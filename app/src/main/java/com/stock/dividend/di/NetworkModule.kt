@@ -1,6 +1,7 @@
 package com.stock.dividend.di
 
-import com.stock.dividend.data.remote.EastMoneyApi
+import com.stock.dividend.data.remote.DividendApi
+import com.stock.dividend.data.remote.SearchApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -47,12 +48,23 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideSearchApi(client: OkHttpClient): EastMoneyApi {
+    fun provideSearchApi(client: OkHttpClient): SearchApi {
         return Retrofit.Builder()
             .baseUrl(SEARCH_BASE_URL)
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
-            .create(EastMoneyApi::class.java)
+            .create(SearchApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideDividendApi(client: OkHttpClient): DividendApi {
+        return Retrofit.Builder()
+            .baseUrl(DATA_BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(DividendApi::class.java)
     }
 }

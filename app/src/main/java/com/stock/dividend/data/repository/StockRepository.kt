@@ -2,7 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.remote.EastMoneyApi
+import com.stock.dividend.data.remote.SearchApi
 import com.stock.dividend.data.remote.dto.StockSearchResponse
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -16,14 +16,14 @@ data class StockSearchResult(
 
 @Singleton
 class StockRepository @Inject constructor(
-    private val api: EastMoneyApi,
+    private val api: SearchApi,
     private val stockDao: StockDao
 ) {
     suspend fun searchStocks(query: String): Result<List<StockSearchResult>> {
         return try {
             val response = api.searchStocks(input = query)
             val items = response.quotationCodeTable?.Data
-                ?.filter { it.SecurityTypeName.contains("A股") }
+                ?.filter { it.Classify == "AStock" }
                 ?.map { item ->
                     StockSearchResult(
                         code = formatStockCode(item.MktNum, item.Code),

@@ -2,7 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
-import com.stock.dividend.data.remote.EastMoneyApi
+import com.stock.dividend.data.remote.DividendApi
 import kotlinx.coroutines.flow.Flow
 import retrofit2.HttpException
 import java.net.ConnectException
@@ -13,7 +13,7 @@ import javax.inject.Singleton
 
 @Singleton
 class DividendRepository @Inject constructor(
-    private val api: EastMoneyApi,
+    private val api: DividendApi,
     private val dividendDao: DividendDao
 ) {
     suspend fun fetchAndCacheDividends(stockCode: String, securityCode: String): Result<Unit> {
@@ -24,7 +24,7 @@ class DividendRepository @Inject constructor(
 
             val entities = items.mapNotNull { item ->
                 val reportDate = item.reportDate?.substringBefore("T") ?: return@mapNotNull null
-                val cashRatio = item.cashDividendRatio ?: return@mapNotNull null
+                val cashRatio = item.pretaxBonusRmb ?: return@mapNotNull null
                 if (cashRatio <= 0) return@mapNotNull null
 
                 DividendEntity(
@@ -32,10 +32,10 @@ class DividendRepository @Inject constructor(
                     stockCode = stockCode,
                     reportDate = reportDate,
                     cashPerShare = cashRatio / 10.0,
-                    dividendYield = item.dividendYield,
+                    dividendYield = item.dividentRatio?.let { it * 100.0 },
                     exDividendDate = item.exDividendDate?.substringBefore("T"),
                     recordDate = item.equityRecordDate?.substringBefore("T"),
-                    planStatus = item.implPlan
+                    planStatus = item.assignProgress
                 )
             }
 

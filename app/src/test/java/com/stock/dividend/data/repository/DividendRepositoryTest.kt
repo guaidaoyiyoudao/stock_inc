@@ -3,7 +3,7 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
-import com.stock.dividend.data.remote.EastMoneyApi
+import com.stock.dividend.data.remote.DividendApi
 import com.stock.dividend.data.remote.dto.DividendResponse
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -19,7 +19,7 @@ import java.net.SocketTimeoutException
 
 class DividendRepositoryTest {
 
-    private val api: EastMoneyApi = mockk()
+    private val api: DividendApi = mockk()
     private val dao: DividendDao = mockk(relaxed = true)
     private val repository = DividendRepository(api, dao)
 
@@ -33,11 +33,11 @@ class DividendRepositoryTest {
                         securityCode = "000001",
                         securityNameAbbr = "平安银行",
                         reportDate = "2024-12-31T00:00:00",
-                        cashDividendRatio = 2.46,
-                        dividendYield = 5.93,
-                        exDividendDate = "2025-07-11T00:00:00",
-                        equityRecordDate = "2025-07-10T00:00:00",
-                        implPlan = "实施方案"
+                        pretaxBonusRmb = 3.62,
+                        dividentRatio = 0.0305,
+                        exDividendDate = "2025-06-12T00:00:00",
+                        equityRecordDate = "2025-06-11T00:00:00",
+                        assignProgress = "实施分配"
                     )
                 )
             )
@@ -49,7 +49,7 @@ class DividendRepositoryTest {
     }
 
     @Test
-    fun `fetchAndCacheDividends converts cashDividendRatio by dividing by 10`() = runTest {
+    fun `fetchAndCacheDividends converts pretaxBonusRmb by dividing by 10`() = runTest {
         val entitiesSlot = mutableListOf<List<DividendEntity>>()
         coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
 
@@ -61,11 +61,11 @@ class DividendRepositoryTest {
                         securityCode = "000001",
                         securityNameAbbr = "平安银行",
                         reportDate = "2024-12-31T00:00:00",
-                        cashDividendRatio = 2.46,
-                        dividendYield = 5.93,
+                        pretaxBonusRmb = 2.46,
+                        dividentRatio = 0.0593,
                         exDividendDate = null,
                         equityRecordDate = null,
-                        implPlan = null
+                        assignProgress = null
                     )
                 )
             )
@@ -73,7 +73,9 @@ class DividendRepositoryTest {
 
         repository.fetchAndCacheDividends("sz.000001", "000001")
 
-        assertThat(entitiesSlot.last()[0].cashPerShare).isWithin(0.001).of(0.246)
+        val entity = entitiesSlot.last()[0]
+        assertThat(entity.cashPerShare).isWithin(0.001).of(0.246)
+        assertThat(entity.dividendYield).isWithin(0.01).of(5.93)
     }
 
     @Test
@@ -89,11 +91,11 @@ class DividendRepositoryTest {
                         securityCode = "000001",
                         securityNameAbbr = "平安银行",
                         reportDate = "2024-12-31T00:00:00",
-                        cashDividendRatio = 2.46,
-                        dividendYield = null,
+                        pretaxBonusRmb = 2.46,
+                        dividentRatio = null,
                         exDividendDate = "2025-07-11T00:00:00",
                         equityRecordDate = "2025-07-10T00:00:00",
-                        implPlan = null
+                        assignProgress = null
                     )
                 )
             )
@@ -166,11 +168,11 @@ class DividendRepositoryTest {
                         securityCode = "000001",
                         securityNameAbbr = "平安银行",
                         reportDate = "2024-12-31T00:00:00",
-                        cashDividendRatio = 0.0,
-                        dividendYield = null,
+                        pretaxBonusRmb = 0.0,
+                        dividentRatio = null,
                         exDividendDate = null,
                         equityRecordDate = null,
-                        implPlan = null
+                        assignProgress = null
                     )
                 )
             )
@@ -192,11 +194,11 @@ class DividendRepositoryTest {
                         securityCode = "000001",
                         securityNameAbbr = "平安银行",
                         reportDate = null,
-                        cashDividendRatio = 1.0,
-                        dividendYield = null,
+                        pretaxBonusRmb = 1.0,
+                        dividentRatio = null,
                         exDividendDate = null,
                         equityRecordDate = null,
-                        implPlan = null
+                        assignProgress = null
                     )
                 )
             )
@@ -245,21 +247,21 @@ class DividendRepositoryTest {
                         securityCode = "000001",
                         securityNameAbbr = "平安银行",
                         reportDate = "2024-12-31T00:00:00",
-                        cashDividendRatio = 2.46,
-                        dividendYield = 5.93,
-                        exDividendDate = "2025-07-11T00:00:00",
+                        pretaxBonusRmb = 3.62,
+                        dividentRatio = 0.0305,
+                        exDividendDate = "2025-06-12T00:00:00",
                         equityRecordDate = null,
-                        implPlan = "实施方案"
+                        assignProgress = "实施分配"
                     ),
                     DividendResponse.DividendItem(
                         securityCode = "000001",
                         securityNameAbbr = "平安银行",
-                        reportDate = "2023-12-31T00:00:00",
-                        cashDividendRatio = 2.18,
-                        dividendYield = 4.56,
-                        exDividendDate = "2024-07-11T00:00:00",
+                        reportDate = "2024-06-30T00:00:00",
+                        pretaxBonusRmb = 2.46,
+                        dividentRatio = 0.021,
+                        exDividendDate = "2024-10-10T00:00:00",
                         equityRecordDate = null,
-                        implPlan = "实施方案"
+                        assignProgress = "实施分配"
                     )
                 )
             )
@@ -269,8 +271,8 @@ class DividendRepositoryTest {
 
         val entities = entitiesSlot.last()
         assertThat(entities).hasSize(2)
-        assertThat(entities[0].cashPerShare).isWithin(0.001).of(0.246)
-        assertThat(entities[1].cashPerShare).isWithin(0.001).of(0.218)
+        assertThat(entities[0].cashPerShare).isWithin(0.001).of(0.362)
+        assertThat(entities[1].cashPerShare).isWithin(0.001).of(0.246)
     }
 
     @Test

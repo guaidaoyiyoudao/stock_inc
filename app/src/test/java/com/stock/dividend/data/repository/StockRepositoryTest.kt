@@ -3,7 +3,7 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.remote.EastMoneyApi
+import com.stock.dividend.data.remote.SearchApi
 import com.stock.dividend.data.remote.dto.StockSearchResponse
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -19,7 +19,7 @@ import java.net.UnknownHostException
 
 class StockRepositoryTest {
 
-    private val api: EastMoneyApi = mockk()
+    private val api: SearchApi = mockk()
     private val dao: StockDao = mockk(relaxed = true)
     private val repository = StockRepository(api, dao)
 
@@ -32,13 +32,15 @@ class StockRepositoryTest {
                         Code = "000001",
                         Name = "平安银行",
                         MktNum = "0",
-                        SecurityTypeName = "A股"
+                        SecurityTypeName = "深A",
+                        Classify = "AStock"
                     ),
                     StockSearchResponse.StockItem(
                         Code = "000001",
                         Name = "平安银行",
                         MktNum = "0",
-                        SecurityTypeName = "ETF"
+                        SecurityTypeName = "债券",
+                        Classify = "Bond"
                     )
                 )
             )
@@ -116,7 +118,8 @@ class StockRepositoryTest {
                         Code = "600519",
                         Name = "贵州茅台",
                         MktNum = "1",
-                        SecurityTypeName = "A股"
+                        SecurityTypeName = "沪A",
+                        Classify = "AStock"
                     )
                 )
             )
@@ -137,7 +140,8 @@ class StockRepositoryTest {
                         Code = "000001",
                         Name = "平安银行",
                         MktNum = "0",
-                        SecurityTypeName = "A股"
+                        SecurityTypeName = "深A",
+                        Classify = "AStock"
                     )
                 )
             )
@@ -199,6 +203,44 @@ class StockRepositoryTest {
         repository.removeStock("sz.000001")
 
         coVerify { dao.delete("sz.000001") }
+    }
+
+    @Test
+    fun `searchStocks filters out HK stocks and bonds`() = runTest {
+        coEvery { api.searchStocks(input = any()) } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(
+                    StockSearchResponse.StockItem(
+                        Code = "601318",
+                        Name = "中国平安",
+                        MktNum = "1",
+                        SecurityTypeName = "沪A",
+                        Classify = "AStock"
+                    ),
+                    StockSearchResponse.StockItem(
+                        Code = "02318",
+                        Name = "中国平安",
+                        MktNum = "2",
+                        SecurityTypeName = "港股",
+                        Classify = "HK"
+                    ),
+                    StockSearchResponse.StockItem(
+                        Code = "751240",
+                        Name = "中国平安",
+                        MktNum = "1",
+                        SecurityTypeName = "债券",
+                        Classify = "Bond"
+                    )
+                )
+            )
+        )
+
+        val result = repository.searchStocks("中国平安")
+
+        assertThat(result.isSuccess).isTrue()
+        val results = result.getOrNull()!!
+        assertThat(results).hasSize(1)
+        assertThat(results[0].code).isEqualTo("sh.601318")
     }
 
     @Test

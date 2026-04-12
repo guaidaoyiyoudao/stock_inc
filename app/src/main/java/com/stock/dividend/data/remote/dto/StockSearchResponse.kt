@@ -14,6 +14,7 @@ data class StockSearchResponse(
         val Code: String,
         val Name: String,
         val MktNum: String,
-        val SecurityTypeName: String
+        val SecurityTypeName: String,
+        val Classify: String? = null
     )
 }
