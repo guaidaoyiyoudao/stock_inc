@@ -1,0 +1,129 @@
+package com.stock.dividend.viewmodel
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.StockSearchResult
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class AddStockUiState(
+    val searchQuery: String = "",
+    val searchResults: List<StockSearchResult> = emptyList(),
+    val isSearching: Boolean = false,
+    val error: String? = null,
+    val addedStock: String? = null,
+    val canRetry: Boolean = false
+)
+
+@OptIn(FlowPreview::class)
+@HiltViewModel
+class AddStockViewModel @Inject constructor(
+    private val stockRepository: StockRepository,
+    private val dividendRepository: DividendRepository
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(AddStockUiState())
+    val uiState: StateFlow<AddStockUiState> = _uiState.asStateFlow()
+
+    private val searchQuery = MutableStateFlow("")
+    private var lastSearchQuery: String? = null
+    private var lastAddResult: StockSearchResult? = null
+
+    init {
+        viewModelScope.launch {
+            searchQuery
+                .debounce(300)
+                .distinctUntilChanged()
+                .filter { it.isNotBlank() }
+                .collect { query ->
+                    performSearch(query)
+                }
+        }
+    }
+
+    fun onSearchQueryChanged(query: String) {
+        _uiState.value = _uiState.value.copy(
+            searchQuery = query,
+            error = null,
+            addedStock = null,
+            canRetry = false
+        )
+        searchQuery.value = query
+        if (query.isBlank()) {
+            _uiState.value = _uiState.value.copy(searchResults = emptyList())
+        }
+    }
+
+    fun addStock(result: StockSearchResult) {
+        lastAddResult = result
+        viewModelScope.launch {
+            stockRepository.addStock(result)
+                .onSuccess {
+                    val securityCode = result.code.substringAfter(".")
+                    dividendRepository.fetchAndCacheDividends(result.code, securityCode)
+                        .onSuccess {
+                            _uiState.value = _uiState.value.copy(
+                                addedStock = result.name,
+                                error = null,
+                                canRetry = false
+                            )
+                        }
+                        .onFailure { e ->
+                            _uiState.value = _uiState.value.copy(
+                                addedStock = result.name,
+                                error = e.message ?: "股息数据加载失败，请重试",
+                                canRetry = true
+                            )
+                        }
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(
+                        error = e.message ?: "添加失败，请重试",
+                        canRetry = true
+                    )
+                }
+        }
+    }
+
+    fun retrySearch() {
+        val query = lastSearchQuery ?: return
+        viewModelScope.launch {
+            performSearch(query)
+        }
+    }
+
+    fun retryAddStock() {
+        val result = lastAddResult ?: return
+        addStock(result)
+    }
+
+    private suspend fun performSearch(query: String) {
+        lastSearchQuery = query
+        _uiState.value = _uiState.value.copy(isSearching = true, error = null, canRetry = false)
+        stockRepository.searchStocks(query)
+            .onSuccess { results ->
+                _uiState.value = _uiState.value.copy(
+                    searchResults = results,
+                    isSearching = false
+                )
+            }
+            .onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    searchResults = emptyList(),
+                    isSearching = false,
+                    error = e.message ?: "搜索失败，请重试",
+                    canRetry = true
+                )
+            }
+    }
+}

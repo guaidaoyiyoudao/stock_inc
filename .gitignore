@@ -1,0 +1,22 @@
+# Kotlin / Android
+build/
+out/
+.gradle/
+.idea/
+*.class
+*.jar
+*.iml
+*.apk
+*.aab
+local.properties
+
+# Kotlin specific
+*.kotlin_module
+
+# Universal
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+*.log
+.env*

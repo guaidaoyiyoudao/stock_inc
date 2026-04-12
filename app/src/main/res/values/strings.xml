@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">股息追踪</string>
+
+    <!-- Home Screen -->
+    <string name="home_title">我的股息</string>
+    <string name="total_dividend_income">总股息收入</string>
+    <string name="add_stock">添加股票</string>
+    <string name="empty_state_title">还没有关注的股票</string>
+    <string name="empty_state_message">点击右下角按钮添加股票，开始追踪股息收入</string>
+    <string name="refresh">刷新</string>
+    <string name="deleting">正在删除…</string>
+    <string name="undo">撤销</string>
+
+    <!-- Add Stock Screen -->
+    <string name="add_stock_title">搜索股票</string>
+    <string name="search_hint">输入股票名称或代码</string>
+    <string name="searching">搜索中…</string>
+    <string name="no_results">未找到匹配的股票</string>
+    <string name="stock_added">已添加 %1$s</string>
+
+    <!-- Stock Detail Screen -->
+    <string name="dividend_detail">股息明细</string>
+    <string name="report_date">报告期</string>
+    <string name="cash_per_share">每股派息</string>
+    <string name="ex_dividend_date">除权除息日</string>
+    <string name="record_date">股权登记日</string>
+    <string name="plan_status">方案进度</string>
+    <string name="no_dividend_data">暂无股息数据</string>
+    <string name="dividend_yield">股息率</string>
+
+    <!-- Error Messages -->
+    <string name="network_error">网络连接失败，请检查网络后重试</string>
+    <string name="search_error">搜索失败，请重试</string>
+    <string name="load_error">数据加载失败</string>
+    <string name="retry">重试</string>
+
+    <!-- Format -->
+    <string name="currency_format">¥%1$.4f</string>
+    <string name="yield_format">%1$.2f%%</string>
+    <string name="delete_confirm">确定删除 %1$s？</string>
+    <string name="confirm">确定</string>
+    <string name="cancel">取消</string>
+</resources>
