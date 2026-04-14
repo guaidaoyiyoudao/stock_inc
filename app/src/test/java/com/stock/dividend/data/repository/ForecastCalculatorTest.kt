@@ -50,7 +50,7 @@ class ForecastCalculatorTest {
     }
 
     @Test
-    fun `calculateAvgCashPerShare deduplicates same year`() {
+    fun `calculateAvgCashPerShare accumulates multiple dividends same year`() {
         val dividends = listOf(
             makeDividend("2024-12-31", 0.246),
             makeDividend("2024-06-30", 0.100),
@@ -60,8 +60,8 @@ class ForecastCalculatorTest {
         val result = ForecastCalculator.calculateAvgCashPerShare(dividends, 2)
 
         assertThat(result).isNotNull()
-        // Should take the latest per year: 0.246 for 2024, 0.216 for 2023
-        assertThat(result!!.avgCashPerShare).isWithin(0.001).of(0.231)
+        // 2024: 0.246 + 0.100 = 0.346, 2023: 0.216, avg = (0.346 + 0.216) / 2
+        assertThat(result!!.avgCashPerShare).isWithin(0.001).of(0.281)
         assertThat(result.actualYears).isEqualTo(2)
     }
 

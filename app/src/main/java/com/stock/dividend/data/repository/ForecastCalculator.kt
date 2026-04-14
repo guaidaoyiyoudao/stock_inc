@@ -17,7 +17,7 @@ object ForecastCalculator {
 
         val yearlyData = dividends
             .groupBy { it.reportDate.substringBefore("-") }
-            .mapValues { (_, records) -> records.maxByOrNull { it.reportDate }?.cashPerShare ?: 0.0 }
+            .mapValues { (_, records) -> records.sumOf { it.cashPerShare } }
             .entries
             .sortedByDescending { it.key }
             .take(years)

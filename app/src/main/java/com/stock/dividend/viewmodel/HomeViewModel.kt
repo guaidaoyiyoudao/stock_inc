@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -50,8 +50,7 @@ class HomeViewModel @Inject constructor(
                 val forecasts = mutableMapOf<String, StockForecast>()
                 for (stock in stocks) {
                     if (stock.shares <= 0) continue
-                    val dividends = dividendDao.observeByStock(stock.code)
-                        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList()).value
+                    val dividends = dividendDao.observeByStock(stock.code).first()
                     val years = stock.yieldPeriod.toIntOrNull() ?: 3
                     val result = ForecastCalculator.calculateForecastIncome(dividends, stock.shares, years)
                     if (result != null) {
