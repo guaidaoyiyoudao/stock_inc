@@ -29,6 +29,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.repository.StockSearchResult
@@ -132,6 +134,20 @@ fun AddStockScreen(
                                 onClick = { viewModel.addStock(result) }
                             )
                         }
+                    }
+
+                    if (uiState.searchResults.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = uiState.sharesInput,
+                            onValueChange = viewModel::onSharesChanged,
+                            label = { Text("持有股数（选填）") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            isError = uiState.sharesError != null,
+                            supportingText = uiState.sharesError?.let { { Text(it, color = MaterialTheme.colorScheme.error) } }
+                        )
                     }
                 }
             }

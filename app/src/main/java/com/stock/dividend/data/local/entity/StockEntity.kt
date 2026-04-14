@@ -10,5 +10,7 @@ data class StockEntity(
     val name: String,
     val marketCode: String,
     val addedAt: Long = System.currentTimeMillis(),
-    val lastUpdated: Long? = null
+    val lastUpdated: Long? = null,
+    val shares: Int = 0,
+    val yieldPeriod: String = "3"
 )

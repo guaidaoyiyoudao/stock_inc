@@ -41,4 +41,23 @@
     <string name="delete_confirm">确定删除 %1$s？</string>
     <string name="confirm">确定</string>
     <string name="cancel">取消</string>
+
+    <!-- Holdings & Forecast -->
+    <string name="edit_holding">编辑持仓</string>
+    <string name="shares_label">持有股数</string>
+    <string name="shares_hint">请输入持有股数</string>
+    <string name="shares_invalid">请输入有效的非负整数</string>
+    <string name="save">保存</string>
+    <string name="shares_count">持有 %1$d 股</string>
+    <string name="forecast_title">预测年度股息收入</string>
+    <string name="forecast_disclaimer">仅供参考</string>
+    <string name="no_forecast_data">暂无历史数据，无法预测</string>
+    <string name="forecast_based_years">基于 %1$d 年数据</string>
+    <string name="yield_period_1">1年</string>
+    <string name="yield_period_3">3年</string>
+    <string name="yield_period_5">5年</string>
+    <string name="yield_period_label">股息率档位</string>
+    <string name="avg_cash_per_share">平均每股派息</string>
+    <string name="forecast_income">预测收入</string>
+    <string name="holding_quantity">持仓数量</string>
 </resources>

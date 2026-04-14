@@ -92,7 +92,7 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 item {
-                    DividendSummaryCard(totalAmount = uiState.totalDividend)
+                    DividendSummaryCard(totalAmount = uiState.forecastTotal)
                 }
                 items(
                     items = uiState.stocks,
@@ -100,6 +100,7 @@ fun HomeScreen(
                 ) { stock ->
                     SwipeToDismissStockItem(
                         stock = stock,
+                        forecastIncome = uiState.stockForecasts[stock.code]?.forecastIncome,
                         onDismiss = { viewModel.deleteStock(stock) },
                         onClick = { onStockClick(stock.code) }
                     )
@@ -113,6 +114,7 @@ fun HomeScreen(
 @Composable
 private fun SwipeToDismissStockItem(
     stock: StockEntity,
+    forecastIncome: Double? = null,
     onDismiss: () -> Unit,
     onClick: () -> Unit
 ) {
@@ -152,6 +154,8 @@ private fun SwipeToDismissStockItem(
         StockCard(
             name = stock.name,
             code = stock.code,
+            shares = stock.shares,
+            forecastIncome = forecastIncome?.let { "¥${"%.2f".format(it)}" },
             lastUpdated = stock.lastUpdated,
             onClick = onClick
         )

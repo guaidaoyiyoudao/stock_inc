@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,11 +15,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class ForecastDetail(
+    val avgCashPerShare: Double,
+    val forecastIncome: Double,
+    val actualYears: Int
+)
+
 data class StockDetailUiState(
     val stock: StockEntity? = null,
     val dividends: List<DividendEntity> = emptyList(),
     val isLoading: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    val forecast: ForecastDetail? = null,
+    val allForecasts: Map<String, ForecastDetail> = emptyMap(),
+    val selectedPeriod: String = "3"
 )
 
 @HiltViewModel
@@ -40,11 +50,13 @@ class StockDetailViewModel @Inject constructor(
 
     private fun loadStock() {
         viewModelScope.launch {
-            val stocks = stockRepository.observeAllStocks()
-            stocks.collect { list ->
-                val stock = list.find { it.code == stockCode }
+            stockRepository.observeStock(stockCode).collect { stock ->
                 if (stock != null) {
-                    _uiState.value = _uiState.value.copy(stock = stock)
+                    _uiState.value = _uiState.value.copy(
+                        stock = stock,
+                        selectedPeriod = stock.yieldPeriod
+                    )
+                    recalculateForecasts()
                 }
             }
         }
@@ -57,7 +69,46 @@ class StockDetailViewModel @Inject constructor(
                     dividends = dividends,
                     isLoading = false
                 )
+                recalculateForecasts()
             }
         }
+    }
+
+    private fun recalculateForecasts() {
+        val state = _uiState.value
+        val stock = state.stock ?: return
+        val dividends = state.dividends
+
+        val allForecasts = mutableMapOf<String, ForecastDetail>()
+        for (period in listOf("1", "3", "5")) {
+            val years = period.toInt()
+            val result = ForecastCalculator.calculateForecastIncome(
+                dividends, stock.shares, years
+            )
+            if (result != null) {
+                allForecasts[period] = ForecastDetail(
+                    avgCashPerShare = result.avgCashPerShare,
+                    forecastIncome = stock.shares * result.avgCashPerShare,
+                    actualYears = result.actualYears
+                )
+            }
+        }
+
+        val selectedForecast = allForecasts[state.selectedPeriod]
+        _uiState.value = state.copy(
+            allForecasts = allForecasts,
+            forecast = selectedForecast
+        )
+    }
+
+    fun updateYieldPeriod(period: String) {
+        viewModelScope.launch {
+            stockRepository.updateYieldPeriod(stockCode, period)
+        }
+        val state = _uiState.value
+        _uiState.value = state.copy(
+            selectedPeriod = period,
+            forecast = state.allForecasts[period]
+        )
     }
 }

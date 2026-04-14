@@ -31,6 +31,7 @@ class HomeViewModelTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         coEvery { stockRepository.observeAllStocks() } returns stocksFlow
+        coEvery { dividendDao.observeByStock(any()) } returns MutableStateFlow(emptyList())
         coEvery { dividendDao.observeTotalCashPerShare() } returns totalDividendFlow
     }
 
@@ -45,7 +46,7 @@ class HomeViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.stocks).isEmpty()
-        assertThat(viewModel.uiState.value.totalDividend).isEqualTo(0.0)
+        assertThat(viewModel.uiState.value.forecastTotal).isEqualTo(0.0)
     }
 
     @Test
@@ -61,13 +62,11 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `totalDividend updates when DAO emits new value`() = runTest {
+    fun `forecastTotal starts at zero`() = runTest {
         val viewModel = HomeViewModel(stockRepository, dividendDao)
-
-        totalDividendFlow.value = 1.234
         testDispatcher.scheduler.advanceUntilIdle()
 
-        assertThat(viewModel.uiState.value.totalDividend).isEqualTo(1.234)
+        assertThat(viewModel.uiState.value.forecastTotal).isEqualTo(0.0)
     }
 
     @Test
@@ -85,7 +84,7 @@ class HomeViewModelTest {
     @Test
     fun `undoDelete re-adds the stock`() = runTest {
         coEvery { stockRepository.removeStock("sz.000001") } returns Unit
-        coEvery { stockRepository.addStock(any()) } returns Result.success(Unit)
+        coEvery { stockRepository.addStock(any(), any()) } returns Result.success(Unit)
 
         val viewModel = HomeViewModel(stockRepository, dividendDao)
         val stock = StockEntity("sz.000001", "平安银行", "0")

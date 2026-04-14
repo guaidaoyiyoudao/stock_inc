@@ -244,6 +244,54 @@ class StockRepositoryTest {
     }
 
     @Test
+    fun `addStock with shares parameter creates entity with shares`() = runTest {
+        coEvery { dao.insert(any()) } returns 1L
+        val searchResult = StockSearchResult("sz.000001", "平安银行", "0")
+
+        repository.addStock(searchResult, shares = 1000)
+
+        coVerify { dao.insert(match { it.shares == 1000 }) }
+    }
+
+    @Test
+    fun `addStock with no shares defaults to 0`() = runTest {
+        coEvery { dao.insert(any()) } returns 1L
+        val searchResult = StockSearchResult("sz.000001", "平安银行", "0")
+
+        repository.addStock(searchResult)
+
+        coVerify { dao.insert(match { it.shares == 0 }) }
+    }
+
+    @Test
+    fun `updateShares delegates to dao with coerced value`() = runTest {
+        coEvery { dao.updateShares(any(), any()) } returns Unit
+
+        repository.updateShares("sz.000001", -100)
+
+        coVerify { dao.updateShares("sz.000001", 0) }
+    }
+
+    @Test
+    fun `updateYieldPeriod delegates to dao`() = runTest {
+        coEvery { dao.updateYieldPeriod(any(), any()) } returns Unit
+
+        repository.updateYieldPeriod("sz.000001", "5")
+
+        coVerify { dao.updateYieldPeriod("sz.000001", "5") }
+    }
+
+    @Test
+    fun `observeStock returns dao flow`() {
+        val flow = MutableStateFlow<StockEntity?>(null)
+        coEvery { dao.observeByCode("sz.000001") } returns flow
+
+        val result = repository.observeStock("sz.000001")
+
+        assertThat(result).isSameInstanceAs(flow)
+    }
+
+    @Test
     fun `observeAllStocks returns dao flow`() {
         val flow = MutableStateFlow<List<StockEntity>>(emptyList())
         coEvery { dao.observeAll() } returns flow

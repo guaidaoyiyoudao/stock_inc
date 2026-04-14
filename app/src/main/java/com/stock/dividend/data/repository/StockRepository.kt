@@ -37,12 +37,13 @@ class StockRepository @Inject constructor(
         }
     }
 
-    suspend fun addStock(searchResult: StockSearchResult): Result<Unit> {
+    suspend fun addStock(searchResult: StockSearchResult, shares: Int = 0): Result<Unit> {
         return try {
             val entity = StockEntity(
                 code = searchResult.code,
                 name = searchResult.name,
-                marketCode = searchResult.marketCode
+                marketCode = searchResult.marketCode,
+                shares = shares
             )
             stockDao.insert(entity)
             Result.success(Unit)
@@ -57,6 +58,18 @@ class StockRepository @Inject constructor(
 
     fun observeAllStocks(): Flow<List<StockEntity>> {
         return stockDao.observeAll()
+    }
+
+    fun observeStock(code: String): Flow<StockEntity?> {
+        return stockDao.observeByCode(code)
+    }
+
+    suspend fun updateShares(code: String, shares: Int) {
+        stockDao.updateShares(code, shares.coerceAtLeast(0))
+    }
+
+    suspend fun updateYieldPeriod(code: String, period: String) {
+        stockDao.updateYieldPeriod(code, period)
     }
 
     private fun formatStockCode(marketCode: String, code: String): String {

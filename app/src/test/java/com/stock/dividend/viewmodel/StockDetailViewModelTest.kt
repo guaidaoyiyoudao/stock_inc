@@ -26,12 +26,13 @@ class StockDetailViewModelTest {
     private val dividendDao: DividendDao = mockk()
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
+    private val stockFlow = MutableStateFlow<StockEntity?>(null)
     private val dividendsFlow = MutableStateFlow<List<DividendEntity>>(emptyList())
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        coEvery { stockRepository.observeAllStocks() } returns stocksFlow
+        coEvery { stockRepository.observeStock(any()) } returns stockFlow
     }
 
     @After
@@ -56,10 +57,8 @@ class StockDetailViewModelTest {
 
     @Test
     fun `stock loads from repository`() = runTest {
-        coEvery { dividendDao.observeByStock("sz.000001") } returns dividendsFlow
         val stock = StockEntity("sz.000001", "平安银行", "0")
-
-        stocksFlow.value = listOf(stock)
+        stockFlow.value = stock
 
         val viewModel = StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
@@ -105,8 +104,7 @@ class StockDetailViewModelTest {
 
     @Test
     fun `stock remains null when not found in repository`() = runTest {
-        val otherStock = StockEntity("sh.600519", "贵州茅台", "1")
-        stocksFlow.value = listOf(otherStock)
+        stockFlow.value = null
 
         val viewModel = StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.999999")),

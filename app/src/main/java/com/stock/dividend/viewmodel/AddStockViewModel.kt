@@ -22,7 +22,10 @@ data class AddStockUiState(
     val isSearching: Boolean = false,
     val error: String? = null,
     val addedStock: String? = null,
-    val canRetry: Boolean = false
+    val canRetry: Boolean = false,
+    val shares: Int = 0,
+    val sharesInput: String = "",
+    val sharesError: String? = null
 )
 
 @OptIn(FlowPreview::class)
@@ -64,10 +67,22 @@ class AddStockViewModel @Inject constructor(
         }
     }
 
+    fun onSharesChanged(input: String) {
+        val error = if (input.isNotBlank()) {
+            val parsed = input.toIntOrNull()
+            if (parsed == null || parsed < 0) "请输入有效的非负整数" else null
+        } else null
+        _uiState.value = _uiState.value.copy(
+            sharesInput = input,
+            shares = input.toIntOrNull()?.coerceAtLeast(0) ?: 0,
+            sharesError = error
+        )
+    }
+
     fun addStock(result: StockSearchResult) {
         lastAddResult = result
         viewModelScope.launch {
-            stockRepository.addStock(result)
+            stockRepository.addStock(result, _uiState.value.shares)
                 .onSuccess {
                     val securityCode = result.code.substringAfter(".")
                     dividendRepository.fetchAndCacheDividends(result.code, securityCode)

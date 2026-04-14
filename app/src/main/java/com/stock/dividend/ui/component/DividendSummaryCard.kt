@@ -33,15 +33,21 @@ fun DividendSummaryCard(
                 .padding(20.dp)
         ) {
             Text(
-                text = "总股息收入",
+                text = "预测年度股息收入",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "¥${"%.4f".format(totalAmount)}",
+                text = "¥${"%.2f".format(totalAmount)}",
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "仅供参考",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
             )
         }
     }

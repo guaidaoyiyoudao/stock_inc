@@ -24,7 +24,8 @@ import java.util.Locale
 fun StockCard(
     name: String,
     code: String,
-    latestDividend: String? = null,
+    shares: Int = 0,
+    forecastIncome: String? = null,
     lastUpdated: Long? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -53,12 +54,14 @@ fun StockCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "数据来源: 东方财富",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (shares > 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "持有 $shares 股",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 if (lastUpdated != null) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
@@ -69,9 +72,9 @@ fun StockCard(
                 }
             }
             Spacer(modifier = Modifier.width(16.dp))
-            if (latestDividend != null) {
+            if (forecastIncome != null) {
                 Text(
-                    text = latestDividend,
+                    text = forecastIncome,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
