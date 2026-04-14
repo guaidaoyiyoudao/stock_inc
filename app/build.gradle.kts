@@ -87,6 +87,7 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.truth)
     debugImplementation(libs.compose.test.manifest)
+    androidTestImplementation(composeBom)
     androidTestImplementation(libs.compose.junit)
     androidTestImplementation(libs.junit)
 }
