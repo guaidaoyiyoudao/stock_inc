@@ -7,11 +7,15 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,6 +36,7 @@ data class HomeUiState(
     val deletedStock: StockEntity? = null
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val stockRepository: StockRepository,
@@ -46,22 +51,35 @@ class HomeViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            stocksFlow.collect { stocks ->
-                val forecasts = mutableMapOf<String, StockForecast>()
-                for (stock in stocks) {
-                    if (stock.shares <= 0) continue
-                    val dividends = dividendDao.observeByStock(stock.code).first()
-                    val years = stock.yieldPeriod.toIntOrNull() ?: 3
-                    val result = ForecastCalculator.calculateForecastIncome(dividends, stock.shares, years)
-                    if (result != null) {
-                        forecasts[stock.code] = StockForecast(
-                            shares = stock.shares,
-                            avgCashPerShare = result.avgCashPerShare,
-                            forecastIncome = stock.shares * result.avgCashPerShare,
-                            actualYears = result.actualYears
-                        )
+            stocksFlow.flatMapLatest { stocks ->
+                val activeStocks = stocks.filter { it.shares > 0 }
+                if (activeStocks.isEmpty()) {
+                    flowOf(stocks to emptyMap())
+                } else {
+                    val forecastFlows = activeStocks.map { stock ->
+                        dividendDao.observeByStock(stock.code).map { dividends ->
+                            val years = stock.yieldPeriod.toIntOrNull() ?: 3
+                            val result = ForecastCalculator.calculateForecastIncome(
+                                dividends, stock.shares, years
+                            )
+                            stock.code to result?.let {
+                                StockForecast(
+                                    shares = stock.shares,
+                                    avgCashPerShare = it.avgCashPerShare,
+                                    forecastIncome = stock.shares * it.avgCashPerShare,
+                                    actualYears = it.actualYears
+                                )
+                            }
+                        }
+                    }
+                    combine(forecastFlows) { results ->
+                        val forecasts = results
+                            .filter { it.second != null }
+                            .associate { it.first to it.second!! }
+                        stocks to forecasts
                     }
                 }
+            }.collect { (stocks, forecasts) ->
                 val total = forecasts.values.sumOf { it.forecastIncome }
                 _uiState.value = _uiState.value.copy(
                     stocks = stocks,

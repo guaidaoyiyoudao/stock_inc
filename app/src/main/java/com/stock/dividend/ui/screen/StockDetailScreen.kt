@@ -141,29 +141,10 @@ fun StockDetailScreen(
                         }
                     }
 
-                    // Section header: Dividend History
-                    item {
-                        SectionHeader(title = "分红记录", count = uiState.dividends.size)
-                        Spacer(modifier = Modifier.height(6.dp))
-                    }
-
-                    items(
-                        count = uiState.dividends.size,
-                        key = { index -> uiState.dividends[index].id }
-                    ) { index ->
-                        val dividend = uiState.dividends[index]
-                        val isLast = index == uiState.dividends.lastIndex
-                        DividendRecordCard(
-                            dividend = dividend,
-                            shares = stock?.shares ?: 0,
-                            isLast = isLast
-                        )
-                    }
-
-                    // Forecast section
+                    // Forecast section (right after holding info)
                     if (stock != null && stock.shares > 0) {
                         item {
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             SectionHeader(title = "预测年度股息收入")
                             Spacer(modifier = Modifier.height(4.dp))
                         }
@@ -189,6 +170,26 @@ fun StockDetailScreen(
                                 )
                             }
                         }
+                    }
+
+                    // Section header: Dividend History
+                    item {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        SectionHeader(title = "分红记录", count = uiState.dividends.size)
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+
+                    items(
+                        count = uiState.dividends.size,
+                        key = { index -> uiState.dividends[index].id }
+                    ) { index ->
+                        val dividend = uiState.dividends[index]
+                        val isLast = index == uiState.dividends.lastIndex
+                        DividendRecordCard(
+                            dividend = dividend,
+                            shares = stock?.shares ?: 0,
+                            isLast = isLast
+                        )
                     }
                 }
             }
