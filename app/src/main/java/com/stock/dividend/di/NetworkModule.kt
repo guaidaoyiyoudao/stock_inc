@@ -1,6 +1,7 @@
 package com.stock.dividend.di
 
 import com.stock.dividend.data.remote.DividendApi
+import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
 import dagger.Module
 import dagger.Provides
@@ -19,6 +20,7 @@ object NetworkModule {
 
     private const val SEARCH_BASE_URL = "https://searchapi.eastmoney.com/"
     private const val DATA_BASE_URL = "https://datacenter-web.eastmoney.com/"
+    private const val QUOTE_BASE_URL = "https://push2.eastmoney.com/"
 
     @Provides
     @Singleton
@@ -66,5 +68,16 @@ object NetworkModule {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(DividendApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideQuoteApi(client: OkHttpClient): QuoteApi {
+        return Retrofit.Builder()
+            .baseUrl(QUOTE_BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(QuoteApi::class.java)
     }
 }
