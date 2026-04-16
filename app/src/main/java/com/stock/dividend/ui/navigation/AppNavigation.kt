@@ -8,6 +8,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.stock.dividend.ui.screen.AddStockScreen
 import com.stock.dividend.ui.screen.EditHoldingScreen
+import com.stock.dividend.ui.screen.FireGoalSetupScreen
 import com.stock.dividend.ui.screen.HomeScreen
 import com.stock.dividend.ui.screen.StockDetailScreen
 
@@ -16,6 +17,7 @@ object Routes {
     const val ADD_STOCK = "addStock"
     const val STOCK_DETAIL = "stockDetail/{code}"
     const val EDIT_HOLDING = "editHolding/{code}"
+    const val FIRE_GOAL_SETUP = "fireGoalSetup"
 
     fun stockDetail(code: String) = "stockDetail/$code"
     fun editHolding(code: String) = "editHolding/$code"
@@ -32,7 +34,8 @@ fun AppNavigation() {
         composable(Routes.HOME) {
             HomeScreen(
                 onAddStockClick = { navController.navigate(Routes.ADD_STOCK) },
-                onStockClick = { code -> navController.navigate(Routes.stockDetail(code)) }
+                onStockClick = { code -> navController.navigate(Routes.stockDetail(code)) },
+                onFireCardClick = { navController.navigate(Routes.FIRE_GOAL_SETUP) }
             )
         }
 
@@ -60,6 +63,12 @@ fun AppNavigation() {
         ) { entry ->
             val code = entry.arguments?.getString("code") ?: return@composable
             EditHoldingScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.FIRE_GOAL_SETUP) {
+            FireGoalSetupScreen(
                 onBack = { navController.popBackStack() }
             )
         }

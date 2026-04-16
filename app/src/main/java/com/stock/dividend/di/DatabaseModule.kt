@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.StockDao
 import dagger.Module
 import dagger.Provides
@@ -24,7 +25,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "stock_dividend.db"
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
     }
 
@@ -33,4 +34,7 @@ object DatabaseModule {
 
     @Provides
     fun provideDividendDao(db: AppDatabase): DividendDao = db.dividendDao()
+
+    @Provides
+    fun provideFireGoalDao(db: AppDatabase): FireGoalDao = db.fireGoalDao()
 }

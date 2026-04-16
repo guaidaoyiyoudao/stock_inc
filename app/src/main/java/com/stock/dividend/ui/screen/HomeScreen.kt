@@ -40,6 +40,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.ui.component.DividendSummaryCard
 import com.stock.dividend.ui.component.EmptyStateView
+import com.stock.dividend.ui.component.FireProgressCard
 import com.stock.dividend.ui.component.StockCard
 import com.stock.dividend.viewmodel.HomeViewModel
 
@@ -48,6 +49,7 @@ import com.stock.dividend.viewmodel.HomeViewModel
 fun HomeScreen(
     onAddStockClick: () -> Unit,
     onStockClick: (String) -> Unit,
+    onFireCardClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -113,6 +115,15 @@ fun HomeScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                item {
+                    FireProgressCard(
+                        targetAmount = uiState.fireGoal?.targetAmount,
+                        forecastTotal = uiState.forecastTotal,
+                        progress = uiState.fireProgress,
+                        onClick = onFireCardClick
+                    )
+                }
+
                 item {
                     DividendSummaryCard(totalAmount = uiState.forecastTotal)
                 }

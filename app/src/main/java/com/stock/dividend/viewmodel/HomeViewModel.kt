@@ -3,6 +3,8 @@ package com.stock.dividend.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.local.dao.FireGoalDao
+import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.StockRepository
@@ -31,6 +33,8 @@ data class HomeUiState(
     val stocks: List<StockEntity> = emptyList(),
     val forecastTotal: Double = 0.0,
     val stockForecasts: Map<String, StockForecast> = emptyMap(),
+    val fireGoal: FireGoalEntity? = null,
+    val fireProgress: Float? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
     val deletedStock: StockEntity? = null
@@ -40,7 +44,8 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val stockRepository: StockRepository,
-    private val dividendDao: DividendDao
+    private val dividendDao: DividendDao,
+    private val fireGoalDao: FireGoalDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -49,7 +54,25 @@ class HomeViewModel @Inject constructor(
     val stocksFlow = stockRepository.observeAllStocks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val fireGoalFlow = fireGoalDao.observe()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     init {
+        // Observe FIRE goal and compute progress
+        viewModelScope.launch {
+            fireGoalFlow.collect { goal ->
+                val currentTotal = _uiState.value.forecastTotal
+                val progress = if (goal != null && goal.targetAmount > 0) {
+                    (currentTotal / goal.targetAmount * 100).toFloat().coerceAtMost(100f)
+                } else null
+                _uiState.value = _uiState.value.copy(
+                    fireGoal = goal,
+                    fireProgress = progress
+                )
+            }
+        }
+
+        // Observe stocks and compute forecasts
         viewModelScope.launch {
             stocksFlow.flatMapLatest { stocks ->
                 val activeStocks = stocks.filter { it.shares > 0 }
@@ -81,10 +104,15 @@ class HomeViewModel @Inject constructor(
                 }
             }.collect { (stocks, forecasts) ->
                 val total = forecasts.values.sumOf { it.forecastIncome }
+                val goal = _uiState.value.fireGoal
+                val progress = if (goal != null && goal.targetAmount > 0) {
+                    (total / goal.targetAmount * 100).toFloat().coerceAtMost(100f)
+                } else null
                 _uiState.value = _uiState.value.copy(
                     stocks = stocks,
                     stockForecasts = forecasts,
-                    forecastTotal = total
+                    forecastTotal = total,
+                    fireProgress = progress
                 )
             }
         }
