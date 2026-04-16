@@ -66,7 +66,7 @@ fun EditHoldingScreen(
                             viewModel.saveHolding()
                             onBack()
                         },
-                        enabled = uiState.sharesError == null
+                        enabled = uiState.sharesError == null && uiState.costPerShareError == null
                     ) {
                         Text(
                             "保存",
@@ -151,6 +151,30 @@ fun EditHoldingScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 isError = uiState.sharesError != null,
                 supportingText = uiState.sharesError?.let {
+                    { Text(it, color = MaterialTheme.colorScheme.error) }
+                },
+                shape = MaterialTheme.shapes.medium
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "每股成本价",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = uiState.costPerShareInput,
+                onValueChange = viewModel::onCostPerShareChanged,
+                label = { Text("成本价（元/股）") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                isError = uiState.costPerShareError != null,
+                supportingText = uiState.costPerShareError?.let {
                     { Text(it, color = MaterialTheme.colorScheme.error) }
                 },
                 shape = MaterialTheme.shapes.medium
