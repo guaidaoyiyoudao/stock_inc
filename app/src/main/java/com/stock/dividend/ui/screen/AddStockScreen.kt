@@ -221,6 +221,22 @@ fun AddStockScreen(
                             },
                             shape = MaterialTheme.shapes.medium
                         )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = uiState.costPerShareInput,
+                            onValueChange = viewModel::onCostPerShareChanged,
+                            label = { Text("每股成本价（选填）") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            isError = uiState.costPerShareError != null,
+                            supportingText = uiState.costPerShareError?.let {
+                                { Text(it, color = MaterialTheme.colorScheme.error) }
+                            },
+                            shape = MaterialTheme.shapes.medium
+                        )
                     }
                 }
             }
