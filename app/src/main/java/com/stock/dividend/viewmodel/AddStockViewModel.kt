@@ -25,7 +25,9 @@ data class AddStockUiState(
     val canRetry: Boolean = false,
     val shares: Int = 0,
     val sharesInput: String = "",
-    val sharesError: String? = null
+    val sharesError: String? = null,
+    val costPerShareInput: String = "",
+    val costPerShareError: String? = null
 )
 
 @OptIn(FlowPreview::class)
@@ -79,10 +81,22 @@ class AddStockViewModel @Inject constructor(
         )
     }
 
+    fun onCostPerShareChanged(input: String) {
+        val error = if (input.isNotBlank()) {
+            val parsed = input.toDoubleOrNull()
+            if (parsed == null || parsed < 0) "请输入有效的非负数" else null
+        } else null
+        _uiState.value = _uiState.value.copy(
+            costPerShareInput = input,
+            costPerShareError = error
+        )
+    }
+
     fun addStock(result: StockSearchResult) {
         lastAddResult = result
+        val costPerShare = _uiState.value.costPerShareInput.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
         viewModelScope.launch {
-            stockRepository.addStock(result, _uiState.value.shares)
+            stockRepository.addStock(result, _uiState.value.shares, costPerShare)
                 .onSuccess {
                     val securityCode = result.code.substringAfter(".")
                     dividendRepository.fetchAndCacheDividends(result.code, securityCode)
