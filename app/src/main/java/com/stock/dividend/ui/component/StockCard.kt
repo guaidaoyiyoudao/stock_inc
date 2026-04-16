@@ -36,6 +36,7 @@ fun StockCard(
     code: String,
     shares: Int = 0,
     forecastIncome: String? = null,
+    marketValue: String? = null,
     lastUpdated: Long? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -121,19 +122,35 @@ fun StockCard(
                 }
             }
 
-            if (forecastIncome != null) {
+            if (marketValue != null || forecastIncome != null) {
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = forecastIncome,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "预测收入",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (marketValue != null) {
+                        Text(
+                            text = marketValue,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "市值",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    if (forecastIncome != null) {
+                        Text(
+                            text = forecastIncome,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "预测收入",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
