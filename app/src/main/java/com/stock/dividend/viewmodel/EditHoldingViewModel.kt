@@ -16,7 +16,9 @@ data class EditHoldingUiState(
     val stockName: String? = null,
     val sharesInput: String = "",
     val sharesError: String? = null,
-    val yieldPeriod: String = "3"
+    val yieldPeriod: String = "3",
+    val costPerShareInput: String = "",
+    val costPerShareError: String? = null
 )
 
 @HiltViewModel
@@ -37,7 +39,8 @@ class EditHoldingViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         stockName = stock.name,
                         sharesInput = if (stock.shares > 0) stock.shares.toString() else "",
-                        yieldPeriod = stock.yieldPeriod
+                        yieldPeriod = stock.yieldPeriod,
+                        costPerShareInput = if (stock.costPerShare > 0) stock.costPerShare.toString() else ""
                     )
                 }
             }
@@ -59,12 +62,25 @@ class EditHoldingViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(yieldPeriod = period)
     }
 
+    fun onCostPerShareChanged(input: String) {
+        val error = if (input.isNotBlank()) {
+            val parsed = input.toDoubleOrNull()
+            if (parsed == null || parsed < 0) "请输入有效的非负数" else null
+        } else null
+        _uiState.value = _uiState.value.copy(
+            costPerShareInput = input,
+            costPerShareError = error
+        )
+    }
+
     fun saveHolding() {
         val shares = _uiState.value.sharesInput.toIntOrNull()?.coerceAtLeast(0) ?: 0
         val period = _uiState.value.yieldPeriod
+        val costPerShare = _uiState.value.costPerShareInput.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
         viewModelScope.launch {
             stockRepository.updateShares(stockCode, shares)
             stockRepository.updateYieldPeriod(stockCode, period)
+            stockRepository.updateCostPerShare(stockCode, costPerShare)
         }
     }
 }
