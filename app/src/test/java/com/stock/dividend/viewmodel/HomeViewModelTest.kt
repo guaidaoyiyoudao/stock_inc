@@ -2,6 +2,7 @@ package com.stock.dividend.viewmodel
 
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.StockRepository
 import io.mockk.coEvery
@@ -23,6 +24,7 @@ class HomeViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
     private val stockRepository: StockRepository = mockk()
     private val dividendDao: DividendDao = mockk()
+    private val fireGoalDao: FireGoalDao = mockk()
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
     private val totalDividendFlow = MutableStateFlow(0.0)
@@ -33,6 +35,8 @@ class HomeViewModelTest {
         coEvery { stockRepository.observeAllStocks() } returns stocksFlow
         coEvery { dividendDao.observeByStock(any()) } returns MutableStateFlow(emptyList())
         coEvery { dividendDao.observeTotalCashPerShare() } returns totalDividendFlow
+        coEvery { fireGoalDao.observe() } returns MutableStateFlow(null)
+        coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
     }
 
     @After
@@ -42,7 +46,7 @@ class HomeViewModelTest {
 
     @Test
     fun `initial state has empty stocks and zero total`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.stocks).isEmpty()
@@ -51,7 +55,7 @@ class HomeViewModelTest {
 
     @Test
     fun `stocks update when repository emits new data`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
         val stock = StockEntity("sz.000001", "平安银行", "0")
 
         stocksFlow.value = listOf(stock)
@@ -63,7 +67,7 @@ class HomeViewModelTest {
 
     @Test
     fun `forecastTotal starts at zero`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.forecastTotal).isEqualTo(0.0)
@@ -72,7 +76,7 @@ class HomeViewModelTest {
     @Test
     fun `deleteStock calls repository removeStock`() = runTest {
         coEvery { stockRepository.removeStock("sz.000001") } returns Unit
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
 
         val stock = StockEntity("sz.000001", "平安银行", "0")
         viewModel.deleteStock(stock)
@@ -84,9 +88,9 @@ class HomeViewModelTest {
     @Test
     fun `undoDelete re-adds the stock`() = runTest {
         coEvery { stockRepository.removeStock("sz.000001") } returns Unit
-        coEvery { stockRepository.addStock(any(), any()) } returns Result.success(Unit)
+        coEvery { stockRepository.addStock(any(), any(), any()) } returns Result.success(Unit)
 
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
         val stock = StockEntity("sz.000001", "平安银行", "0")
 
         viewModel.deleteStock(stock)
@@ -101,7 +105,7 @@ class HomeViewModelTest {
     @Test
     fun `clearDeleted removes deletedStock from state`() = runTest {
         coEvery { stockRepository.removeStock("sz.000001") } returns Unit
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
 
         val stock = StockEntity("sz.000001", "平安银行", "0")
         viewModel.deleteStock(stock)
@@ -114,7 +118,7 @@ class HomeViewModelTest {
 
     @Test
     fun `undoDelete does nothing when no deleted stock`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
         testDispatcher.scheduler.advanceUntilIdle()
 
         viewModel.undoDelete()
@@ -125,7 +129,7 @@ class HomeViewModelTest {
 
     @Test
     fun `initial isLoading is false`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.isLoading).isFalse()
@@ -133,7 +137,7 @@ class HomeViewModelTest {
 
     @Test
     fun `initial error is null`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao)
+        val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.error).isNull()
