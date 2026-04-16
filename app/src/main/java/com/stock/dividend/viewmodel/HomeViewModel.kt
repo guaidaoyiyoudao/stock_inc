@@ -10,12 +10,15 @@ import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -26,13 +29,16 @@ data class StockForecast(
     val shares: Int,
     val avgCashPerShare: Double,
     val forecastIncome: Double,
-    val actualYears: Int
+    val actualYears: Int,
+    val currentPrice: Double? = null,
+    val marketValue: Double? = null
 )
 
 data class HomeUiState(
     val stocks: List<StockEntity> = emptyList(),
     val forecastTotal: Double = 0.0,
     val stockForecasts: Map<String, StockForecast> = emptyMap(),
+    val totalMarketValue: Double? = null,
     val fireGoal: FireGoalEntity? = null,
     val fireProgress: Float? = null,
     val isLoading: Boolean = false,
@@ -50,6 +56,9 @@ class HomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    private val _stockPrices = MutableStateFlow<Map<String, Double>>(emptyMap())
+    private val _refreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     val stocksFlow = stockRepository.observeAllStocks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -116,6 +125,40 @@ class HomeViewModel @Inject constructor(
                 )
             }
         }
+
+        // Fetch quotes: triggered by stock list changes and explicit refresh
+        viewModelScope.launch {
+            combine(
+                stocksFlow,
+                _refreshTrigger.onStart { emit(Unit) }.conflate()
+            ) { stocks, _ -> stocks }
+                .collect { stocks ->
+                    val stocksWithShares = stocks.filter { it.shares > 0 }
+                    if (stocksWithShares.isNotEmpty()) {
+                        val prices = stockRepository.fetchQuotes(stocksWithShares)
+                        _stockPrices.value = prices
+
+                        val forecasts = _uiState.value.stockForecasts
+                        val updatedForecasts = forecasts.mapValues { (code, forecast) ->
+                            val price = prices[code]
+                            forecast.copy(
+                                currentPrice = price,
+                                marketValue = if (price != null && forecast.shares > 0) price * forecast.shares else null
+                            )
+                        }
+                        val totalMV = updatedForecasts.values.mapNotNull { it.marketValue }.sum().let {
+                            if (it > 0) it else null
+                        }
+                        _uiState.value = _uiState.value.copy(
+                            stockForecasts = updatedForecasts,
+                            totalMarketValue = totalMV
+                        )
+                    } else {
+                        _stockPrices.value = emptyMap()
+                        _uiState.value = _uiState.value.copy(totalMarketValue = null)
+                    }
+                }
+        }
     }
 
     fun deleteStock(stock: StockEntity) {
@@ -134,7 +177,8 @@ class HomeViewModel @Inject constructor(
                     name = deleted.name,
                     marketCode = deleted.marketCode
                 ),
-                shares = deleted.shares
+                shares = deleted.shares,
+                costPerShare = deleted.costPerShare
             )
             _uiState.value = _uiState.value.copy(deletedStock = null)
         }
@@ -142,5 +186,9 @@ class HomeViewModel @Inject constructor(
 
     fun clearDeleted() {
         _uiState.value = _uiState.value.copy(deletedStock = null)
+    }
+
+    fun refreshQuotes() {
+        _refreshTrigger.tryEmit(Unit)
     }
 }
