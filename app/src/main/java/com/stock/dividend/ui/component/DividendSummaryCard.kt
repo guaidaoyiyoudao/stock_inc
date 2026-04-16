@@ -35,6 +35,7 @@ import com.stock.dividend.ui.theme.Jade5
 @Composable
 fun DividendSummaryCard(
     totalAmount: Double,
+    totalMarketValue: Double? = null,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -134,6 +135,40 @@ fun DividendSummaryCard(
                             color = Color.White.copy(alpha = 0.8f)
                         )
                     }
+                }
+
+                if (totalMarketValue != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.6f))
+                        )
+                        Text(
+                            text = "持仓总市值",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = buildAnnotatedString {
+                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("¥")
+                            }
+                            append("%,.2f".format(totalMarketValue))
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
