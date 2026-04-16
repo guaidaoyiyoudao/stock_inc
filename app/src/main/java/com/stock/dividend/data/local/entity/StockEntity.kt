@@ -12,5 +12,6 @@ data class StockEntity(
     val addedAt: Long = System.currentTimeMillis(),
     val lastUpdated: Long? = null,
     val shares: Int = 0,
-    val yieldPeriod: String = "3"
+    val yieldPeriod: String = "3",
+    val costPerShare: Double = 0.0
 )

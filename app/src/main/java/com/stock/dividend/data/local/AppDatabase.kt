@@ -13,7 +13,7 @@ import com.stock.dividend.data.local.entity.StockEntity
 
 @Database(
     entities = [StockEntity::class, DividendEntity::class, FireGoalEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -38,6 +38,12 @@ abstract class AppDatabase : RoomDatabase() {
                             "`createdAt` INTEGER NOT NULL, " +
                             "`updatedAt` INTEGER NOT NULL)"
                 )
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE stocks ADD COLUMN costPerShare REAL NOT NULL DEFAULT 0.0")
             }
         }
     }

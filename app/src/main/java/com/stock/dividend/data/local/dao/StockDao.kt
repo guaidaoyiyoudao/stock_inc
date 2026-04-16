@@ -29,4 +29,7 @@ interface StockDao {
 
     @Query("UPDATE stocks SET yieldPeriod = :period WHERE code = :code")
     suspend fun updateYieldPeriod(code: String, period: String)
+
+    @Query("UPDATE stocks SET costPerShare = :costPerShare WHERE code = :code")
+    suspend fun updateCostPerShare(code: String, costPerShare: Double)
 }
