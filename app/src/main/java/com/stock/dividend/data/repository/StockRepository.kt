@@ -96,7 +96,7 @@ class StockRepository @Inject constructor(
                 if (price != null && price > 0) {
                     val prefix = if (item.market == 1) "sh" else "sz"
                     val appCode = "$prefix.${item.code}"
-                    priceMap[appCode] = price
+                    priceMap[appCode] = price / 100.0
                 }
             }
             priceMap
