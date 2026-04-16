@@ -2,6 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
 import com.stock.dividend.data.remote.dto.StockSearchResponse
 import kotlinx.coroutines.flow.Flow
@@ -17,6 +18,7 @@ data class StockSearchResult(
 @Singleton
 class StockRepository @Inject constructor(
     private val api: SearchApi,
+    private val quoteApi: QuoteApi,
     private val stockDao: StockDao
 ) {
     suspend fun searchStocks(query: String): Result<List<StockSearchResult>> {
@@ -37,13 +39,18 @@ class StockRepository @Inject constructor(
         }
     }
 
-    suspend fun addStock(searchResult: StockSearchResult, shares: Int = 0): Result<Unit> {
+    suspend fun addStock(
+        searchResult: StockSearchResult,
+        shares: Int = 0,
+        costPerShare: Double = 0.0
+    ): Result<Unit> {
         return try {
             val entity = StockEntity(
                 code = searchResult.code,
                 name = searchResult.name,
                 marketCode = searchResult.marketCode,
-                shares = shares
+                shares = shares,
+                costPerShare = costPerShare
             )
             stockDao.insert(entity)
             Result.success(Unit)
@@ -70,6 +77,32 @@ class StockRepository @Inject constructor(
 
     suspend fun updateYieldPeriod(code: String, period: String) {
         stockDao.updateYieldPeriod(code, period)
+    }
+
+    suspend fun updateCostPerShare(code: String, costPerShare: Double) {
+        stockDao.updateCostPerShare(code, costPerShare.coerceAtLeast(0.0))
+    }
+
+    suspend fun fetchQuotes(stocks: List<StockEntity>): Map<String, Double> {
+        if (stocks.isEmpty()) return emptyMap()
+        return try {
+            val secids = stocks.joinToString(",") { stock ->
+                "${stock.marketCode}.${stock.code.substringAfter(".")}"
+            }
+            val response = quoteApi.getQuotes(secids = secids)
+            val priceMap = mutableMapOf<String, Double>()
+            response.data?.diff?.forEach { item ->
+                val price = item.price
+                if (price != null && price > 0) {
+                    val prefix = if (item.market == 1) "sh" else "sz"
+                    val appCode = "$prefix.${item.code}"
+                    priceMap[appCode] = price
+                }
+            }
+            priceMap
+        } catch (e: Exception) {
+            emptyMap()
+        }
     }
 
     private fun formatStockCode(marketCode: String, code: String): String {
