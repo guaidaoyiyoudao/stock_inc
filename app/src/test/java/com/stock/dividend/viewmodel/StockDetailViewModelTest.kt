@@ -145,4 +145,78 @@ class StockDetailViewModelTest {
 
         assertThat(viewModel.uiState.value.error).isNull()
     }
+
+    private fun createViewModel(
+        code: String = "sz.000001",
+        dividends: List<DividendEntity> = emptyList()
+    ): StockDetailViewModel {
+        dividendsFlow.value = dividends
+        return StockDetailViewModel(
+            savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to code)),
+            stockRepository = stockRepository,
+            dividendRepository = mockk {
+                coEvery { observeDividends(code) } returns dividendsFlow
+            }
+        )
+    }
+
+    private fun makeDividends(count: Int): List<DividendEntity> {
+        return (1..count).map { i ->
+            DividendEntity(
+                id = "sz.000001_2024-$i",
+                stockCode = "sz.000001",
+                reportDate = "2024-$i",
+                cashPerShare = 0.1 * i,
+                dividendYield = 1.0 * i,
+                exDividendDate = "2025-07-$i",
+                recordDate = "2025-07-${i - 1}",
+                planStatus = "实施方案"
+            )
+        }
+    }
+
+    @Test
+    fun `initial visibleCount is 5`() = runTest {
+        val viewModel = createViewModel(dividends = makeDividends(12))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.visibleCount).isEqualTo(5)
+    }
+
+    @Test
+    fun `loadMoreDividends increases visibleCount by 5`() = runTest {
+        val viewModel = createViewModel(dividends = makeDividends(12))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.loadMoreDividends()
+
+        assertThat(viewModel.uiState.value.visibleCount).isEqualTo(10)
+    }
+
+    @Test
+    fun `loadMoreDividends caps at total dividends size`() = runTest {
+        val viewModel = createViewModel(dividends = makeDividends(12))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.loadMoreDividends() // 5 → 10
+        viewModel.loadMoreDividends() // 10 → 12 (capped)
+
+        assertThat(viewModel.uiState.value.visibleCount).isEqualTo(12)
+    }
+
+    @Test
+    fun `refreshing dividends resets visibleCount to 5`() = runTest {
+        val viewModel = createViewModel(dividends = makeDividends(12))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.loadMoreDividends()
+        assertThat(viewModel.uiState.value.visibleCount).isEqualTo(10)
+
+        // Simulate dividend refresh by emitting different data through the flow
+        // MutableStateFlow uses structural equality, so we must emit a different list
+        dividendsFlow.value = makeDividends(13)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.visibleCount).isEqualTo(5)
+    }
 }

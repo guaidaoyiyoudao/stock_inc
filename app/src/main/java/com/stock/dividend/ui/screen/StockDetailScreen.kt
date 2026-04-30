@@ -1,5 +1,11 @@
 package com.stock.dividend.ui.screen
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +79,10 @@ fun StockDetailScreen(
                     }
                 },
                 actions = {
+                    RefreshButton(
+                        isRefreshing = uiState.isRefreshing,
+                        onClick = { viewModel.refreshDividends() }
+                    )
                     TextButton(onClick = { onEditHolding(stockCode) }) {
                         Text(
                             "编辑持仓",
@@ -180,16 +192,32 @@ fun StockDetailScreen(
                     }
 
                     items(
-                        count = uiState.dividends.size,
+                        count = minOf(uiState.visibleCount, uiState.dividends.size),
                         key = { index -> uiState.dividends[index].id }
                     ) { index ->
                         val dividend = uiState.dividends[index]
-                        val isLast = index == uiState.dividends.lastIndex
+                        val visibleLast = minOf(uiState.visibleCount, uiState.dividends.size) - 1
+                        val isLast = index == visibleLast
                         DividendRecordCard(
                             dividend = dividend,
                             shares = stock?.shares ?: 0,
                             isLast = isLast
                         )
+                    }
+
+                    // Load more button
+                    if (uiState.visibleCount < uiState.dividends.size) {
+                        item {
+                            TextButton(
+                                onClick = { viewModel.loadMoreDividends() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "加载更多",
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -392,5 +420,38 @@ private fun DividendRecordCard(
                 color = MaterialTheme.colorScheme.outlineVariant
             )
         }
+    }
+}
+
+@Composable
+private fun RefreshButton(
+    isRefreshing: Boolean,
+    onClick: () -> Unit
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "refresh")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "refreshRotation"
+    )
+
+    IconButton(
+        onClick = onClick,
+        enabled = !isRefreshing
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Refresh,
+            contentDescription = "刷新股息数据",
+            modifier = Modifier.rotate(if (isRefreshing) rotation else 0f),
+            tint = if (isRefreshing) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
     }
 }

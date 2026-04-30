@@ -25,10 +25,12 @@ data class StockDetailUiState(
     val stock: StockEntity? = null,
     val dividends: List<DividendEntity> = emptyList(),
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val error: String? = null,
     val forecast: ForecastDetail? = null,
     val allForecasts: Map<String, ForecastDetail> = emptyMap(),
-    val selectedPeriod: String = "3"
+    val selectedPeriod: String = "3",
+    val visibleCount: Int = 5
 )
 
 @HiltViewModel
@@ -67,7 +69,8 @@ class StockDetailViewModel @Inject constructor(
             dividendRepository.observeDividends(stockCode).collect { dividends ->
                 _uiState.value = _uiState.value.copy(
                     dividends = dividends,
-                    isLoading = false
+                    isLoading = false,
+                    visibleCount = 5
                 )
                 recalculateForecasts()
             }
@@ -99,6 +102,24 @@ class StockDetailViewModel @Inject constructor(
             allForecasts = allForecasts,
             forecast = selectedForecast
         )
+    }
+
+    fun refreshDividends() {
+        val stock = _uiState.value.stock ?: return
+        if (_uiState.value.isRefreshing) return
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRefreshing = true)
+            val securityCode = stockCode.substringAfter(".")
+            dividendRepository.fetchAndCacheDividends(stockCode, securityCode)
+            _uiState.value = _uiState.value.copy(isRefreshing = false)
+        }
+    }
+
+    fun loadMoreDividends() {
+        val state = _uiState.value
+        val newCount = (state.visibleCount + 5).coerceAtMost(state.dividends.size)
+        _uiState.value = state.copy(visibleCount = newCount)
     }
 
     fun updateYieldPeriod(period: String) {
