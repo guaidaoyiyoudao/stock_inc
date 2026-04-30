@@ -6,10 +6,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -21,10 +24,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -36,7 +38,7 @@ fun FireGoalSetupScreen(
     onBack: () -> Unit,
     viewModel: FireGoalViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.saved, uiState.deleted) {
         if (uiState.saved || uiState.deleted) {
@@ -47,7 +49,7 @@ fun FireGoalSetupScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("FIRE 目标", fontWeight = FontWeight.SemiBold) },
+                title = { Text("FIRE 目标") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -73,50 +75,71 @@ fun FireGoalSetupScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            Text(
-                text = "目标年度支出",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = "设置 FIRE 退休后每年的目标支出金额",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = uiState.amountInput,
-                onValueChange = viewModel::onAmountChanged,
-                label = { Text("目标金额（元）") },
-                placeholder = { Text("例如：200000") },
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                isError = uiState.error != null,
-                supportingText = uiState.error?.let {
-                    { Text(it, color = MaterialTheme.colorScheme.error) }
-                },
-                shape = MaterialTheme.shapes.medium,
-                prefix = { Text("¥") }
-            )
+                shape = RoundedCornerShape(14.dp),
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "目标年度支出",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = "设置 FIRE 退休后每年的目标支出金额，当股息收入覆盖支出时即达成财务自由",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = uiState.amountInput,
+                        onValueChange = viewModel::onAmountChanged,
+                        label = { Text("目标金额（元）") },
+                        placeholder = { Text("例如：200,000") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = uiState.error != null,
+                        supportingText = uiState.error?.let {
+                            { Text(it, color = MaterialTheme.colorScheme.error) }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        prefix = { Text("¥") }
+                    )
+                }
+            }
 
             if (uiState.existingGoal != null) {
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-                TextButton(
-                    onClick = viewModel::showDeleteDialog,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "删除目标",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.labelLarge
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
                     )
+                ) {
+                    TextButton(
+                        onClick = viewModel::showDeleteDialog,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp)
+                    ) {
+                        Text(
+                            "删除目标",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
             }
         }

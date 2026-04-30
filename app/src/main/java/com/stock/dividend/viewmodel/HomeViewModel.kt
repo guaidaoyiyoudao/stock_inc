@@ -1,5 +1,6 @@
 package com.stock.dividend.viewmodel
 
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.dao.DividendDao
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+@Stable
 data class StockForecast(
     val shares: Int,
     val avgCashPerShare: Double,
@@ -34,6 +36,7 @@ data class StockForecast(
     val marketValue: Double? = null
 )
 
+@Stable
 data class HomeUiState(
     val stocks: List<StockEntity> = emptyList(),
     val forecastTotal: Double = 0.0,
@@ -57,7 +60,6 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-    private val _stockPrices = MutableStateFlow<Map<String, Double>>(emptyMap())
     private val _refreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     val stocksFlow = stockRepository.observeAllStocks()
@@ -66,63 +68,56 @@ class HomeViewModel @Inject constructor(
     private val fireGoalFlow = fireGoalDao.observe()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    init {
-        // Observe FIRE goal and compute progress
-        viewModelScope.launch {
-            fireGoalFlow.collect { goal ->
-                val currentTotal = _uiState.value.forecastTotal
-                val progress = if (goal != null && goal.targetAmount > 0) {
-                    (currentTotal / goal.targetAmount * 100).toFloat().coerceAtMost(100f)
-                } else null
-                _uiState.value = _uiState.value.copy(
-                    fireGoal = goal,
-                    fireProgress = progress
-                )
-            }
-        }
-
-        // Observe stocks and compute forecasts
-        viewModelScope.launch {
-            stocksFlow.flatMapLatest { stocks ->
-                val activeStocks = stocks.filter { it.shares > 0 }
-                if (activeStocks.isEmpty()) {
-                    flowOf(stocks to emptyMap())
-                } else {
-                    val forecastFlows = activeStocks.map { stock ->
-                        dividendDao.observeByStock(stock.code).map { dividends ->
-                            val years = stock.yieldPeriod.toIntOrNull() ?: 3
-                            val result = ForecastCalculator.calculateForecastIncome(
-                                dividends, stock.shares, years
-                            )
-                            stock.code to result?.let {
-                                StockForecast(
-                                    shares = stock.shares,
-                                    avgCashPerShare = it.avgCashPerShare,
-                                    forecastIncome = stock.shares * it.avgCashPerShare,
-                                    actualYears = it.actualYears
-                                )
-                            }
-                        }
-                    }
-                    combine(forecastFlows) { results ->
-                        val forecasts = results
-                            .filter { it.second != null }
-                            .associate { it.first to it.second!! }
-                        stocks to forecasts
+    private val forecastMapFlow = stocksFlow.flatMapLatest { stocks ->
+        val activeStocks = stocks.filter { it.shares > 0 }
+        if (activeStocks.isEmpty()) {
+            flowOf(emptyMap())
+        } else {
+            val forecastFlows = activeStocks.map { stock ->
+                dividendDao.observeByStock(stock.code).map { dividends ->
+                    val years = stock.yieldPeriod.toIntOrNull() ?: 3
+                    val result = ForecastCalculator.calculateForecastIncome(
+                        dividends, stock.shares, years
+                    )
+                    stock.code to result?.let {
+                        StockForecast(
+                            shares = stock.shares,
+                            avgCashPerShare = it.avgCashPerShare,
+                            forecastIncome = stock.shares * it.avgCashPerShare,
+                            actualYears = it.actualYears
+                        )
                     }
                 }
-            }.collect { (stocks, forecasts) ->
+            }
+            combine(forecastFlows) { results ->
+                results
+                    .filter { it.second != null }
+                    .associate { it.first to it.second!! }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    init {
+        // Single combined flow: stocks + forecasts + FIRE goal → one emission per data change
+        viewModelScope.launch {
+            combine(
+                stocksFlow,
+                forecastMapFlow,
+                fireGoalFlow
+            ) { stocks, forecasts, goal ->
                 val total = forecasts.values.sumOf { it.forecastIncome }
-                val goal = _uiState.value.fireGoal
                 val progress = if (goal != null && goal.targetAmount > 0) {
                     (total / goal.targetAmount * 100).toFloat().coerceAtMost(100f)
                 } else null
-                _uiState.value = _uiState.value.copy(
+                _uiState.value.copy(
                     stocks = stocks,
                     stockForecasts = forecasts,
                     forecastTotal = total,
+                    fireGoal = goal,
                     fireProgress = progress
                 )
+            }.collect { state ->
+                _uiState.value = state
             }
         }
 
@@ -136,7 +131,10 @@ class HomeViewModel @Inject constructor(
                     val stocksWithShares = stocks.filter { it.shares > 0 }
                     if (stocksWithShares.isNotEmpty()) {
                         val prices = stockRepository.fetchQuotes(stocksWithShares)
-                        _stockPrices.value = prices
+
+                        val totalMV = stocksWithShares.mapNotNull { stock ->
+                            prices[stock.code]?.let { price -> price * stock.shares }
+                        }.sum().let { if (it > 0) it else null }
 
                         val forecasts = _uiState.value.stockForecasts
                         val updatedForecasts = forecasts.mapValues { (code, forecast) ->
@@ -146,15 +144,11 @@ class HomeViewModel @Inject constructor(
                                 marketValue = if (price != null && forecast.shares > 0) price * forecast.shares else null
                             )
                         }
-                        val totalMV = updatedForecasts.values.mapNotNull { it.marketValue }.sum().let {
-                            if (it > 0) it else null
-                        }
                         _uiState.value = _uiState.value.copy(
                             stockForecasts = updatedForecasts,
                             totalMarketValue = totalMV
                         )
                     } else {
-                        _stockPrices.value = emptyMap()
                         _uiState.value = _uiState.value.copy(totalMarketValue = null)
                     }
                 }

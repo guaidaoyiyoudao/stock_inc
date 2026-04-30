@@ -1,10 +1,12 @@
 package com.stock.dividend.data.local.entity
 
+import androidx.compose.runtime.Stable
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+@Stable
 @Entity(
     tableName = "dividends",
     foreignKeys = [

@@ -1,6 +1,9 @@
 package com.stock.dividend.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,7 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -24,17 +27,17 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.StockEntity
@@ -52,7 +55,7 @@ fun HomeScreen(
     onFireCardClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -75,20 +78,26 @@ fun HomeScreen(
                 title = {
                     Text(
                         text = "我的股息",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.titleLarge
                     )
                 },
                 scrollBehavior = scrollBehavior
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddStockClick,
-                containerColor = MaterialTheme.colorScheme.primary,
-                shape = MaterialTheme.shapes.large
+            AnimatedVisibility(
+                visible = uiState.stocks.isNotEmpty(),
+                enter = fadeIn(),
+                exit = fadeOut()
             ) {
-                Icon(Icons.Default.Add, contentDescription = "添加股票")
+                ExtendedFloatingActionButton(
+                    onClick = onAddStockClick,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = MaterialTheme.shapes.large,
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("添加股票", style = MaterialTheme.typography.labelLarge) }
+                )
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -100,57 +109,62 @@ fun HomeScreen(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                EmptyStateView()
+                EmptyStateView(onAddClick = onAddStockClick)
             }
         } else {
-            LazyColumn(
+            PullToRefreshBox(
+                isRefreshing = uiState.isLoading,
+                onRefresh = { viewModel.refreshQuotes() },
                 modifier = Modifier
                     .padding(padding)
-                    .nestedScroll(scrollBehavior.nestedScrollConnection),
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 8.dp,
-                    bottom = 88.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
             ) {
-                item {
-                    FireProgressCard(
-                        targetAmount = uiState.fireGoal?.targetAmount,
-                        forecastTotal = uiState.forecastTotal,
-                        progress = uiState.fireProgress,
-                        onClick = onFireCardClick
-                    )
-                }
+                LazyColumn(
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 12.dp,
+                        bottom = 88.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        FireProgressCard(
+                            targetAmount = uiState.fireGoal?.targetAmount,
+                            forecastTotal = uiState.forecastTotal,
+                            progress = uiState.fireProgress,
+                            onClick = onFireCardClick
+                        )
+                    }
 
-                item {
-                    DividendSummaryCard(
-                        totalAmount = uiState.forecastTotal,
-                        totalMarketValue = uiState.totalMarketValue
-                    )
-                }
+                    item {
+                        DividendSummaryCard(
+                            totalAmount = uiState.forecastTotal,
+                            totalMarketValue = uiState.totalMarketValue
+                        )
+                    }
 
-                item {
-                    Text(
-                        text = "关注列表",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-                    )
-                }
+                    item {
+                        Text(
+                            text = "关注列表",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                        )
+                    }
 
-                items(
-                    items = uiState.stocks,
-                    key = { it.code }
-                ) { stock ->
-                    SwipeToDismissStockItem(
-                        stock = stock,
-                        forecastIncome = uiState.stockForecasts[stock.code]?.forecastIncome,
-                        marketValue = uiState.stockForecasts[stock.code]?.marketValue,
-                        onDismiss = { viewModel.deleteStock(stock) },
-                        onClick = { onStockClick(stock.code) }
-                    )
+                    items(
+                        items = uiState.stocks,
+                        key = { it.code }
+                    ) { stock ->
+                        SwipeToDismissStockItem(
+                            stock = stock,
+                            forecastIncome = uiState.stockForecasts[stock.code]?.forecastIncome,
+                            marketValue = uiState.stockForecasts[stock.code]?.marketValue,
+                            onDismiss = { viewModel.deleteStock(stock) },
+                            onClick = { onStockClick(stock.code) }
+                        )
+                    }
                 }
             }
         }
