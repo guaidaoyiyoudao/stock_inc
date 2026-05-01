@@ -17,14 +17,13 @@ class DividendIncomeRepository @Inject constructor(
 ) {
     suspend fun generateMissingAutoRecords() {
         val allDividends = dividendDao.getAllWithExDate()
-        val existingAutoRecords = incomeRecordDao.getAllAutoRecords()
-        val existingAutoIds = existingAutoRecords.map { it.id }.toSet()
+        val existingIds = incomeRecordDao.getAllIds().toSet()
 
         val newRecords = mutableListOf<DividendIncomeRecordEntity>()
         for (dividend in allDividends) {
             val exDate = dividend.exDividendDate ?: continue
             val autoId = "auto_${dividend.stockCode}_${exDate}"
-            if (autoId in existingAutoIds) continue
+            if (autoId in existingIds) continue
 
             val stock = stockDao.getByCode(dividend.stockCode) ?: continue
             val shares = stock.shares

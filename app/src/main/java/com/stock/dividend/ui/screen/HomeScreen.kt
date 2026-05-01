@@ -59,6 +59,7 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.ui.component.DividendSummaryCard
 import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.ui.component.FireProgressCard
+import com.stock.dividend.ui.component.IncomeBreakdownChart
 import com.stock.dividend.ui.component.IncomeSummaryCard
 import com.stock.dividend.ui.component.IncomeTimelineCard
 import com.stock.dividend.ui.component.IncomeTrendChart
@@ -379,6 +380,14 @@ private fun IncomeTabContent(
             prevYearTotal = state.prevYearTotal,
             manualCount = state.manualCount,
             autoCount = state.autoCount,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Breakdown chart
+        IncomeBreakdownChart(
+            records = state.records,
             modifier = Modifier.padding(horizontal = 16.dp)
         )
 

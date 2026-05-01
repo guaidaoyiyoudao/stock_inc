@@ -24,3 +24,7 @@ Thumbs.db
 
 # Worktrees
 .worktrees/
+
+# Keystore
+*.keystore
+*.jks

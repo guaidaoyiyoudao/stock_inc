@@ -20,6 +20,9 @@ interface DividendIncomeRecordDao {
     @Query("SELECT * FROM dividend_income_records WHERE year = :year ORDER BY date DESC")
     fun observeByYear(year: Int): Flow<List<DividendIncomeRecordEntity>>
 
+    @Query("SELECT id FROM dividend_income_records")
+    suspend fun getAllIds(): List<String>
+
     @Query("SELECT * FROM dividend_income_records WHERE source = 'auto'")
     suspend fun getAllAutoRecords(): List<DividendIncomeRecordEntity>
 
