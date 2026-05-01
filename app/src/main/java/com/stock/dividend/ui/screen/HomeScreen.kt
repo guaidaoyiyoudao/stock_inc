@@ -164,7 +164,7 @@ fun HomeScreen(
                     Tab(
                         selected = selectedTabIndex == 0,
                         onClick = { selectedTabIndex = 0 },
-                        text = { Text("关注列表", style = MaterialTheme.typography.labelLarge) }
+                        text = { Text("持仓列表", style = MaterialTheme.typography.labelLarge) }
                     )
                     Tab(
                         selected = selectedTabIndex == 1,
@@ -321,7 +321,7 @@ private fun WatchlistContent(
 
             item {
                 Text(
-                    text = "关注列表",
+                    text = "持仓列表",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold,

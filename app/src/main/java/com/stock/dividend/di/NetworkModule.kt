@@ -33,10 +33,12 @@ object NetworkModule {
                 val url = request.url.toString()
                 val referer = when {
                     url.contains("searchapi") -> "https://so.eastmoney.com/"
+                    url.contains("push2") -> "https://quote.eastmoney.com/"
                     else -> "https://data.eastmoney.com/"
                 }
                 val newRequest = request.newBuilder()
                     .header("Referer", referer)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
                     .build()
                 chain.proceed(newRequest)
             }

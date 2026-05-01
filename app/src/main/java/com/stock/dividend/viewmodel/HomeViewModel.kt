@@ -130,24 +130,29 @@ class HomeViewModel @Inject constructor(
                 .collect { stocks ->
                     val stocksWithShares = stocks.filter { it.shares > 0 }
                     if (stocksWithShares.isNotEmpty()) {
-                        val prices = stockRepository.fetchQuotes(stocksWithShares)
+                        _uiState.value = _uiState.value.copy(isLoading = true)
+                        try {
+                            val prices = stockRepository.fetchQuotes(stocksWithShares)
 
-                        val totalMV = stocksWithShares.mapNotNull { stock ->
-                            prices[stock.code]?.let { price -> price * stock.shares }
-                        }.sum().let { if (it > 0) it else null }
+                            val totalMV = stocksWithShares.mapNotNull { stock ->
+                                prices[stock.code]?.let { price -> price * stock.shares }
+                            }.sum().let { if (it > 0) it else null }
 
-                        val forecasts = _uiState.value.stockForecasts
-                        val updatedForecasts = forecasts.mapValues { (code, forecast) ->
-                            val price = prices[code]
-                            forecast.copy(
-                                currentPrice = price,
-                                marketValue = if (price != null && forecast.shares > 0) price * forecast.shares else null
+                            val forecasts = _uiState.value.stockForecasts
+                            val updatedForecasts = forecasts.mapValues { (code, forecast) ->
+                                val price = prices[code]
+                                forecast.copy(
+                                    currentPrice = price,
+                                    marketValue = if (price != null && forecast.shares > 0) price * forecast.shares else null
+                                )
+                            }
+                            _uiState.value = _uiState.value.copy(
+                                stockForecasts = updatedForecasts,
+                                totalMarketValue = totalMV
                             )
+                        } finally {
+                            _uiState.value = _uiState.value.copy(isLoading = false)
                         }
-                        _uiState.value = _uiState.value.copy(
-                            stockForecasts = updatedForecasts,
-                            totalMarketValue = totalMV
-                        )
                     } else {
                         _uiState.value = _uiState.value.copy(totalMarketValue = null)
                     }

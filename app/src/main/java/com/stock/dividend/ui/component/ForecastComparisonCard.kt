@@ -1,5 +1,6 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -12,19 +13,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.stock.dividend.ui.theme.Jade3
-import com.stock.dividend.ui.theme.Slate2
 import com.stock.dividend.viewmodel.ForecastDetail
 
 @Composable
@@ -41,15 +42,18 @@ fun ForecastComparisonCard(
             .fillMaxWidth()
             .animateContentSize(),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        shape = MaterialTheme.shapes.medium
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Text(
                 text = "多情景对比",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             periods.forEachIndexed { index, (period, label) ->
                 val detail = allForecasts[period]
@@ -64,7 +68,7 @@ fun ForecastComparisonCard(
                 )
 
                 if (index < periods.lastIndex) {
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
             }
         }
@@ -80,6 +84,16 @@ private fun ForecastPeriodRow(
     actualYears: Int?
 ) {
     val progress = income?.let { (it / maxIncome).toFloat().coerceIn(0f, 1f) } ?: 0f
+    val textColor by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.onSurface,
+        label = "textColor"
+    )
+    val progressColor by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.outlineVariant,
+        label = "progressColor"
+    )
 
     Column {
         Row(
@@ -102,11 +116,9 @@ private fun ForecastPeriodRow(
                 }
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                    ),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = textColor
                 )
             }
 
@@ -116,11 +128,9 @@ private fun ForecastPeriodRow(
             ) {
                 Text(
                     text = income?.let { "¥%.2f".format(it) } ?: "-",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                    ),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = textColor
                 )
             }
         }
@@ -132,8 +142,8 @@ private fun ForecastPeriodRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(4.dp)
-                .clip(MaterialTheme.shapes.extraSmall),
-            color = if (isSelected) MaterialTheme.colorScheme.primary else Slate2,
+                .clip(RoundedCornerShape(2.dp)),
+            color = progressColor,
             trackColor = MaterialTheme.colorScheme.surfaceVariant,
         )
 

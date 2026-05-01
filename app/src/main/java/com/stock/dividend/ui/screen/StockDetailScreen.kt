@@ -232,7 +232,7 @@ private fun HoldingInfoBanner(shares: Int, stockName: String) {
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
             modifier = Modifier
@@ -243,14 +243,14 @@ private fun HoldingInfoBanner(shares: Int, stockName: String) {
             Box(
                 modifier = Modifier
                     .size(36.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.1f)),
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "持",
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -281,6 +281,7 @@ private fun SectionHeader(title: String, count: Int? = null) {
         Text(
             text = title,
             style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface
         )
         if (count != null) {
@@ -288,7 +289,7 @@ private fun SectionHeader(title: String, count: Int? = null) {
                 modifier = Modifier
                     .background(
                         MaterialTheme.colorScheme.secondaryContainer,
-                        RoundedCornerShape(4.dp)
+                        RoundedCornerShape(6.dp)
                     )
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
@@ -311,7 +312,7 @@ private fun ForecastMainCard(forecast: ForecastDetail, selectedPeriod: String) {
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
@@ -354,9 +355,7 @@ private fun DividendRecordCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-        )
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
             modifier = Modifier
