@@ -18,9 +18,11 @@ Build a dividend income timeline that automatically estimates historical income 
 |----------|--------|-----|
 | Record source | Hybrid: auto-generated + manual | Auto gives zero-cost baseline; manual covers corrections and external sources |
 | UI location | New tab in HomeScreen | Keeps the feature front-and-center without adding navigation depth |
-| Auto record generation | On data load, diff-based | Non-blocking, only generates missing records |
+| Auto record generation | On data load, diff-based, coroutine-scoped (`viewModelScope`) | Non-blocking, only generates missing records; runs off main thread |
 | Auto record updates | Never auto-update existing | Current shares may differ from historical; first generation is the best estimate |
+| Correction model | In-place mutation (auto -> manual) | Correction changes `source` on the existing record; ID prefix is decorative and set at creation, never changed |
 | Manual record deletion | Allowed for manual, blocked for auto | Auto records regenerate on next load; blocking deletion avoids confusion |
+| Stock deletion | CASCADE deletes all income records | Acceptable: if user removes a stock, its income history is no longer relevant |
 
 ---
 
@@ -30,27 +32,32 @@ Build a dividend income timeline that automatically estimates historical income 
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | `auto_{stockCode}_{exDividendDate}` or `manual_{timestamp}` |
+| `id` | TEXT | PRIMARY KEY | `auto_{stockCode}_{exDividendDate}` or `manual_{epochMillis}` |
 | `stockCode` | TEXT | FK -> stocks(code) ON DELETE CASCADE, NULLABLE | NULL for external income sources |
-| `year` | INTEGER | NOT NULL | Income attribution year (from exDividendDate or manual input) |
+| `year` | INTEGER | NOT NULL | Income attribution year |
+| `date` | TEXT | NOT NULL | Full date for display and sorting (ISO-8601: `yyyy-MM-dd`). For auto records: `exDividendDate`; for manual records: user-selected date |
 | `amount` | REAL | NOT NULL | Actual received amount in yuan |
-| `exDividendDate` | TEXT | NULLABLE | Ex-dividend date (set for auto records, optional for manual) |
+| `exDividendDate` | TEXT | NULLABLE | Original ex-dividend date (set for auto records, null for manual) |
 | `source` | TEXT | NOT NULL, DEFAULT 'auto' | `auto` or `manual` |
 | `note` | TEXT | NULLABLE | Optional user note |
-| `createdAt` | INTEGER | NOT NULL | Record creation timestamp |
+| `createdAt` | INTEGER | NOT NULL | Record creation timestamp (epoch millis) |
+| `updatedAt` | INTEGER | NOT NULL | Last modification timestamp (epoch millis), equals `createdAt` on creation |
+
+**ID format details:**
+- Auto records: `auto_{stockCode}_{exDividendDate}` (e.g. `auto_sh.600000_2024-07-10`). The prefix is set at creation and never changes, even if `source` is later mutated to `manual` via correction.
+- Manual records: `manual_{epochMillis}` (e.g. `manual_1718000000000`). Epoch millis ensures uniqueness and sortability.
 
 **Index:** `index_dividend_income_records_year` on `year`
 **Index:** `index_dividend_income_records_stock_code` on `stockCode`
 
-### 1.2 Data Merge Logic
+### 1.2 Data Display Logic
 
 When loading income records for display:
 
-1. Fetch all auto records and all manual records for the selected year
-2. For each stock + exDividendDate pair:
-   - If a manual record exists, display it (priority)
-   - Otherwise display the auto record
-3. Display manual records with no stock association as standalone entries
+1. Fetch all records for the selected year, sorted by `date` descending
+2. Each record is displayed as-is — there is no merge/dedup logic
+3. Auto records that have been corrected have `source='manual'` and show the green "实际" indicator
+4. Manual records with no stock association (`stockCode` is null) display as "其他收入"
 
 ### 1.3 Auto Record Generation
 
@@ -65,6 +72,8 @@ Triggered in `DividendIncomeRepository` when HomeScreen loads income data:
 **Edge cases:**
 - If `stock.shares == 0`, still generate the record with `amount = 0.0` (user may add shares later; the record exists as a marker)
 - If a dividend's `exDividendDate` is null, skip it (can't determine attribution year)
+- Multiple dividends per stock per year (e.g. mid-year + year-end): handled naturally because the ID includes `exDividendDate`, producing distinct records
+- Year attribution uses `exDividendDate`. For Chinese A-shares where ex-date and payment date may span year boundaries (e.g. ex-date in Dec, payment in Jan), the record attributes to the ex-date's year. This is acceptable for this iteration
 
 ### 1.4 Database Migration
 
@@ -75,11 +84,13 @@ CREATE TABLE IF NOT EXISTS `dividend_income_records` (
     `id` TEXT NOT NULL PRIMARY KEY,
     `stockCode` TEXT NULLABLE,
     `year` INTEGER NOT NULL,
+    `date` TEXT NOT NULL,
     `amount` REAL NOT NULL,
     `exDividendDate` TEXT NULLABLE,
     `source` TEXT NOT NULL DEFAULT 'auto',
     `note` TEXT NULLABLE,
     `createdAt` INTEGER NOT NULL,
+    `updatedAt` INTEGER NOT NULL,
     FOREIGN KEY (`stockCode`) REFERENCES `stocks`(`code`) ON DELETE CASCADE
 );
 
@@ -130,14 +141,15 @@ Each `IncomeTimelineCard`:
 - Source indicator: green "实际" chip for manual, gray "推算" chip for auto
 
 **Expanded view (on tap):**
-- Ex-dividend date (if available)
-- Per-share dividend amount
-- Shares held (for auto records)
+- Date (full `date` field)
+- Ex-dividend date (if available, from `exDividendDate` field)
+- Per-share dividend amount (looked up from the original `dividends` table by matching `stockCode` + `exDividendDate`; shows "—" if source data no longer exists, e.g. stock was removed)
+- Shares held at generation time (looked up from the original `dividends` table for context; shows "—" if unavailable)
 - Note (if any)
 - Actions:
-  - "修正金额" button (for auto records) — opens edit dialog
-  - "编辑" button (for manual records) — opens edit dialog
-  - "删除" button (for manual records only)
+  - "修正金额" button (for `source=auto` records) — opens edit dialog
+  - "编辑" button (for `source=manual` records) — opens edit dialog
+  - "删除" button (for `source=manual` records only; auto records cannot be deleted)
 
 **Empty state:** "暂无股息收入记录" with subtitle "分红到账后会自动记录"
 
@@ -166,12 +178,14 @@ HomeScreen loads "股息收入" tab
 
 ### 3.2 Manual Correction Flow
 
+Corrections mutate the existing auto record in-place, changing its `source` to `manual`. The record ID stays the same (e.g. `auto_sh.600000_2024-07-10` even though `source` is now `manual`). No separate manual record is created.
+
 ```
 User taps auto record -> Expanded view
   -> User taps "修正金额"
     -> Dialog: amount input (pre-filled with auto amount), note input
     -> User edits and confirms
-      -> Update record: source='manual', amount=user input, note=user input
+      -> UPDATE record: source='manual', amount=user input, note=user input, updatedAt=now()
       -> Timeline refreshes
 ```
 
@@ -216,6 +230,7 @@ User taps manual record -> Expanded view
 | File | Change |
 |------|--------|
 | `data/local/AppDatabase.kt` | Add entity, bump version 4->5, add migration |
+| `di/RepositoryModule.kt` (or equivalent Hilt module) | Provide `DividendIncomeRepository` and `DividendIncomeRecordDao` |
 | `ui/screen/HomeScreen.kt` | Add TabRow, wrap existing content in tab, add income tab content |
 | `viewmodel/HomeViewModel.kt` | Add selected tab state |
 
@@ -256,8 +271,32 @@ HomeScreen
 
 ## 6. Testing Strategy
 
-- **Unit tests:** DividendIncomeRepository auto-generation logic, merge priority logic, YoY calculation
-- **Unit tests:** DividendIncomeViewModel state transitions
-- **Migration test:** v4 -> v5 database migration
-- **Compose tests:** IncomeTimelineCard expand/collapse state
-- Manual testing: full flow of auto-generation, manual correction, manual add, delete
+### Unit Tests
+
+**DividendIncomeRepository:**
+- Auto-generation correctly diffs and inserts missing records
+- Auto-generation skips dividends with null `exDividendDate`
+- Auto-generation handles `shares == 0` (amount = 0.0)
+- Correction mutates record in-place (source -> manual, amount updated, updatedAt changed)
+- Manual add creates record with correct fields
+- Delete only works on manual records
+- YoY calculation handles: first year (no prior year), increase, decrease, zero income
+
+**DividendIncomeViewModel:**
+- Year selection updates displayed records
+- Auto-generation triggers on init
+- Dialog state transitions (correct/add/delete)
+
+**ForecastCalculator (existing):**
+- No changes expected, but regression test to ensure auto-generation doesn't interfere
+
+### Migration Test
+
+- v4 -> v5 migration creates `dividend_income_records` table with correct schema
+- Existing data in `stocks`, `dividends`, `fire_goal` tables is preserved
+
+### Compose Tests
+
+- `IncomeTimelineCard`: collapsed/expanded state toggle
+- `IncomeSummaryCard`: renders YoY comparison correctly
+- `YearSelector`: year chip selection updates state
