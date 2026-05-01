@@ -23,4 +23,7 @@ interface DividendDao {
 
     @Query("SELECT COALESCE(SUM(cashPerShare), 0.0) FROM dividends")
     fun observeTotalCashPerShare(): Flow<Double>
+
+    @Query("SELECT * FROM dividends WHERE exDividendDate IS NOT NULL")
+    suspend fun getAllWithExDate(): List<DividendEntity>
 }
