@@ -29,6 +29,7 @@ data class DividendIncomeUiState(
     val manualCount: Int = 0,
     val autoCount: Int = 0,
     val prevYearTotal: Double? = null,
+    val yearlyTotals: Map<Int, Double> = emptyMap(),
     val stocks: List<StockEntity> = emptyList(),
     val showAddDialog: Boolean = false,
     val showCorrectDialog: Boolean = false,
@@ -121,6 +122,15 @@ class DividendIncomeViewModel @Inject constructor(
         viewModelScope.launch {
             stocksFlow.collect { stocks ->
                 _uiState.value = _uiState.value.copy(stocks = stocks)
+            }
+        }
+
+        // Observe yearly totals for trend chart
+        viewModelScope.launch {
+            incomeRepository.observeYearlyTotals().collect { totals ->
+                _uiState.value = _uiState.value.copy(
+                    yearlyTotals = totals.associate { it.year to it.total }
+                )
             }
         }
     }
