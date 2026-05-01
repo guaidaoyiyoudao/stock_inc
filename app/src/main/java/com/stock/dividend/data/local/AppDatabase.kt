@@ -5,21 +5,24 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.StockEntity
 
 @Database(
-    entities = [StockEntity::class, DividendEntity::class, FireGoalEntity::class],
-    version = 4,
+    entities = [StockEntity::class, DividendEntity::class, FireGoalEntity::class, DividendIncomeRecordEntity::class],
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun stockDao(): StockDao
     abstract fun dividendDao(): DividendDao
     abstract fun fireGoalDao(): FireGoalDao
+    abstract fun dividendIncomeRecordDao(): DividendIncomeRecordDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -44,6 +47,27 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE stocks ADD COLUMN costPerShare REAL NOT NULL DEFAULT 0.0")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `dividend_income_records` (" +
+                            "`id` TEXT NOT NULL PRIMARY KEY, " +
+                            "`stockCode` TEXT NULLABLE, " +
+                            "`year` INTEGER NOT NULL, " +
+                            "`date` TEXT NOT NULL, " +
+                            "`amount` REAL NOT NULL, " +
+                            "`exDividendDate` TEXT NULLABLE, " +
+                            "`source` TEXT NOT NULL DEFAULT 'auto', " +
+                            "`note` TEXT NULLABLE, " +
+                            "`createdAt` INTEGER NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL, " +
+                            "FOREIGN KEY(`stockCode`) REFERENCES `stocks`(`code`) ON DELETE CASCADE)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_dividend_income_records_stock_code` ON `dividend_income_records`(`stockCode`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_dividend_income_records_year` ON `dividend_income_records`(`year`)")
             }
         }
     }
