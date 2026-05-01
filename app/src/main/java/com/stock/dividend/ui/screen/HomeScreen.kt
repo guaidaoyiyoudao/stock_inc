@@ -61,6 +61,7 @@ import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.ui.component.FireProgressCard
 import com.stock.dividend.ui.component.IncomeSummaryCard
 import com.stock.dividend.ui.component.IncomeTimelineCard
+import com.stock.dividend.ui.component.IncomeTrendChart
 import com.stock.dividend.ui.component.StockCard
 import com.stock.dividend.ui.component.YearSelector
 import com.stock.dividend.viewmodel.DividendIncomeUiState
@@ -356,6 +357,16 @@ private fun IncomeTabContent(
             years = state.availableYears.ifEmpty { listOf(state.selectedYear) },
             selectedYear = state.selectedYear,
             onYearSelected = { viewModel.selectYear(it) },
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Trend chart
+        IncomeTrendChart(
+            yearlyTotals = state.yearlyTotals,
+            selectedYear = state.selectedYear,
+            onYearClick = { viewModel.selectYear(it) },
             modifier = Modifier.padding(horizontal = 16.dp)
         )
 
