@@ -1,6 +1,7 @@
 package com.stock.dividend.ui.component
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -138,7 +139,7 @@ fun IncomeBreakdownChart(
                     // Center hole (donut)
                     val holeRadius = radius * 0.55f
                     drawCircle(
-                        color = MaterialTheme.colorScheme.surface,
+                        color = surfaceColor,
                         radius = holeRadius,
                         center = center
                     )
@@ -155,7 +156,7 @@ fun IncomeBreakdownChart(
                             center.x - textLayoutResult.size.width / 2f,
                             center.y - textLayoutResult.size.height / 2f
                         ),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = onSurfaceColor
                     )
                 }
 
@@ -176,11 +177,8 @@ fun IncomeBreakdownChart(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(MaterialTheme.shapes.extraSmall)
-                            ) {
-                                Canvas(modifier = Modifier.size(8.dp)) {
-                                    drawCircle(color = slice.color)
-                                }
-                            }
+                                    .background(slice.color)
+                            )
                             Text(
                                 text = slice.label,
                                 style = MaterialTheme.typography.labelSmall,

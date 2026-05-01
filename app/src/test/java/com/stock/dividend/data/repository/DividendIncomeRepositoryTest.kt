@@ -52,7 +52,7 @@ class DividendIncomeRepositoryTest {
             )
         )
         coEvery { dividendDao.getAllWithExDate() } returns dividends
-        coEvery { incomeRecordDao.getAllAutoRecords() } returns emptyList()
+        coEvery { incomeRecordDao.getAllIds() } returns emptyList()
         coEvery { stockDao.getByCode("sh.600000") } returns testStock
 
         repository.generateMissingAutoRecords()
@@ -80,7 +80,7 @@ class DividendIncomeRepositoryTest {
             )
         )
         coEvery { dividendDao.getAllWithExDate() } returns dividends
-        coEvery { incomeRecordDao.getAllAutoRecords() } returns emptyList()
+        coEvery { incomeRecordDao.getAllIds() } returns emptyList()
 
         repository.generateMissingAutoRecords()
 
@@ -100,7 +100,7 @@ class DividendIncomeRepositoryTest {
             )
         )
         coEvery { dividendDao.getAllWithExDate() } returns dividends
-        coEvery { incomeRecordDao.getAllAutoRecords() } returns emptyList()
+        coEvery { incomeRecordDao.getAllIds() } returns emptyList()
         coEvery { stockDao.getByCode("sh.600000") } returns zeroShareStock
 
         repository.generateMissingAutoRecords()
@@ -132,7 +132,7 @@ class DividendIncomeRepositoryTest {
             )
         )
         coEvery { dividendDao.getAllWithExDate() } returns dividends
-        coEvery { incomeRecordDao.getAllAutoRecords() } returns existingRecords
+        coEvery { incomeRecordDao.getAllIds() } returns listOf("auto_sh.600000_2024-07-10")
 
         repository.generateMissingAutoRecords()
 
@@ -158,7 +158,7 @@ class DividendIncomeRepositoryTest {
             )
         )
         coEvery { dividendDao.getAllWithExDate() } returns dividends
-        coEvery { incomeRecordDao.getAllAutoRecords() } returns emptyList()
+        coEvery { incomeRecordDao.getAllIds() } returns emptyList()
         coEvery { stockDao.getByCode("sh.600000") } returns testStock
 
         repository.generateMissingAutoRecords()
@@ -180,7 +180,7 @@ class DividendIncomeRepositoryTest {
             )
         )
         coEvery { dividendDao.getAllWithExDate() } returns dividends
-        coEvery { incomeRecordDao.getAllAutoRecords() } returns emptyList()
+        coEvery { incomeRecordDao.getAllIds() } returns emptyList()
         coEvery { stockDao.getByCode("sh.999999") } returns null
 
         repository.generateMissingAutoRecords()
