@@ -7,6 +7,8 @@ import androidx.room.Query
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import kotlinx.coroutines.flow.Flow
 
+data class YearlyTotal(val year: Int, val total: Double)
+
 @Dao
 interface DividendIncomeRecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -44,4 +46,7 @@ interface DividendIncomeRecordDao {
 
     @Query("SELECT COUNT(*) FROM dividend_income_records WHERE year = :year AND source = 'auto'")
     suspend fun getAutoCountByYear(year: Int): Int
+
+    @Query("SELECT year, COALESCE(SUM(amount), 0.0) as total FROM dividend_income_records GROUP BY year ORDER BY year ASC")
+    fun observeYearlyTotals(): Flow<List<YearlyTotal>>
 }

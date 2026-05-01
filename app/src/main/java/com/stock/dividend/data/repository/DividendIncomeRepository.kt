@@ -2,6 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
+import com.stock.dividend.data.local.dao.YearlyTotal
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import kotlinx.coroutines.flow.Flow
@@ -55,6 +56,9 @@ class DividendIncomeRepository @Inject constructor(
 
     fun observeTotalByYear(year: Int): Flow<Double> =
         incomeRecordDao.observeTotalByYear(year)
+
+    fun observeYearlyTotals(): Flow<List<YearlyTotal>> =
+        incomeRecordDao.observeYearlyTotals()
 
     suspend fun getManualCountByYear(year: Int): Int =
         incomeRecordDao.getManualCountByYear(year)
