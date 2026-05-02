@@ -44,9 +44,10 @@ fun MainScaffold(rootNavController: NavHostController) {
 
     val selectedTabIndex = bottomNavItems.indexOfFirst { it.route == currentTabRoute }.coerceAtLeast(0)
 
-    val fabRoute = currentTabRoute
-    val fabVisible = fabRoute == "watchlist"
-    val fabLabel = "添加股票"
+    val fabVisible = currentTabRoute in listOf("watchlist", "income")
+    val fabOnWatchlist = currentTabRoute == "watchlist"
+
+    var incomeFabTrigger by remember { mutableIntStateOf(0) }
 
     Scaffold(
         bottomBar = {
@@ -91,12 +92,20 @@ fun MainScaffold(rootNavController: NavHostController) {
                 exit = fadeOut()
             ) {
                 ExtendedFloatingActionButton(
-                    onClick = { tabNavController.navigate("addStock") },
+                    onClick = {
+                        if (fabOnWatchlist) tabNavController.navigate("addStock")
+                        else incomeFabTrigger++
+                    },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = MaterialTheme.shapes.large,
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text(fabLabel, style = MaterialTheme.typography.labelLarge) }
+                    text = {
+                        Text(
+                            if (fabOnWatchlist) "添加股票" else "添加收入",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 )
             }
         }
@@ -114,7 +123,7 @@ fun MainScaffold(rootNavController: NavHostController) {
                 )
             }
             composable("income") {
-                IncomeScreen()
+                IncomeScreen(fabTrigger = incomeFabTrigger)
             }
             composable("achievements") {
                 AchievementScreen()

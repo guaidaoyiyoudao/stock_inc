@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -112,9 +113,11 @@ fun WatchlistScreen(
                     onDeleteStock = { viewModel.deleteStock(it) },
                     onRefresh = { viewModel.refreshQuotes() },
                     modifier = Modifier.padding(padding)
-            )
+                )
+            }
         }
     }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -142,17 +145,17 @@ fun IncomeScreen(
     }
 
     if (showAddIncomeDialog) {
-        AddIncomeDialog(
-            stocks = state.stocks,
-            onDismiss = { showAddIncomeDialog = false },
-            onConfirm = { date, amount, stockCode, note ->
-                viewModel.addManualRecord(date, amount, stockCode, note)
-                showAddIncomeDialog = false
-            }
-        )
-    }
+            AddIncomeDialog(
+                stocks = state.stocks,
+                onDismiss = { showAddIncomeDialog = false },
+                onConfirm = { date, amount, stockCode, note ->
+                    viewModel.addManualRecord(date, amount, stockCode, note)
+                    showAddIncomeDialog = false
+                }
+            )
+        }
 
-    if (state.showCorrectDialog) {
+        if (state.showCorrectDialog) {
             if (!showCorrectDialog) {
                 showCorrectDialog = true
                 correctAmount = "%.2f".format(state.correctCurrentAmount)
@@ -401,7 +404,10 @@ private fun AchievementTabContent(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        CategorizedAchievementList(achievements = state.achievements)
+        CategorizedAchievementList(
+            achievements = state.achievements,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
@@ -427,7 +433,7 @@ private fun AddIncomeDialog(
                     onValueChange = { amountText = it },
                     label = { Text("金额 (元)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
@@ -435,7 +441,7 @@ private fun AddIncomeDialog(
                     onValueChange = { noteText = it },
                     label = { Text("备注 (可选)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         },
