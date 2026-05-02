@@ -4,7 +4,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
@@ -52,6 +54,7 @@ fun MainScaffold(rootNavController: NavHostController) {
     Scaffold(
         bottomBar = {
             NavigationBar(
+                modifier = Modifier.height(56.dp),
                 containerColor = if (isSystemInDarkTheme())
                     GlassColors.DarkSurface else GlassColors.LightSurface,
                 tonalElevation = 0.dp
@@ -71,7 +74,11 @@ fun MainScaffold(rootNavController: NavHostController) {
                             }
                         },
                         icon = {
-                            Icon(imageVector = item.icon, contentDescription = item.label)
+                            Icon(
+                                imageVector = item.icon,
+                                contentDescription = item.label,
+                                modifier = Modifier.size(20.dp)
+                            )
                         },
                         label = { Text(item.label) },
                         colors = NavigationBarItemDefaults.colors(
