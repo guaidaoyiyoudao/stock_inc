@@ -462,11 +462,12 @@ private fun SwipeToDismissStockItem(
     onDismiss: () -> Unit,
     onClick: () -> Unit
 ) {
+    var showConfirmDialog by remember { mutableStateOf(false) }
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = {
             if (it == SwipeToDismissBoxValue.EndToStart) {
-                onDismiss()
-                true
+                showConfirmDialog = true
+                false
             } else false
         }
     )
@@ -506,6 +507,27 @@ private fun SwipeToDismissStockItem(
             marketValue = marketValue?.let { "¥${"%,.2f".format(it)}" },
             lastUpdated = stock.lastUpdated,
             onClick = onClick
+        )
+    }
+
+    if (showConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDialog = false },
+            title = { Text("确认删除") },
+            text = { Text("确定要删除 ${stock.name} 吗？删除后可以撤销。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirmDialog = false
+                        onDismiss()
+                    }
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmDialog = false }) {
+                    Text("取消")
+                }
+            }
         )
     }
 }
