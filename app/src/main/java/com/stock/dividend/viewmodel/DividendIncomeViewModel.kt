@@ -59,20 +59,17 @@ class DividendIncomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        // Auto-generate missing records on init
         viewModelScope.launch {
-            incomeRepository.generateMissingAutoRecords()
+            incomeRepository.regenerateAutoRecords()
             _uiState.value = _uiState.value.copy(isLoading = false)
         }
 
-        // Observe available years
         viewModelScope.launch {
             incomeRepository.observeAvailableYears().collect { years ->
                 _uiState.value = _uiState.value.copy(availableYears = years)
             }
         }
 
-        // Observe records for selected year + stock names
         viewModelScope.launch {
             combine(
                 _selectedYear.flatMapLatest { year ->
@@ -98,7 +95,6 @@ class DividendIncomeViewModel @Inject constructor(
             }
         }
 
-        // Observe current year total
         viewModelScope.launch {
             _selectedYear.flatMapLatest { year ->
                 incomeRepository.observeTotalByYear(year)
@@ -107,7 +103,6 @@ class DividendIncomeViewModel @Inject constructor(
             }
         }
 
-        // Observe previous year total for YoY comparison
         viewModelScope.launch {
             _selectedYear.flatMapLatest { year ->
                 incomeRepository.observeTotalByYear(year - 1)
@@ -118,14 +113,12 @@ class DividendIncomeViewModel @Inject constructor(
             }
         }
 
-        // Observe stocks for stock selector
         viewModelScope.launch {
             stocksFlow.collect { stocks ->
                 _uiState.value = _uiState.value.copy(stocks = stocks)
             }
         }
 
-        // Observe yearly totals for trend chart
         viewModelScope.launch {
             incomeRepository.observeYearlyTotals().collect { totals ->
                 _uiState.value = _uiState.value.copy(

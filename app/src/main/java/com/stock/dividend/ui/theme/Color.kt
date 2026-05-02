@@ -39,3 +39,31 @@ val FinanceGreenLight = Color(0xFFD1FAE5)
 // Surfaces
 val SurfaceBackground = Color(0xFFF8FAFC)
 val SurfaceElevated = Color(0xFFFFFFFF)
+
+// ── Glassmorphism Colors ───────────────────────────────────────────
+
+object GlassColors {
+    // Light theme glass surfaces
+    val LightSurface = Color.White.copy(alpha = 0.75f)
+    val LightSurfaceVariant = Color(0xFFF1F5F9).copy(alpha = 0.8f)
+    val LightContainer = Color(0xFFEFF6FF).copy(alpha = 0.7f)
+    val LightSecondaryContainer = Color(0xFFF1F5F9).copy(alpha = 0.7f)
+    val LightBorder = Color.White.copy(alpha = 0.6f)
+    val LightSurfaceBorder = Color.White.copy(alpha = 0.4f)
+
+    // Dark theme glass surfaces
+    val DarkSurface = Color(0xFF1E293B).copy(alpha = 0.75f)
+    val DarkSurfaceVariant = Color(0xFF1E293B).copy(alpha = 0.7f)
+    val DarkContainer = Color(0xFF1D4ED8).copy(alpha = 0.35f)
+    val DarkSecondaryContainer = Color(0xFF334155).copy(alpha = 0.5f)
+    val DarkBorder = Color.White.copy(alpha = 0.08f)
+    val DarkSurfaceBorder = Color.White.copy(alpha = 0.06f)
+
+    // Gradient background endpoints - light
+    val LightGradientStart = Color(0xFFEFF6FF)
+    val LightGradientEnd = Color(0xFFF0F4FF)
+
+    // Gradient background endpoints - dark
+    val DarkGradientStart = Color(0xFF0F172A)
+    val DarkGradientEnd = Color(0xFF1A1F35)
+}

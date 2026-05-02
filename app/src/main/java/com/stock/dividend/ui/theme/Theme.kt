@@ -1,12 +1,16 @@
 package com.stock.dividend.ui.theme
 
 import android.app.Activity
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -14,63 +18,63 @@ import androidx.core.view.WindowCompat
 private val LightColorScheme = lightColorScheme(
     primary = Blue5,
     onPrimary = Color.White,
-    primaryContainer = Blue0,
+    primaryContainer = GlassColors.LightContainer,
     onPrimaryContainer = Blue7,
 
     secondary = Slate5,
     onSecondary = Color.White,
-    secondaryContainer = Slate1,
+    secondaryContainer = GlassColors.LightSecondaryContainer,
     onSecondaryContainer = Slate7,
 
     tertiary = Gold3,
     onTertiary = Color.White,
-    tertiaryContainer = Gold1,
+    tertiaryContainer = Gold1.copy(alpha = 0.7f),
     onTertiaryContainer = Gold5,
 
     error = FinanceRed,
     onError = Color.White,
-    errorContainer = FinanceRedLight,
+    errorContainer = FinanceRedLight.copy(alpha = 0.7f),
     onErrorContainer = FinanceRed,
 
-    background = SurfaceBackground,
+    background = GlassColors.LightGradientStart,
     onBackground = Slate7,
-    surface = Color.White,
+    surface = GlassColors.LightSurface,
     onSurface = Slate7,
-    surfaceVariant = Slate1,
+    surfaceVariant = GlassColors.LightSurfaceVariant,
     onSurfaceVariant = Slate4,
-    outline = Slate3,
-    outlineVariant = Slate2,
+    outline = Slate3.copy(alpha = 0.5f),
+    outlineVariant = Slate2.copy(alpha = 0.5f),
 )
 
 private val DarkColorScheme = darkColorScheme(
     primary = Blue3,
     onPrimary = Blue7,
-    primaryContainer = Blue6,
+    primaryContainer = GlassColors.DarkContainer,
     onPrimaryContainer = Blue0,
 
     secondary = Slate3,
     onSecondary = Slate7,
-    secondaryContainer = Slate5,
+    secondaryContainer = GlassColors.DarkSecondaryContainer,
     onSecondaryContainer = Slate1,
 
     tertiary = Gold2,
     onTertiary = Gold5,
-    tertiaryContainer = Gold4,
+    tertiaryContainer = Gold4.copy(alpha = 0.5f),
     onTertiaryContainer = Gold1,
 
     error = Color(0xFFEF5350),
     onError = Color.White,
-    errorContainer = Color(0xFF5C1A1A),
+    errorContainer = Color(0xFF5C1A1A).copy(alpha = 0.7f),
     onErrorContainer = Color(0xFFFFCDD2),
 
-    background = Color(0xFF0F172A),
+    background = GlassColors.DarkGradientStart,
     onBackground = Slate1,
-    surface = Color(0xFF1E293B),
+    surface = GlassColors.DarkSurface,
     onSurface = Slate1,
-    surfaceVariant = Color(0xFF1E293B),
+    surfaceVariant = GlassColors.DarkSurfaceVariant,
     onSurfaceVariant = Slate3,
-    outline = Slate5,
-    outlineVariant = Slate6,
+    outline = Slate5.copy(alpha = 0.5f),
+    outlineVariant = Slate6.copy(alpha = 0.5f),
 )
 
 @Composable
@@ -97,4 +101,24 @@ fun StockDividendTheme(
         shapes = StockShapes,
         content = content
     )
+}
+
+@Composable
+fun GradientBackground(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val isDark = isSystemInDarkTheme()
+    val colors = if (isDark) {
+        listOf(GlassColors.DarkGradientStart, GlassColors.DarkGradientEnd)
+    } else {
+        listOf(GlassColors.LightGradientStart, GlassColors.LightGradientEnd)
+    }
+    Box(
+        modifier = modifier.background(
+            brush = Brush.verticalGradient(colors)
+        )
+    ) {
+        content()
+    }
 }

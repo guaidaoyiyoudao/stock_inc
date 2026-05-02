@@ -98,7 +98,6 @@ class HomeViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     init {
-        // Single combined flow: stocks + forecasts + FIRE goal → one emission per data change
         viewModelScope.launch {
             combine(
                 stocksFlow,
@@ -121,7 +120,6 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // Fetch quotes: triggered by stock list changes and explicit refresh
         viewModelScope.launch {
             combine(
                 stocksFlow,

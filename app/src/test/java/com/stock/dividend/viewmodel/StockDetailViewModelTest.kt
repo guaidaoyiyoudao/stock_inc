@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.StockRepository
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -33,11 +34,17 @@ class StockDetailViewModelTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         coEvery { stockRepository.observeStock(any()) } returns stockFlow
+        coEvery { stockRepository.getFirstBuyDate(any()) } returns null
     }
 
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    private fun mockDividendRepository(): DividendRepository = mockk {
+        coEvery { observeDividends(any()) } returns dividendsFlow
+        coEvery { getLatestDividend(any()) } returns null
     }
 
     @Test
@@ -47,9 +54,7 @@ class StockDetailViewModelTest {
         val viewModel = StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
             stockRepository = stockRepository,
-            dividendRepository = mockk {
-                coEvery { observeDividends("sz.000001") } returns dividendsFlow
-            }
+            dividendRepository = mockDividendRepository()
         )
 
         assertThat(viewModel.uiState.value.isLoading).isTrue()
@@ -63,9 +68,7 @@ class StockDetailViewModelTest {
         val viewModel = StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
             stockRepository = stockRepository,
-            dividendRepository = mockk {
-                coEvery { observeDividends("sz.000001") } returns dividendsFlow
-            }
+            dividendRepository = mockDividendRepository()
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -91,9 +94,7 @@ class StockDetailViewModelTest {
         val viewModel = StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
             stockRepository = stockRepository,
-            dividendRepository = mockk {
-                coEvery { observeDividends("sz.000001") } returns dividendsFlow
-            }
+            dividendRepository = mockDividendRepository()
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -109,9 +110,7 @@ class StockDetailViewModelTest {
         val viewModel = StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.999999")),
             stockRepository = stockRepository,
-            dividendRepository = mockk {
-                coEvery { observeDividends("sz.999999") } returns dividendsFlow
-            }
+            dividendRepository = mockDividendRepository()
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -123,9 +122,7 @@ class StockDetailViewModelTest {
         val viewModel = StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
             stockRepository = stockRepository,
-            dividendRepository = mockk {
-                coEvery { observeDividends("sz.000001") } returns dividendsFlow
-            }
+            dividendRepository = mockDividendRepository()
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -138,9 +135,7 @@ class StockDetailViewModelTest {
         val viewModel = StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
             stockRepository = stockRepository,
-            dividendRepository = mockk {
-                coEvery { observeDividends("sz.000001") } returns dividendsFlow
-            }
+            dividendRepository = mockDividendRepository()
         )
 
         assertThat(viewModel.uiState.value.error).isNull()
@@ -151,12 +146,11 @@ class StockDetailViewModelTest {
         dividends: List<DividendEntity> = emptyList()
     ): StockDetailViewModel {
         dividendsFlow.value = dividends
+        val repo = mockDividendRepository()
         return StockDetailViewModel(
             savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to code)),
             stockRepository = stockRepository,
-            dividendRepository = mockk {
-                coEvery { observeDividends(code) } returns dividendsFlow
-            }
+            dividendRepository = repo
         )
     }
 

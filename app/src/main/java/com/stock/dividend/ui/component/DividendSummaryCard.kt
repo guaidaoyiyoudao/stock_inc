@@ -29,6 +29,9 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
+import com.stock.dividend.ui.theme.GlassColors
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
@@ -41,23 +44,16 @@ fun DividendSummaryCard(
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF2563EB)
-        )
+            containerColor = Color(0xFF2563EB).copy(alpha = if (isSystemInDarkTheme()) 0.45f else 0.75f)
+        ),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF2563EB),
-                            Color(0xFF3B82F6),
-                            Color(0xFF60A5FA),
-                        )
-                    )
-                )
+                .background(Color.Transparent)
         ) {
             // Subtle decorative circles
             Box(
@@ -66,7 +62,7 @@ fun DividendSummaryCard(
                     .offset { IntOffset(20, -40) }
                     .size(160.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.06f))
+                    .background(Color.White.copy(alpha = 0.1f))
             )
             Box(
                 modifier = Modifier
@@ -74,7 +70,7 @@ fun DividendSummaryCard(
                     .offset { IntOffset(-30, 20) }
                     .size(100.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.04f))
+                    .background(Color.White.copy(alpha = 0.07f))
             )
 
             Column(
@@ -151,7 +147,7 @@ fun DividendSummaryCard(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(
-                                    Color.White.copy(alpha = 0.12f),
+                                    Color.White.copy(alpha = 0.15f),
                                     MaterialTheme.shapes.small
                                 )
                                 .padding(horizontal = 16.dp, vertical = 12.dp)

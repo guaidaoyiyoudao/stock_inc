@@ -20,6 +20,7 @@ import javax.inject.Inject
 data class AddStockUiState(
     val searchQuery: String = "",
     val searchResults: List<StockSearchResult> = emptyList(),
+    val selectedStock: StockSearchResult? = null,
     val isSearching: Boolean = false,
     val error: String? = null,
     val addedStock: String? = null,
@@ -110,6 +111,17 @@ class AddStockViewModel @Inject constructor(
         )
     }
 
+    fun selectStock(result: StockSearchResult) {
+        _uiState.value = _uiState.value.copy(
+            selectedStock = if (_uiState.value.selectedStock?.code == result.code) null else result
+        )
+    }
+
+    fun confirmAddStock() {
+        val result = _uiState.value.selectedStock ?: return
+        addStock(result)
+    }
+
     fun addStock(result: StockSearchResult) {
         lastAddResult = result
         val costPerShare = _uiState.value.costPerShareInput.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
@@ -159,6 +171,7 @@ class AddStockViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             searchQuery = "",
             searchResults = emptyList(),
+            selectedStock = null,
             addedStock = null,
             error = null,
             canRetry = false,

@@ -47,11 +47,11 @@ class DividendIncomeViewModelTest {
     }
 
     @Test
-    fun `init triggers auto-generation`() = runTest {
+    fun `init triggers auto-regeneration`() = runTest {
         val viewModel = DividendIncomeViewModel(incomeRepository, stockRepository)
         advanceUntilIdle()
 
-        coVerify { incomeRepository.generateMissingAutoRecords() }
+        coVerify { incomeRepository.regenerateAutoRecords() }
     }
 
     @Test

@@ -91,11 +91,6 @@ abstract class AppDatabase : RoomDatabase() {
                             "FOREIGN KEY(`stockCode`) REFERENCES `stocks`(`code`) ON DELETE CASCADE)"
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_stock_code` ON `transactions`(`stockCode`)")
-                db.execSQL(
-                    "INSERT INTO transactions (stockCode, type, shares, price, date, createdAt) " +
-                            "SELECT code, 'BUY', shares, costPerShare, date(addedAt / 1000, 'unixepoch'), addedAt " +
-                            "FROM stocks WHERE shares > 0"
-                )
             }
         }
 

@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.StockEntity
@@ -23,6 +24,7 @@ class DividendIncomeRepositoryTest {
     private val incomeRecordDao: DividendIncomeRecordDao = mockk(relaxed = true)
     private val dividendDao: DividendDao = mockk(relaxed = true)
     private val stockDao: StockDao = mockk(relaxed = true)
+    private val transactionDao: TransactionDao = mockk(relaxed = true)
 
     private lateinit var repository: DividendIncomeRepository
 
@@ -35,7 +37,7 @@ class DividendIncomeRepositoryTest {
 
     @Before
     fun setUp() {
-        repository = DividendIncomeRepository(incomeRecordDao, dividendDao, stockDao)
+        repository = DividendIncomeRepository(incomeRecordDao, dividendDao, stockDao, transactionDao)
     }
 
     // --- Auto-generation tests ---
@@ -88,7 +90,7 @@ class DividendIncomeRepositoryTest {
     }
 
     @Test
-    fun `generateMissingAutoRecords generates zero-amount record when shares is zero`() = runTest {
+    fun `generateMissingAutoRecords skips when shares is zero`() = runTest {
         val zeroShareStock = testStock.copy(shares = 0)
         val dividends = listOf(
             DividendEntity(
@@ -105,9 +107,7 @@ class DividendIncomeRepositoryTest {
 
         repository.generateMissingAutoRecords()
 
-        val recordsSlot = slot<List<DividendIncomeRecordEntity>>()
-        coVerify { incomeRecordDao.insertAll(capture(recordsSlot)) }
-        assertThat(recordsSlot.captured[0].amount).isWithin(0.001).of(0.0)
+        coVerify(exactly = 0) { incomeRecordDao.insertAll(any()) }
     }
 
     @Test

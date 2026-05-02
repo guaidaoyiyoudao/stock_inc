@@ -32,6 +32,9 @@ interface DividendIncomeRecordDao {
     @Query("DELETE FROM dividend_income_records WHERE id = :id AND source = 'manual'")
     suspend fun deleteManualRecord(id: String): Int
 
+    @Query("DELETE FROM dividend_income_records WHERE source = 'auto'")
+    suspend fun deleteAllAutoRecords(): Int
+
     @Query("SELECT DISTINCT year FROM dividend_income_records ORDER BY year DESC")
     fun observeAvailableYears(): Flow<List<Int>>
 

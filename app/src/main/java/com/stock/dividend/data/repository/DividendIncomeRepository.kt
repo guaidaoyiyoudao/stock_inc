@@ -4,6 +4,7 @@ import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.YearlyTotal
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -13,7 +14,8 @@ import javax.inject.Singleton
 class DividendIncomeRepository @Inject constructor(
     private val incomeRecordDao: DividendIncomeRecordDao,
     private val dividendDao: DividendDao,
-    private val stockDao: StockDao
+    private val stockDao: StockDao,
+    private val transactionDao: TransactionDao
 ) {
     suspend fun generateMissingAutoRecords() {
         val allDividends = dividendDao.getAllWithExDate()
@@ -26,8 +28,11 @@ class DividendIncomeRepository @Inject constructor(
             if (autoId in existingIds) continue
 
             val stock = stockDao.getByCode(dividend.stockCode) ?: continue
-            val shares = stock.shares
-            val amount = dividend.cashPerShare * shares
+
+            val heldShares = calculateHeldSharesAtDate(dividend.stockCode, exDate, stock.shares)
+            if (heldShares <= 0) continue
+
+            val amount = dividend.cashPerShare * heldShares
 
             newRecords.add(
                 DividendIncomeRecordEntity(
@@ -45,6 +50,21 @@ class DividendIncomeRepository @Inject constructor(
         if (newRecords.isNotEmpty()) {
             incomeRecordDao.insertAll(newRecords)
         }
+    }
+
+    suspend fun regenerateAutoRecords() {
+        incomeRecordDao.deleteAllAutoRecords()
+        generateMissingAutoRecords()
+    }
+
+    private suspend fun calculateHeldSharesAtDate(stockCode: String, date: String, defaultShares: Int): Int {
+        val transactions = transactionDao.getByStock(stockCode)
+        if (transactions.isEmpty()) return defaultShares
+
+        val held = transactions
+            .filter { it.date <= date }
+            .sumOf { if (it.type == "BUY") it.shares else -it.shares }
+        return held.coerceAtLeast(0)
     }
 
     fun observeByYear(year: Int): Flow<List<DividendIncomeRecordEntity>> =

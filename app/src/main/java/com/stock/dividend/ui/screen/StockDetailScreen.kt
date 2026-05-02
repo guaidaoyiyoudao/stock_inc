@@ -6,7 +6,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +58,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.ui.component.ForecastComparisonCard
+import com.stock.dividend.ui.theme.GlassColors
+import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.ForecastDetail
 import com.stock.dividend.viewmodel.StockDetailViewModel
 
@@ -100,7 +104,10 @@ fun StockDetailScreen(
             )
         }
     ) { padding ->
-        if (uiState.isLoading) {
+        GradientBackground(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (uiState.isLoading) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -215,11 +222,12 @@ fun StockDetailScreen(
                                     text = "加载更多 (${uiState.dividends.size - uiState.visibleCount} 条)",
                                     style = MaterialTheme.typography.labelLarge
                                 )
-                            }
-                        }
-                    }
                 }
             }
+        }
+        }
+    }
+}
         }
     }
 }
@@ -232,7 +240,8 @@ private fun HoldingInfoBanner(shares: Int, stockName: String) {
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
     ) {
         Row(
             modifier = Modifier
@@ -312,7 +321,8 @@ private fun ForecastMainCard(forecast: ForecastDetail, selectedPeriod: String) {
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
@@ -355,7 +365,8 @@ private fun DividendRecordCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
     ) {
         Row(
             modifier = Modifier

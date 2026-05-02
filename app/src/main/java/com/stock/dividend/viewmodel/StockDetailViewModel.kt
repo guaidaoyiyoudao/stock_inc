@@ -58,7 +58,6 @@ class StockDetailViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        // Single combined flow: stock + dividends → one recalculation per data change
         viewModelScope.launch {
             combine(stockFlow, dividendsFlow) { stock, dividends ->
                 Pair(stock, dividends)
@@ -81,6 +80,7 @@ class StockDetailViewModel @Inject constructor(
                     val selectedPeriod = _uiState.value.selectedPeriod.let { period ->
                         if (allForecasts.containsKey(period)) period else allForecasts.keys.firstOrNull() ?: "3"
                     }
+
                     _uiState.value = _uiState.value.copy(
                         stock = stock,
                         dividends = dividends,

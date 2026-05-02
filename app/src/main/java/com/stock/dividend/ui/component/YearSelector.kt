@@ -46,7 +46,8 @@ fun YearSelector(
                 shape = RoundedCornerShape(8.dp),
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.primary
+                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 )
             )
         }

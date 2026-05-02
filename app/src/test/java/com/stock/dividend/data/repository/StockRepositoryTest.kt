@@ -2,6 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
@@ -26,7 +27,8 @@ class StockRepositoryTest {
     private val api: SearchApi = mockk()
     private val quoteApi: QuoteApi = mockk()
     private val dao: StockDao = mockk(relaxed = true)
-    private val repository = StockRepository(api, quoteApi, dao)
+    private val transactionDao: TransactionDao = mockk(relaxed = true)
+    private val repository = StockRepository(api, quoteApi, dao, transactionDao)
 
     @Test
     fun `searchStocks returns filtered A-stock results`() = runTest {

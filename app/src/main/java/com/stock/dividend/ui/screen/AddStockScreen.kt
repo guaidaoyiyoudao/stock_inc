@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -60,6 +62,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.repository.StockSearchResult
+import com.stock.dividend.ui.theme.GlassColors
+import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.AddStockViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,12 +92,15 @@ fun AddStockScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
+        GradientBackground(
+            modifier = Modifier.fillMaxSize()
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(16.dp)
+            ) {
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::onSearchQueryChanged,
@@ -296,71 +303,100 @@ fun AddStockScreen(
                         items(uiState.searchResults, key = { it.code }) { result ->
                             StockSearchItem(
                                 result = result,
-                                onClick = { viewModel.addStock(result) }
+                                isSelected = uiState.selectedStock?.code == result.code,
+                                onClick = { viewModel.selectStock(result) }
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    OutlinedTextField(
-                        value = uiState.sharesInput,
-                        onValueChange = viewModel::onSharesChanged,
-                        label = { Text("持有股数（选填）") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        isError = uiState.sharesError != null,
-                        supportingText = uiState.sharesError?.let {
-                            { Text(it, color = MaterialTheme.colorScheme.error) }
-                        },
-                        shape = MaterialTheme.shapes.medium
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = uiState.costPerShareInput,
-                        onValueChange = viewModel::onCostPerShareChanged,
-                        label = { Text("每股成本价（选填）") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        isError = uiState.costPerShareError != null,
-                        supportingText = uiState.costPerShareError?.let {
-                            { Text(it, color = MaterialTheme.colorScheme.error) }
-                        },
-                        shape = MaterialTheme.shapes.medium
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showDatePicker = true }
+                    AnimatedVisibility(
+                        visible = uiState.selectedStock != null,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut()
                     ) {
-                        OutlinedTextField(
-                            value = uiState.buyDateInput,
-                            onValueChange = {},
-                            label = { Text("首次买入日期（选填）") },
-                            modifier = Modifier.fillMaxWidth(),
-                            readOnly = true,
-                            enabled = false,
-                            leadingIcon = {
-                                Icon(Icons.Default.DateRange, contentDescription = null)
-                            },
-                            singleLine = true,
-                            shape = MaterialTheme.shapes.medium,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                                disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                                disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        Column {
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = "已选择: ${uiState.selectedStock?.name ?: ""}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
                             )
-                        )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            OutlinedTextField(
+                                value = uiState.sharesInput,
+                                onValueChange = viewModel::onSharesChanged,
+                                label = { Text("持有股数（选填）") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                isError = uiState.sharesError != null,
+                                supportingText = uiState.sharesError?.let {
+                                    { Text(it, color = MaterialTheme.colorScheme.error) }
+                                },
+                                shape = MaterialTheme.shapes.medium
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            OutlinedTextField(
+                                value = uiState.costPerShareInput,
+                                onValueChange = viewModel::onCostPerShareChanged,
+                                label = { Text("每股成本价（选填）") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                isError = uiState.costPerShareError != null,
+                                supportingText = uiState.costPerShareError?.let {
+                                    { Text(it, color = MaterialTheme.colorScheme.error) }
+                                },
+                                shape = MaterialTheme.shapes.medium
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showDatePicker = true }
+                            ) {
+                                OutlinedTextField(
+                                    value = uiState.buyDateInput,
+                                    onValueChange = {},
+                                    label = { Text("首次买入日期（选填）") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    readOnly = true,
+                                    enabled = false,
+                                    leadingIcon = {
+                                        Icon(Icons.Default.DateRange, contentDescription = null)
+                                    },
+                                    singleLine = true,
+                                    shape = MaterialTheme.shapes.medium,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                        disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Button(
+                                onClick = { viewModel.confirmAddStock() },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("确认添加", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
             }
+        }
         }
     }
 
@@ -403,6 +439,7 @@ fun AddStockScreen(
 @Composable
 private fun StockSearchItem(
     result: StockSearchResult,
+    isSelected: Boolean,
     onClick: () -> Unit
 ) {
     Card(
@@ -410,10 +447,12 @@ private fun StockSearchItem(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
     ) {
         Row(
             modifier = Modifier
@@ -430,15 +469,27 @@ private fun StockSearchItem(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.primaryContainer
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = result.name.take(1),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontWeight = FontWeight.Bold
-                    )
+                    if (isSelected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    } else {
+                        Text(
+                            text = result.name.take(1),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
                 Column {
                     Text(
@@ -461,12 +512,6 @@ private fun StockSearchItem(
                         fontWeight = FontWeight.Medium
                     )
                 }
-                Text(
-                    text = "添加",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
             }
         }
     }

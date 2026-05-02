@@ -29,6 +29,9 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.isSystemInDarkTheme
+import com.stock.dividend.ui.theme.GlassColors
+import androidx.compose.foundation.BorderStroke
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -87,8 +90,9 @@ fun IncomeBreakdownChart(
     Card(
         modifier = modifier,
         shape = MaterialTheme.shapes.large,
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
     ) {
         Column(
             modifier = Modifier
@@ -139,7 +143,7 @@ fun IncomeBreakdownChart(
                     // Center hole (donut)
                     val holeRadius = radius * 0.55f
                     drawCircle(
-                        color = surfaceColor,
+                        color = surfaceColor.copy(alpha = 0.85f),
                         radius = holeRadius,
                         center = center
                     )

@@ -50,6 +50,10 @@ class DividendRepository @Inject constructor(
     fun observeDividends(stockCode: String): Flow<List<DividendEntity>> {
         return dividendDao.observeByStock(stockCode)
     }
+
+    suspend fun getLatestDividend(stockCode: String): DividendEntity? {
+        return dividendDao.getLatestByStock(stockCode)
+    }
 }
 
 internal fun Exception.toUserMessage(): String {

@@ -88,7 +88,7 @@ class HomeViewModelTest {
     @Test
     fun `undoDelete re-adds the stock`() = runTest {
         coEvery { stockRepository.removeStock("sz.000001") } returns Unit
-        coEvery { stockRepository.addStock(any(), any(), any()) } returns Result.success(Unit)
+        coEvery { stockRepository.addStock(any(), any(), any(), any()) } returns Result.success(Unit)
 
         val viewModel = HomeViewModel(stockRepository, dividendDao, fireGoalDao)
         val stock = StockEntity("sz.000001", "平安银行", "0")

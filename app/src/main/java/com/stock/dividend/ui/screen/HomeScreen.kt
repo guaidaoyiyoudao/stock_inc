@@ -70,6 +70,7 @@ import com.stock.dividend.viewmodel.AchievementUiState
 import com.stock.dividend.viewmodel.AchievementViewModel
 import com.stock.dividend.viewmodel.DividendIncomeUiState
 import com.stock.dividend.viewmodel.DividendIncomeViewModel
+import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -153,21 +154,25 @@ fun HomeScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
+        GradientBackground(
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Tab row - only show when stocks exist
-            if (uiState.stocks.isNotEmpty()) {
-                TabRow(
-                    selectedTabIndex = selectedTabIndex,
-                    indicator = { tabPositions ->
-                        SecondaryIndicator(
-                            Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex])
-                        )
-                    }
-                ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                // Tab row - only show when stocks exist
+                if (uiState.stocks.isNotEmpty()) {
+                    TabRow(
+                        selectedTabIndex = selectedTabIndex,
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                        indicator = { tabPositions ->
+                            SecondaryIndicator(
+                                Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex])
+                            )
+                        }
+                    ) {
                     Tab(
                         selected = selectedTabIndex == 0,
                         onClick = { selectedTabIndex = 0 },
@@ -290,6 +295,7 @@ fun HomeScreen(
                     ) { Text("取消") }
                 }
             )
+        }
         }
     }
 }
