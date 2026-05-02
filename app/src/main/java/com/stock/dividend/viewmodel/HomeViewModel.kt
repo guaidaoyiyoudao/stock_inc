@@ -168,15 +168,7 @@ class HomeViewModel @Inject constructor(
     fun undoDelete() {
         val deleted = _uiState.value.deletedStock ?: return
         viewModelScope.launch {
-            stockRepository.addStock(
-                com.stock.dividend.data.repository.StockSearchResult(
-                    code = deleted.code,
-                    name = deleted.name,
-                    marketCode = deleted.marketCode
-                ),
-                shares = deleted.shares,
-                costPerShare = deleted.costPerShare
-            )
+            stockRepository.restoreStock(deleted)
             _uiState.value = _uiState.value.copy(deletedStock = null)
             refreshQuotes()
         }

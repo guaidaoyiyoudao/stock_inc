@@ -99,6 +99,10 @@ class StockRepository @Inject constructor(
         stockDao.delete(code)
     }
 
+    suspend fun restoreStock(stock: StockEntity) {
+        stockDao.insert(stock)
+    }
+
     fun observeAllStocks(): Flow<List<StockEntity>> {
         return stockDao.observeAll()
     }
