@@ -9,6 +9,12 @@ import kotlinx.coroutines.flow.Flow
 
 data class YearlyTotal(val year: Int, val total: Double)
 
+data class StockYearlyIncome(
+    val stockCode: String,
+    val year: Int,
+    val total: Double
+)
+
 @Dao
 interface DividendIncomeRecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -55,4 +61,13 @@ interface DividendIncomeRecordDao {
 
     @Query("SELECT year, COALESCE(SUM(amount), 0.0) as total FROM dividend_income_records GROUP BY year ORDER BY year ASC")
     fun observeYearlyTotals(): Flow<List<YearlyTotal>>
+
+    @Query("SELECT COUNT(*) FROM dividend_income_records")
+    fun observeRecordCount(): Flow<Int>
+
+    @Query("SELECT COALESCE(MAX(amount), 0.0) FROM dividend_income_records")
+    fun observeMaxSingleIncome(): Flow<Double>
+
+    @Query("SELECT stockCode, year, SUM(amount) as total FROM dividend_income_records WHERE stockCode IS NOT NULL GROUP BY stockCode, year")
+    fun observePerStockYearlyIncome(): Flow<List<StockYearlyIncome>>
 }
