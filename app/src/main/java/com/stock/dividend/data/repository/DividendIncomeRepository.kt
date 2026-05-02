@@ -2,6 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
+import com.stock.dividend.data.local.dao.StockYearlyIncome
 import com.stock.dividend.data.local.dao.YearlyTotal
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
@@ -78,6 +79,15 @@ class DividendIncomeRepository @Inject constructor(
 
     fun observeYearlyTotals(): Flow<List<YearlyTotal>> =
         incomeRecordDao.observeYearlyTotals()
+
+    fun observeRecordCount(): Flow<Int> =
+        incomeRecordDao.observeRecordCount()
+
+    fun observeMaxSingleIncome(): Flow<Double> =
+        incomeRecordDao.observeMaxSingleIncome()
+
+    fun observePerStockYearlyIncome(): Flow<List<StockYearlyIncome>> =
+        incomeRecordDao.observePerStockYearlyIncome()
 
     suspend fun getManualCountByYear(year: Int): Int =
         incomeRecordDao.getManualCountByYear(year)
