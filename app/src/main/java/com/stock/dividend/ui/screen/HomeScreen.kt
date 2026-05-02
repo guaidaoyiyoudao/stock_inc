@@ -48,7 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.ui.component.AchievementGrid
+import com.stock.dividend.ui.component.CategorizedAchievementList
 import com.stock.dividend.ui.component.DividendSummaryCard
 import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.ui.component.FireProgressCard
@@ -112,15 +112,14 @@ fun WatchlistScreen(
                     onDeleteStock = { viewModel.deleteStock(it) },
                     onRefresh = { viewModel.refreshQuotes() },
                     modifier = Modifier.padding(padding)
-                )
-            }
+            )
         }
     }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IncomeScreen(
+    fabTrigger: Int = 0,
     viewModel: DividendIncomeViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -129,40 +128,31 @@ fun IncomeScreen(
     var correctAmount by remember { mutableStateOf("") }
     var correctNote by remember { mutableStateOf("") }
 
-    Scaffold(
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAddIncomeDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = MaterialTheme.shapes.large,
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("添加收入", style = MaterialTheme.typography.labelLarge) }
-            )
-        }
-    ) { padding ->
-        GradientBackground(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            IncomeTabContent(
-                state = state,
-                viewModel = viewModel,
-                modifier = Modifier.padding(padding)
-            )
-        }
+    LaunchedEffect(fabTrigger) {
+        if (fabTrigger > 0) showAddIncomeDialog = true
+    }
 
-        if (showAddIncomeDialog) {
-            AddIncomeDialog(
-                stocks = state.stocks,
-                onDismiss = { showAddIncomeDialog = false },
-                onConfirm = { date, amount, stockCode, note ->
-                    viewModel.addManualRecord(date, amount, stockCode, note)
-                    showAddIncomeDialog = false
-                }
-            )
-        }
+    GradientBackground(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        IncomeTabContent(
+            state = state,
+            viewModel = viewModel
+        )
+    }
 
-        if (state.showCorrectDialog) {
+    if (showAddIncomeDialog) {
+        AddIncomeDialog(
+            stocks = state.stocks,
+            onDismiss = { showAddIncomeDialog = false },
+            onConfirm = { date, amount, stockCode, note ->
+                viewModel.addManualRecord(date, amount, stockCode, note)
+                showAddIncomeDialog = false
+            }
+        )
+    }
+
+    if (state.showCorrectDialog) {
             if (!showCorrectDialog) {
                 showCorrectDialog = true
                 correctAmount = "%.2f".format(state.correctCurrentAmount)
@@ -217,7 +207,6 @@ fun IncomeScreen(
             )
         }
     }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -412,7 +401,7 @@ private fun AchievementTabContent(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        AchievementGrid(achievements = state.achievements)
+        CategorizedAchievementList(achievements = state.achievements)
     }
 }
 
