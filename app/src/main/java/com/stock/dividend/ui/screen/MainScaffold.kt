@@ -50,8 +50,10 @@ fun MainScaffold(rootNavController: NavHostController) {
     val fabOnWatchlist = currentTabRoute == "watchlist"
 
     var incomeFabTrigger by remember { mutableIntStateOf(0) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar(
                 containerColor = if (isSystemInDarkTheme())
@@ -123,6 +125,7 @@ fun MainScaffold(rootNavController: NavHostController) {
         ) {
             composable("watchlist") {
                 WatchlistScreen(
+                    snackbarHostState = snackbarHostState,
                     onAddStockClick = { tabNavController.navigate("addStock") },
                     onStockClick = { code -> tabNavController.navigate("stockDetail/$code") },
                     onFireCardClick = { rootNavController.navigate("fireGoalSetup") }

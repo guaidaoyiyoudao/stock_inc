@@ -69,13 +69,13 @@ import com.stock.dividend.viewmodel.HomeViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WatchlistScreen(
+    snackbarHostState: SnackbarHostState,
     onAddStockClick: () -> Unit,
     onStockClick: (String) -> Unit,
     onFireCardClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.deletedStock) {
         val deleted = uiState.deletedStock ?: return@LaunchedEffect
@@ -90,31 +90,25 @@ fun WatchlistScreen(
         }
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { padding ->
-        GradientBackground(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            if (uiState.stocks.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    EmptyStateView(onAddClick = onAddStockClick)
-                }
-            } else {
-                WatchlistContent(
-                    uiState = uiState,
-                    onStockClick = onStockClick,
-                    onFireCardClick = onFireCardClick,
-                    onDeleteStock = { viewModel.deleteStock(it) },
-                    onRefresh = { viewModel.refreshQuotes() },
-                    modifier = Modifier.padding(padding)
-                )
+    GradientBackground(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        if (uiState.stocks.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                EmptyStateView(onAddClick = onAddStockClick)
             }
+        } else {
+            WatchlistContent(
+                uiState = uiState,
+                onStockClick = onStockClick,
+                onFireCardClick = onFireCardClick,
+                onDeleteStock = { viewModel.deleteStock(it) },
+                onRefresh = { viewModel.refreshQuotes() }
+            )
         }
     }
 }
