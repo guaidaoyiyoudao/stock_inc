@@ -1,11 +1,16 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -19,14 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import com.stock.dividend.ui.theme.GlassColors
-import androidx.compose.ui.unit.dp
 import com.stock.dividend.viewmodel.AchievementCategory
 import com.stock.dividend.viewmodel.AchievementItem
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -99,7 +100,7 @@ fun AchievementCard(
 }
 
 @Composable
-fun CategorySection(
+fun CategoryHeader(
     category: AchievementCategory,
     achievements: List<AchievementItem>,
     modifier: Modifier = Modifier
@@ -139,16 +140,23 @@ fun CategorySection(
         )
 
         Spacer(modifier = Modifier.height(8.dp))
+    }
+}
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.height(((achievements.size + 1) / 2) * 150.dp)
-        ) {
-            items(items = achievements, key = { it.def.id }) { item ->
-                AchievementCard(item = item)
-            }
+@Composable
+fun CategoryGrid(
+    achievements: List<AchievementItem>,
+    modifier: Modifier = Modifier
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        userScrollEnabled = false,
+        modifier = modifier.height(150.dp * ((achievements.size + 1) / 2))
+    ) {
+        items(items = achievements, key = { it.def.id }) { item ->
+            AchievementCard(item = item)
         }
     }
 }
@@ -158,17 +166,22 @@ fun CategorizedAchievementList(
     achievements: List<AchievementItem>,
     modifier: Modifier = Modifier
 ) {
-    Column(
+    LazyColumn(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         for (category in AchievementCategory.entries) {
             val categoryAchievements = achievements.filter { it.def.category == category }
             if (categoryAchievements.isNotEmpty()) {
-                CategorySection(
-                    category = category,
-                    achievements = categoryAchievements
-                )
+                item(key = "header_${category.id}") {
+                    CategoryHeader(
+                        category = category,
+                        achievements = categoryAchievements
+                    )
+                }
+                item(key = "grid_${category.id}") {
+                    CategoryGrid(achievements = categoryAchievements)
+                }
             }
         }
     }
