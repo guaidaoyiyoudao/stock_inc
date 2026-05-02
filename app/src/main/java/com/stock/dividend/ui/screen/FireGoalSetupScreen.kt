@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.theme.GlassColors
 import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.FireGoalViewModel
@@ -53,18 +54,9 @@ fun FireGoalSetupScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "FIRE 目标",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+            CompactTopAppBar(
+                title = "FIRE 目标",
+                onBack = onBack,
                 actions = {
                     TextButton(
                         onClick = viewModel::saveGoal,

@@ -63,6 +63,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.repository.StockSearchResult
+import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.theme.GlassColors
 import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.AddStockViewModel
@@ -79,18 +80,9 @@ fun AddStockScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "添加股票",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                }
+            CompactTopAppBar(
+                title = "添加股票",
+                onBack = onBack
             )
         }
     ) { padding ->

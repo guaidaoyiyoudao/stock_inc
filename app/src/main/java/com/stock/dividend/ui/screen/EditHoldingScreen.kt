@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.theme.GlassColors
 import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.EditHoldingViewModel
@@ -69,18 +70,9 @@ fun EditHoldingScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "编辑持仓",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
+            CompactTopAppBar(
+                title = "编辑持仓",
+                onBack = onBack,
                 actions = {
                     TextButton(
                         onClick = {
