@@ -5,8 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.FireGoalDao
+import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -46,7 +48,8 @@ data class HomeUiState(
     val fireProgress: Float? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
-    val deletedStock: StockEntity? = null
+    val deletedStock: StockEntity? = null,
+    val deletedTransactions: List<TransactionEntity> = emptyList()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -54,7 +57,8 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val stockRepository: StockRepository,
     private val dividendDao: DividendDao,
-    private val fireGoalDao: FireGoalDao
+    private val fireGoalDao: FireGoalDao,
+    private val transactionDao: TransactionDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -160,8 +164,12 @@ class HomeViewModel @Inject constructor(
 
     fun deleteStock(stock: StockEntity) {
         viewModelScope.launch {
+            val transactions = transactionDao.getByStock(stock.code)
             stockRepository.removeStock(stock.code)
-            _uiState.value = _uiState.value.copy(deletedStock = stock)
+            _uiState.value = _uiState.value.copy(
+                deletedStock = stock,
+                deletedTransactions = transactions
+            )
         }
     }
 
@@ -169,13 +177,22 @@ class HomeViewModel @Inject constructor(
         val deleted = _uiState.value.deletedStock ?: return
         viewModelScope.launch {
             stockRepository.restoreStock(deleted)
-            _uiState.value = _uiState.value.copy(deletedStock = null)
+            _uiState.value.deletedTransactions.forEach { transaction ->
+                transactionDao.insert(transaction)
+            }
+            _uiState.value = _uiState.value.copy(
+                deletedStock = null,
+                deletedTransactions = emptyList()
+            )
             refreshQuotes()
         }
     }
 
     fun clearDeleted() {
-        _uiState.value = _uiState.value.copy(deletedStock = null)
+        _uiState.value = _uiState.value.copy(
+            deletedStock = null,
+            deletedTransactions = emptyList()
+        )
     }
 
     fun refreshQuotes() {
