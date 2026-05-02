@@ -550,6 +550,7 @@ private fun SwipeToDismissStockItem(
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
+            val isSwiping = dismissState.currentValue != SwipeToDismissBoxValue.Settled
             val color by animateColorAsState(
                 when (dismissState.targetValue) {
                     SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
@@ -562,11 +563,13 @@ private fun SwipeToDismissStockItem(
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                Text(
-                    text = "删除",
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.labelSmall
-                )
+                if (isSwiping) {
+                    Text(
+                        text = "删除",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
         },
         enableDismissFromStartToEnd = false
