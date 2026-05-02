@@ -45,8 +45,8 @@ fun MainScaffold(rootNavController: NavHostController) {
     val selectedTabIndex = bottomNavItems.indexOfFirst { it.route == currentTabRoute }.coerceAtLeast(0)
 
     val fabRoute = currentTabRoute
-    val fabVisible = fabRoute in listOf("watchlist", "income")
-    val fabLabel = if (fabRoute == "watchlist") "添加股票" else "添加收入"
+    val fabVisible = fabRoute == "watchlist"
+    val fabLabel = "添加股票"
 
     Scaffold(
         bottomBar = {
@@ -91,11 +91,7 @@ fun MainScaffold(rootNavController: NavHostController) {
                 exit = fadeOut()
             ) {
                 ExtendedFloatingActionButton(
-                    onClick = {
-                        if (currentTabRoute == "watchlist") {
-                            tabNavController.navigate("addStock")
-                        }
-                    },
+                    onClick = { tabNavController.navigate("addStock") },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = MaterialTheme.shapes.large,
