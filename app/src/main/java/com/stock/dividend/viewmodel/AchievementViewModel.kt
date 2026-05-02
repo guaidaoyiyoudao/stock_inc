@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.AchievementRepository
 import com.stock.dividend.data.repository.DividendIncomeRepository
+import com.stock.dividend.data.repository.FireGoalRepository
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +37,8 @@ data class AchievementUiState(
 class AchievementViewModel @Inject constructor(
     private val achievementRepository: AchievementRepository,
     stockRepository: StockRepository,
-    incomeRepository: DividendIncomeRepository
+    incomeRepository: DividendIncomeRepository,
+    private val fireGoalRepository: FireGoalRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(AchievementUiState())
     val uiState: StateFlow<AchievementUiState> = _uiState.asStateFlow()
@@ -49,13 +51,25 @@ class AchievementViewModel @Inject constructor(
             combine(
                 stocksFlow,
                 incomeRepository.observeYearlyTotals(),
-                achievementRepository.observeAll()
-            ) { stocks, yearlyTotals, unlockedEntities ->
+                achievementRepository.observeAll(),
+                incomeRepository.observeRecordCount(),
+                incomeRepository.observeMaxSingleIncome(),
+                incomeRepository.observePerStockYearlyIncome(),
+                fireGoalRepository.observeGoal(),
+                incomeRepository.observeForecastTotal()
+            ) { stocks, yearlyTotals, unlockedEntities, recordCount, maxSingle, perStockIncome, fireGoal, forecastTotal ->
                 val hasIncome = yearlyTotals.isNotEmpty()
                 val ctx = AchievementChecker.CheckContext(
                     stocks = stocks,
                     yearlyTotals = yearlyTotals.associate { it.year to it.total },
-                    hasAnyIncomeRecord = hasIncome
+                    hasAnyIncomeRecord = hasIncome,
+                    incomeRecordCount = recordCount,
+                    maxSingleIncome = maxSingle,
+                    perStockYearlyIncome = perStockIncome
+                        .groupBy { it.stockCode }
+                        .mapValues { (_, items) -> items.associate { it.year to it.total } },
+                    fireGoal = fireGoal,
+                    forecastTotal = forecastTotal
                 )
                 val qualified = AchievementChecker.check(ctx)
 
