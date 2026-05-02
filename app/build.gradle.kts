@@ -41,7 +41,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            val storeFilePath = System.getenv("KEYSTORE_FILE")
+            if (storeFilePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
