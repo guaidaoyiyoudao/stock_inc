@@ -30,10 +30,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults.SecondaryIndicator
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -75,28 +71,15 @@ import com.stock.dividend.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(
+fun WatchlistScreen(
     onAddStockClick: () -> Unit,
     onStockClick: (String) -> Unit,
     onFireCardClick: () -> Unit = {},
-    viewModel: HomeViewModel = hiltViewModel(),
-    incomeViewModel: DividendIncomeViewModel = hiltViewModel(),
-    achievementViewModel: AchievementViewModel = hiltViewModel()
+    viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val incomeState by incomeViewModel.uiState.collectAsStateWithLifecycle()
-    val achievementState by achievementViewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-    var selectedTabIndex by remember { mutableStateOf(0) }
-
-    // Dialog state
-    var showAddIncomeDialog by remember { mutableStateOf(false) }
-    var showCorrectDialog by remember { mutableStateOf(false) }
-    var correctAmount by remember { mutableStateOf("") }
-    var correctNote by remember { mutableStateOf("") }
-    var addAmount by remember { mutableStateOf("") }
-    var addNote by remember { mutableStateOf("") }
 
     LaunchedEffect(uiState.deletedStock) {
         val deleted = uiState.deletedStock ?: return@LaunchedEffect
@@ -116,7 +99,7 @@ fun HomeScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "我的股息",
+                        text = "我的持仓",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -124,133 +107,99 @@ fun HomeScreen(
                 scrollBehavior = scrollBehavior
             )
         },
-        floatingActionButton = {
-            AnimatedVisibility(
-                visible = when (selectedTabIndex) {
-                    0 -> uiState.stocks.isNotEmpty()
-                    1 -> true
-                    else -> false
-                },
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        if (selectedTabIndex == 0) onAddStockClick()
-                        else showAddIncomeDialog = true
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = MaterialTheme.shapes.large,
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = {
-                        Text(
-                            if (selectedTabIndex == 0) "添加股票" else "添加收入",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                )
-            }
-        },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         GradientBackground(
             modifier = Modifier.fillMaxSize()
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                // Tab row - only show when stocks exist
-                if (uiState.stocks.isNotEmpty()) {
-                    TabRow(
-                        selectedTabIndex = selectedTabIndex,
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                        indicator = { tabPositions ->
-                            SecondaryIndicator(
-                                Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex])
-                            )
-                        }
-                    ) {
-                    Tab(
-                        selected = selectedTabIndex == 0,
-                        onClick = { selectedTabIndex = 0 },
-                        text = { Text("持仓列表", style = MaterialTheme.typography.labelLarge) }
-                    )
-                    Tab(
-                        selected = selectedTabIndex == 1,
-                        onClick = { selectedTabIndex = 1 },
-                        text = { Text("股息收入", style = MaterialTheme.typography.labelLarge) }
-                    )
-                    Tab(
-                        selected = selectedTabIndex == 2,
-                        onClick = { selectedTabIndex = 2 },
-                        text = { Text("成就", style = MaterialTheme.typography.labelLarge) }
-                    )
+            if (uiState.stocks.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    EmptyStateView(onAddClick = onAddStockClick)
                 }
-            }
-
-            when (selectedTabIndex) {
-                0 -> {
-                    if (uiState.stocks.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            EmptyStateView(onAddClick = onAddStockClick)
-                        }
-                    } else {
-                        WatchlistContent(
-                            uiState = uiState,
-                            onStockClick = onStockClick,
-                            onFireCardClick = onFireCardClick,
-                            onDeleteStock = { viewModel.deleteStock(it) },
-                            onRefresh = { viewModel.refreshQuotes() },
-                            scrollBehavior = scrollBehavior
-                        )
-                    }
-                }
-                1 -> {
-                    IncomeTabContent(
-                        state = incomeState,
-                        viewModel = incomeViewModel
-                    )
-                }
-                2 -> {
-                    AchievementTabContent(state = achievementState)
-                }
+            } else {
+                WatchlistContent(
+                    uiState = uiState,
+                    onStockClick = onStockClick,
+                    onFireCardClick = onFireCardClick,
+                    onDeleteStock = { viewModel.deleteStock(it) },
+                    onRefresh = { viewModel.refreshQuotes() },
+                    scrollBehavior = scrollBehavior,
+                    modifier = Modifier.padding(padding)
+                )
             }
         }
+    }
+}
 
-        // Add Income Dialog
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun IncomeScreen(
+    viewModel: DividendIncomeViewModel = hiltViewModel()
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var showAddIncomeDialog by remember { mutableStateOf(false) }
+    var showCorrectDialog by remember { mutableStateOf(false) }
+    var correctAmount by remember { mutableStateOf("") }
+    var correctNote by remember { mutableStateOf("") }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "股息收入",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { showAddIncomeDialog = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = MaterialTheme.shapes.large,
+                icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                text = { Text("添加收入", style = MaterialTheme.typography.labelLarge) }
+            )
+        }
+    ) { padding ->
+        GradientBackground(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            IncomeTabContent(
+                state = state,
+                viewModel = viewModel,
+                modifier = Modifier.padding(padding)
+            )
+        }
+
         if (showAddIncomeDialog) {
             AddIncomeDialog(
-                stocks = incomeState.stocks,
-                onDismiss = {
-                    showAddIncomeDialog = false
-                    addAmount = ""
-                    addNote = ""
-                },
+                stocks = state.stocks,
+                onDismiss = { showAddIncomeDialog = false },
                 onConfirm = { date, amount, stockCode, note ->
-                    incomeViewModel.addManualRecord(date, amount, stockCode, note)
+                    viewModel.addManualRecord(date, amount, stockCode, note)
                     showAddIncomeDialog = false
-                    addAmount = ""
-                    addNote = ""
                 }
             )
         }
 
-        // Correct Record Dialog
-        if (incomeState.showCorrectDialog) {
+        if (state.showCorrectDialog) {
             if (!showCorrectDialog) {
                 showCorrectDialog = true
-                correctAmount = "%.2f".format(incomeState.correctCurrentAmount)
+                correctAmount = "%.2f".format(state.correctCurrentAmount)
                 correctNote = ""
             }
             AlertDialog(
                 onDismissRequest = {
-                    incomeViewModel.dismissCorrectDialog()
+                    viewModel.dismissCorrectDialog()
                     showCorrectDialog = false
                 },
                 title = { Text("修正金额") },
@@ -277,8 +226,8 @@ fun HomeScreen(
                     TextButton(
                         onClick = {
                             val amount = correctAmount.toDoubleOrNull() ?: return@TextButton
-                            incomeViewModel.correctRecord(
-                                incomeState.correctTargetId,
+                            viewModel.correctRecord(
+                                state.correctTargetId,
                                 amount,
                                 correctNote.ifBlank { null }
                             )
@@ -289,13 +238,43 @@ fun HomeScreen(
                 dismissButton = {
                     TextButton(
                         onClick = {
-                            incomeViewModel.dismissCorrectDialog()
+                            viewModel.dismissCorrectDialog()
                             showCorrectDialog = false
                         }
                     ) { Text("取消") }
                 }
             )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AchievementScreen(
+    viewModel: AchievementViewModel = hiltViewModel()
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "成就",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            )
+        }
+    ) { padding ->
+        GradientBackground(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            AchievementTabContent(
+                state = state,
+                modifier = Modifier.padding(padding)
+            )
         }
     }
 }
@@ -308,12 +287,13 @@ private fun WatchlistContent(
     onFireCardClick: () -> Unit,
     onDeleteStock: (StockEntity) -> Unit,
     onRefresh: () -> Unit,
-    scrollBehavior: TopAppBarScrollBehavior?
+    scrollBehavior: TopAppBarScrollBehavior?,
+    modifier: Modifier = Modifier
 ) {
     PullToRefreshBox(
         isRefreshing = uiState.isLoading,
         onRefresh = onRefresh,
-        modifier = Modifier.nestedScroll(scrollBehavior?.nestedScrollConnection!!)
+        modifier = modifier.nestedScroll(scrollBehavior?.nestedScrollConnection!!)
     ) {
         LazyColumn(
             contentPadding = PaddingValues(
@@ -369,10 +349,10 @@ private fun WatchlistContent(
 @Composable
 private fun IncomeTabContent(
     state: DividendIncomeUiState,
-    viewModel: DividendIncomeViewModel
+    viewModel: DividendIncomeViewModel,
+    modifier: Modifier = Modifier
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Year selector
+    Column(modifier = modifier.fillMaxSize()) {
         YearSelector(
             years = state.availableYears.ifEmpty { listOf(state.selectedYear) },
             selectedYear = state.selectedYear,
@@ -382,7 +362,6 @@ private fun IncomeTabContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Trend chart
         IncomeTrendChart(
             yearlyTotals = state.yearlyTotals,
             selectedYear = state.selectedYear,
@@ -392,7 +371,6 @@ private fun IncomeTabContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Summary card
         IncomeSummaryCard(
             year = state.selectedYear,
             totalAmount = state.yearlyTotal,
@@ -404,7 +382,6 @@ private fun IncomeTabContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Breakdown chart
         IncomeBreakdownChart(
             records = state.records,
             modifier = Modifier.padding(horizontal = 16.dp)
@@ -412,7 +389,6 @@ private fun IncomeTabContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Timeline list or empty state
         if (state.records.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -463,10 +439,11 @@ private fun IncomeTabContent(
 
 @Composable
 private fun AchievementTabContent(
-    state: AchievementUiState
+    state: AchievementUiState,
+    modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
