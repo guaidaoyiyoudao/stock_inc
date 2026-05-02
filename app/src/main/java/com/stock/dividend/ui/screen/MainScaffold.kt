@@ -54,7 +54,6 @@ fun MainScaffold(rootNavController: NavHostController) {
     Scaffold(
         bottomBar = {
             NavigationBar(
-                modifier = Modifier.height(64.dp),
                 containerColor = if (isSystemInDarkTheme())
                     GlassColors.DarkSurface else GlassColors.LightSurface,
                 tonalElevation = 0.dp
