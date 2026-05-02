@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.ui.component.AchievementGrid
 import com.stock.dividend.ui.component.DividendSummaryCard
 import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.ui.component.FireProgressCard
@@ -65,6 +66,8 @@ import com.stock.dividend.ui.component.IncomeTimelineCard
 import com.stock.dividend.ui.component.IncomeTrendChart
 import com.stock.dividend.ui.component.StockCard
 import com.stock.dividend.ui.component.YearSelector
+import com.stock.dividend.viewmodel.AchievementUiState
+import com.stock.dividend.viewmodel.AchievementViewModel
 import com.stock.dividend.viewmodel.DividendIncomeUiState
 import com.stock.dividend.viewmodel.DividendIncomeViewModel
 import com.stock.dividend.viewmodel.HomeViewModel
@@ -76,10 +79,12 @@ fun HomeScreen(
     onStockClick: (String) -> Unit,
     onFireCardClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
-    incomeViewModel: DividendIncomeViewModel = hiltViewModel()
+    incomeViewModel: DividendIncomeViewModel = hiltViewModel(),
+    achievementViewModel: AchievementViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val incomeState by incomeViewModel.uiState.collectAsStateWithLifecycle()
+    val achievementState by achievementViewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var selectedTabIndex by remember { mutableStateOf(0) }
@@ -173,6 +178,11 @@ fun HomeScreen(
                         onClick = { selectedTabIndex = 1 },
                         text = { Text("股息收入", style = MaterialTheme.typography.labelLarge) }
                     )
+                    Tab(
+                        selected = selectedTabIndex == 2,
+                        onClick = { selectedTabIndex = 2 },
+                        text = { Text("成就", style = MaterialTheme.typography.labelLarge) }
+                    )
                 }
             }
 
@@ -201,6 +211,9 @@ fun HomeScreen(
                         state = incomeState,
                         viewModel = incomeViewModel
                     )
+                }
+                2 -> {
+                    AchievementTabContent(state = achievementState)
                 }
             }
         }
@@ -439,6 +452,26 @@ private fun IncomeTabContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AchievementTabContent(
+    state: AchievementUiState
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = "${state.unlockedCount}/${state.totalCount} 已达成",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        AchievementGrid(achievements = state.achievements)
     }
 }
 
