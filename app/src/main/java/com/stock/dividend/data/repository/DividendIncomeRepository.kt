@@ -8,6 +8,11 @@ import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -88,6 +93,25 @@ class DividendIncomeRepository @Inject constructor(
 
     fun observePerStockYearlyIncome(): Flow<List<StockYearlyIncome>> =
         incomeRecordDao.observePerStockYearlyIncome()
+
+    fun observeForecastTotal(): Flow<Double> =
+        stockDao.observeAll().flatMapLatest { stocks ->
+            val activeStocks = stocks.filter { it.shares > 0 }
+            if (activeStocks.isEmpty()) {
+                flowOf(0.0)
+            } else {
+                combine(
+                    activeStocks.map { stock ->
+                        dividendDao.observeByStock(stock.code).map { dividends ->
+                            val result = ForecastCalculator.calculateForecastIncome(
+                                dividends, stock.shares, stock.yieldPeriod.toIntOrNull() ?: 3
+                            )
+                            result?.avgCashPerShare?.let { it * stock.shares } ?: 0.0
+                        }
+                    }
+                ) { incomes -> incomes.sum() }
+            }
+        }.distinctUntilChanged()
 
     suspend fun getManualCountByYear(year: Int): Int =
         incomeRecordDao.getManualCountByYear(year)
