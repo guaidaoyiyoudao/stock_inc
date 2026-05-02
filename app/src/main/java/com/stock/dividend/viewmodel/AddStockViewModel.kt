@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import javax.inject.Inject
 
 data class AddStockUiState(
@@ -27,7 +28,9 @@ data class AddStockUiState(
     val sharesInput: String = "",
     val sharesError: String? = null,
     val costPerShareInput: String = "",
-    val costPerShareError: String? = null
+    val costPerShareError: String? = null,
+    val buyDateInput: String = LocalDate.now().toString(),
+    val buyDateError: String? = null
 )
 
 @OptIn(FlowPreview::class)
@@ -92,11 +95,27 @@ class AddStockViewModel @Inject constructor(
         )
     }
 
+    fun onBuyDateChanged(input: String) {
+        val error = if (input.isNotBlank()) {
+            try {
+                LocalDate.parse(input)
+                null
+            } catch (e: Exception) {
+                "日期格式无效 (YYYY-MM-DD)"
+            }
+        } else null
+        _uiState.value = _uiState.value.copy(
+            buyDateInput = input,
+            buyDateError = error
+        )
+    }
+
     fun addStock(result: StockSearchResult) {
         lastAddResult = result
         val costPerShare = _uiState.value.costPerShareInput.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+        val buyDate = _uiState.value.buyDateInput
         viewModelScope.launch {
-            stockRepository.addStock(result, _uiState.value.shares, costPerShare)
+            stockRepository.addStock(result, _uiState.value.shares, costPerShare, buyDate)
                 .onSuccess {
                     val securityCode = result.code.substringAfter(".")
                     dividendRepository.fetchAndCacheDividends(result.code, securityCode)
@@ -134,6 +153,24 @@ class AddStockViewModel @Inject constructor(
     fun retryAddStock() {
         val result = lastAddResult ?: return
         addStock(result)
+    }
+
+    fun resetForNewAdd() {
+        _uiState.value = _uiState.value.copy(
+            searchQuery = "",
+            searchResults = emptyList(),
+            addedStock = null,
+            error = null,
+            canRetry = false,
+            sharesInput = "",
+            shares = 0,
+            sharesError = null,
+            costPerShareInput = "",
+            costPerShareError = null,
+            buyDateInput = LocalDate.now().toString(),
+            buyDateError = null
+        )
+        searchQuery.value = ""
     }
 
     private suspend fun performSearch(query: String) {
