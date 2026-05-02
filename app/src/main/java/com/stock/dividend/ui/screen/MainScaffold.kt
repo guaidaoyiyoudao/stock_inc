@@ -54,7 +54,7 @@ fun MainScaffold(rootNavController: NavHostController) {
     Scaffold(
         bottomBar = {
             NavigationBar(
-                modifier = Modifier.height(56.dp),
+                modifier = Modifier.height(64.dp),
                 containerColor = if (isSystemInDarkTheme())
                     GlassColors.DarkSurface else GlassColors.LightSurface,
                 tonalElevation = 0.dp
@@ -80,7 +80,7 @@ fun MainScaffold(rootNavController: NavHostController) {
                                 modifier = Modifier.size(20.dp)
                             )
                         },
-                        label = { Text(item.label) },
+                        label = { Text(item.label, style = MaterialTheme.typography.labelSmall) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
                             selectedTextColor = MaterialTheme.colorScheme.primary,
