@@ -3,6 +3,10 @@ package com.stock.dividend.viewmodel
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.local.dao.StockYearlyIncome
+import com.stock.dividend.data.local.dao.YearlyTotal
+import com.stock.dividend.data.local.entity.AchievementEntity
+import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.AchievementRepository
 import com.stock.dividend.data.repository.DividendIncomeRepository
@@ -57,7 +61,17 @@ class AchievementViewModel @Inject constructor(
                 incomeRepository.observePerStockYearlyIncome(),
                 fireGoalRepository.observeGoal(),
                 incomeRepository.observeForecastTotal()
-            ) { stocks, yearlyTotals, unlockedEntities, recordCount, maxSingle, perStockIncome, fireGoal, forecastTotal ->
+            ) { args ->
+                @Suppress("UNCHECKED_CAST")
+                val stocks = args[0] as List<StockEntity>
+                val yearlyTotals = args[1] as List<YearlyTotal>
+                val unlockedEntities = args[2] as List<AchievementEntity>
+                val recordCount = args[3] as Int
+                val maxSingle = args[4] as Double
+                val perStockIncome = args[5] as List<StockYearlyIncome>
+                val fireGoal = args[6] as FireGoalEntity?
+                val forecastTotal = args[7] as Double
+
                 val hasIncome = yearlyTotals.isNotEmpty()
                 val ctx = AchievementChecker.CheckContext(
                     stocks = stocks,
