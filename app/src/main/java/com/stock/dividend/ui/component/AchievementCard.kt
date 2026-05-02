@@ -23,7 +23,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.stock.dividend.ui.theme.GlassColors
 import androidx.compose.ui.unit.dp
+import com.stock.dividend.viewmodel.AchievementCategory
 import com.stock.dividend.viewmodel.AchievementItem
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -96,18 +99,77 @@ fun AchievementCard(
 }
 
 @Composable
-fun AchievementGrid(
+fun CategorySection(
+    category: AchievementCategory,
     achievements: List<AchievementItem>,
     modifier: Modifier = Modifier
 ) {
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
+    val unlockedCount = achievements.count { it.unlocked }
+
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = category.icon,
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = category.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = "已解锁 $unlockedCount/${achievements.size}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = category.description,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.height(((achievements.size + 1) / 2) * 150.dp)
+        ) {
+            items(items = achievements, key = { it.def.id }) { item ->
+                AchievementCard(item = item)
+            }
+        }
+    }
+}
+
+@Composable
+fun CategorizedAchievementList(
+    achievements: List<AchievementItem>,
+    modifier: Modifier = Modifier
+) {
+    Column(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        items(items = achievements, key = { it.def.id }) { item ->
-            AchievementCard(item = item)
+        for (category in AchievementCategory.entries) {
+            val categoryAchievements = achievements.filter { it.def.category == category }
+            if (categoryAchievements.isNotEmpty()) {
+                CategorySection(
+                    category = category,
+                    achievements = categoryAchievements
+                )
+            }
         }
     }
 }
