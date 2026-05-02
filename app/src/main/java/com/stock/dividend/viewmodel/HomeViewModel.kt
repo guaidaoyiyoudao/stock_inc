@@ -178,6 +178,7 @@ class HomeViewModel @Inject constructor(
                 costPerShare = deleted.costPerShare
             )
             _uiState.value = _uiState.value.copy(deletedStock = null)
+            refreshQuotes()
         }
     }
 
