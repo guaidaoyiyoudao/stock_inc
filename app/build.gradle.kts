@@ -48,6 +48,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -100,6 +101,9 @@ dependencies {
     // Charts
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)
+
+    // Desugaring
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
 
     // Testing
     testImplementation(libs.junit)
