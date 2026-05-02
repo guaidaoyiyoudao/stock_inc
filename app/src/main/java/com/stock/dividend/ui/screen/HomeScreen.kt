@@ -32,8 +32,6 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
@@ -46,8 +44,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.TopAppBarScrollBehavior
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -79,7 +75,6 @@ fun WatchlistScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(uiState.deletedStock) {
         val deleted = uiState.deletedStock ?: return@LaunchedEffect
@@ -95,18 +90,6 @@ fun WatchlistScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "我的持仓",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                scrollBehavior = scrollBehavior
-            )
-        },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         GradientBackground(
@@ -128,7 +111,6 @@ fun WatchlistScreen(
                     onFireCardClick = onFireCardClick,
                     onDeleteStock = { viewModel.deleteStock(it) },
                     onRefresh = { viewModel.refreshQuotes() },
-                    scrollBehavior = scrollBehavior,
                     modifier = Modifier.padding(padding)
                 )
             }
@@ -148,17 +130,6 @@ fun IncomeScreen(
     var correctNote by remember { mutableStateOf("") }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "股息收入",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            )
-        },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { showAddIncomeDialog = true },
@@ -255,19 +226,7 @@ fun AchievementScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "成就",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            )
-        }
-    ) { padding ->
+    Scaffold { padding ->
         GradientBackground(
             modifier = Modifier.fillMaxSize()
         ) {
@@ -287,13 +246,12 @@ private fun WatchlistContent(
     onFireCardClick: () -> Unit,
     onDeleteStock: (StockEntity) -> Unit,
     onRefresh: () -> Unit,
-    scrollBehavior: TopAppBarScrollBehavior?,
     modifier: Modifier = Modifier
 ) {
     PullToRefreshBox(
         isRefreshing = uiState.isLoading,
         onRefresh = onRefresh,
-        modifier = modifier.nestedScroll(scrollBehavior?.nestedScrollConnection!!)
+        modifier = modifier
     ) {
         LazyColumn(
             contentPadding = PaddingValues(
