@@ -1,7 +1,5 @@
 package com.stock.dividend.ui.component
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import com.stock.dividend.ui.theme.GlassColors
 import com.stock.dividend.viewmodel.AchievementCategory
 import com.stock.dividend.viewmodel.AchievementItem
 import androidx.compose.ui.unit.dp
@@ -42,14 +39,11 @@ fun AchievementCard(
     Card(
         modifier = modifier.alpha(alpha),
         shape = MaterialTheme.shapes.large,
-        elevation = CardDefaults.cardElevation(defaultElevation = if (item.unlocked) 2.dp else 0.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (item.unlocked) {
-                if (isSystemInDarkTheme()) GlassColors.DarkContainer
-                else GlassColors.LightContainer
+                MaterialTheme.colorScheme.primaryContainer
             } else MaterialTheme.colorScheme.surfaceVariant
-        ),
-        border = if (item.unlocked) BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder) else null
+        )
     ) {
         Column(
             modifier = Modifier

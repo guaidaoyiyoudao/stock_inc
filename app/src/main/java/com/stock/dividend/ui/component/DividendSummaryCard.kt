@@ -29,9 +29,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
-import com.stock.dividend.ui.theme.GlassColors
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 
@@ -44,11 +41,9 @@ fun DividendSummaryCard(
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF2563EB).copy(alpha = if (isSystemInDarkTheme()) 0.45f else 0.75f)
-        ),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+            containerColor = Color(0xFF2563EB).copy(alpha = 0.75f)
+        )
     ) {
         Box(
             modifier = Modifier

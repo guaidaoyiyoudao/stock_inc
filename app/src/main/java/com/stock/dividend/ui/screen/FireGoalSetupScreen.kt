@@ -1,8 +1,6 @@
 package com.stock.dividend.ui.screen
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,8 +32,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.ui.component.CompactTopAppBar
-import com.stock.dividend.ui.theme.GlassColors
-import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.FireGoalViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,23 +67,18 @@ fun FireGoalSetupScreen(
             )
         }
     ) { padding ->
-        GradientBackground(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
+        Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(16.dp)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
@@ -133,8 +124,7 @@ fun FireGoalSetupScreen(
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
-                    ),
-                    border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
+                    )
                 ) {
                     TextButton(
                         onClick = viewModel::showDeleteDialog,
@@ -150,7 +140,6 @@ fun FireGoalSetupScreen(
                     }
                 }
             }
-        }
         }
     }
 

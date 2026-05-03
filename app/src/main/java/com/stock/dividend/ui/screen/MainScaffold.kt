@@ -3,7 +3,6 @@ package com.stock.dividend.ui.screen
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,7 +23,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.stock.dividend.ui.theme.GlassColors
 
 private data class BottomNavItem(
     val route: String,
@@ -56,8 +54,6 @@ fun MainScaffold(rootNavController: NavHostController) {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar(
-                containerColor = if (isSystemInDarkTheme())
-                    GlassColors.DarkSurface else GlassColors.LightSurface,
                 tonalElevation = 0.dp
             ) {
                 bottomNavItems.forEachIndexed { index, item ->

@@ -1,8 +1,6 @@
 package com.stock.dividend.ui.screen
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
@@ -55,8 +53,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.ui.component.CompactTopAppBar
-import com.stock.dividend.ui.theme.GlassColors
-import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.EditHoldingViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,10 +85,7 @@ fun EditHoldingScreen(
             )
         }
     ) { padding ->
-        GradientBackground(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            LazyColumn(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -109,7 +102,6 @@ fun EditHoldingScreen(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.secondaryContainer
                         ),
-                        border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
                     ) {
                         Row(
                             modifier = Modifier
@@ -157,7 +149,6 @@ fun EditHoldingScreen(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface
                         ),
-                        border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
                     ) {
                         Column(modifier = Modifier.padding(18.dp)) {
                             Row(
@@ -281,7 +272,6 @@ fun EditHoldingScreen(
                 }
             }
         }
-        }
     }
 
     if (uiState.showAddBuyDialog || uiState.showAddSellDialog) {
@@ -317,7 +307,6 @@ private fun TransactionCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
     ) {
         Row(
             modifier = Modifier

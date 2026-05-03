@@ -63,7 +63,6 @@ import com.stock.dividend.viewmodel.AchievementUiState
 import com.stock.dividend.viewmodel.AchievementViewModel
 import com.stock.dividend.viewmodel.DividendIncomeUiState
 import com.stock.dividend.viewmodel.DividendIncomeViewModel
-import com.stock.dividend.ui.theme.GradientBackground
 import com.stock.dividend.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,26 +89,22 @@ fun WatchlistScreen(
         }
     }
 
-    GradientBackground(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        if (uiState.stocks.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                EmptyStateView(onAddClick = onAddStockClick)
-            }
-        } else {
-            WatchlistContent(
-                uiState = uiState,
-                onStockClick = onStockClick,
-                onFireCardClick = onFireCardClick,
-                onDeleteStock = { viewModel.deleteStock(it) },
-                onRefresh = { viewModel.refreshQuotes() }
-            )
+    if (uiState.stocks.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            EmptyStateView(onAddClick = onAddStockClick)
         }
+    } else {
+        WatchlistContent(
+            uiState = uiState,
+            onStockClick = onStockClick,
+            onFireCardClick = onFireCardClick,
+            onDeleteStock = { viewModel.deleteStock(it) },
+            onRefresh = { viewModel.refreshQuotes() }
+        )
     }
 }
 
@@ -129,14 +124,10 @@ fun IncomeScreen(
         if (fabTrigger > 0) showAddIncomeDialog = true
     }
 
-    GradientBackground(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        IncomeTabContent(
-            state = state,
-            viewModel = viewModel
-        )
-    }
+    IncomeTabContent(
+        state = state,
+        viewModel = viewModel
+    )
 
     if (showAddIncomeDialog) {
             AddIncomeDialog(
@@ -213,14 +204,10 @@ fun AchievementScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold { padding ->
-        GradientBackground(
-            modifier = Modifier.fillMaxSize()
-        ) {
             AchievementTabContent(
                 state = state,
                 modifier = Modifier.padding(padding)
             )
-        }
     }
 }
 

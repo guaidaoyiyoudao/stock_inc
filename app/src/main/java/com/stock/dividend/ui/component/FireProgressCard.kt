@@ -32,10 +32,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import com.stock.dividend.ui.theme.FinanceGreen
-import com.stock.dividend.ui.theme.GlassColors
 
 @Composable
 fun FireProgressCard(
@@ -53,9 +50,7 @@ fun FireProgressCard(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
-            ),
-            border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            )
         ) {
             Row(
                 modifier = Modifier
@@ -105,11 +100,9 @@ fun FireProgressCard(
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
             shape = RoundedCornerShape(14.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
-            ),
-            border = BorderStroke(1.dp, if (isSystemInDarkTheme()) GlassColors.DarkSurfaceBorder else GlassColors.LightSurfaceBorder)
+            )
         ) {
             Column(
                 modifier = Modifier
