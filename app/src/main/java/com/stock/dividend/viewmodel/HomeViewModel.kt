@@ -112,9 +112,17 @@ class HomeViewModel @Inject constructor(
                 val progress = if (goal != null && goal.targetAmount > 0) {
                     (total / goal.targetAmount * 100).toFloat().coerceAtMost(100f)
                 } else null
+                val previousForecasts = _uiState.value.stockForecasts
+                val mergedForecasts = forecasts.mapValues { (code, forecast) ->
+                    val previous = previousForecasts[code]
+                    forecast.copy(
+                        currentPrice = previous?.currentPrice,
+                        marketValue = previous?.marketValue
+                    )
+                }
                 _uiState.value.copy(
                     stocks = stocks,
-                    stockForecasts = forecasts,
+                    stockForecasts = mergedForecasts,
                     forecastTotal = total,
                     fireGoal = goal,
                     fireProgress = progress
