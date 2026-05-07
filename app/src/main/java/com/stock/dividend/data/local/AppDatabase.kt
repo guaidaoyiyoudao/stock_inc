@@ -8,18 +8,28 @@ import com.stock.dividend.data.local.dao.AchievementDao
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FireGoalDao
+import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
+import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 
 @Database(
-    entities = [StockEntity::class, DividendEntity::class, FireGoalEntity::class, DividendIncomeRecordEntity::class, TransactionEntity::class, AchievementEntity::class],
-    version = 7,
+    entities = [
+        StockEntity::class,
+        DividendEntity::class,
+        FireGoalEntity::class,
+        DividendIncomeRecordEntity::class,
+        TransactionEntity::class,
+        AchievementEntity::class,
+        LivingExpenseItemEntity::class
+    ],
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dividendIncomeRecordDao(): DividendIncomeRecordDao
     abstract fun transactionDao(): TransactionDao
     abstract fun achievementDao(): AchievementDao
+    abstract fun livingExpenseItemDao(): LivingExpenseItemDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -100,6 +111,25 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `achievements` (" +
                             "`id` TEXT NOT NULL PRIMARY KEY, " +
                             "`unlockedAt` INTEGER NOT NULL)"
+                )
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `living_expense_items` (" +
+                            "`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, " +
+                            "`name` TEXT NOT NULL, " +
+                            "`amount` REAL NOT NULL, " +
+                            "`period` TEXT NOT NULL, " +
+                            "`sortOrder` INTEGER NOT NULL, " +
+                            "`createdAt` INTEGER NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_living_expense_items_sortOrder` " +
+                            "ON `living_expense_items`(`sortOrder`)"
                 )
             }
         }
