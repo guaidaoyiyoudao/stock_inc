@@ -23,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.stock.dividend.ui.navigation.Routes
 
 private data class BottomNavItem(
     val route: String,
@@ -124,7 +125,7 @@ fun MainScaffold(rootNavController: NavHostController) {
                     snackbarHostState = snackbarHostState,
                     onAddStockClick = { tabNavController.navigate("addStock") },
                     onStockClick = { code -> tabNavController.navigate("stockDetail/$code") },
-                    onFireCardClick = { rootNavController.navigate("fireGoalSetup") }
+                    onFireCardClick = { rootNavController.navigate(Routes.EXPENSE_COVERAGE) }
                 )
             }
             composable("income") {

@@ -4,12 +4,14 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.stock.dividend.ui.screen.ExpenseCoverageScreen
 import com.stock.dividend.ui.screen.FireGoalSetupScreen
 import com.stock.dividend.ui.screen.MainScaffold
 
 object Routes {
     const val MAIN = "main"
     const val FIRE_GOAL_SETUP = "fireGoalSetup"
+    const val EXPENSE_COVERAGE = "expenseCoverage"
 }
 
 @Composable
@@ -26,6 +28,12 @@ fun AppNavigation() {
         composable(Routes.FIRE_GOAL_SETUP) {
             FireGoalSetupScreen(
                 onBack = { rootNavController.popBackStack() }
+            )
+        }
+        composable(Routes.EXPENSE_COVERAGE) {
+            ExpenseCoverageScreen(
+                onBack = { rootNavController.popBackStack() },
+                onGoSetup = { rootNavController.navigate(Routes.FIRE_GOAL_SETUP) }
             )
         }
     }

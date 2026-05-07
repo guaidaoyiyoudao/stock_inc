@@ -60,4 +60,20 @@
     <string name="avg_cash_per_share">平均每股派息</string>
     <string name="forecast_income">预测收入</string>
     <string name="holding_quantity">持仓数量</string>
+
+    <!-- Expense Coverage Screen -->
+    <string name="expense_coverage_title">开支覆盖率</string>
+    <string name="expense_coverage_description">查看年度股息收入对年度生活开支目标的覆盖情况。</string>
+    <string name="expense_coverage_status_title">年度覆盖状态</string>
+    <string name="expense_coverage_metric_income">年度股息收入</string>
+    <string name="expense_coverage_metric_goal">年度生活开支目标</string>
+    <string name="expense_coverage_metric_difference">差额（收入 - 开支）</string>
+    <string name="expense_coverage_empty_title">还未设置年度开支目标</string>
+    <string name="expense_coverage_empty_message">先设置 FIRE 年度生活开支目标，才能准确评估覆盖率。</string>
+    <string name="expense_coverage_action_setup_goal">去设置目标</string>
+
+    <string name="expense_coverage_no_goal_status">未设置支出目标</string>
+    <string name="expense_coverage_reached_status">已覆盖年度支出目标</string>
+    <string name="expense_coverage_shortfall_status">距离覆盖目标还差 ¥%1$.2f</string>
+
 </resources>
