@@ -37,9 +37,10 @@ class ExpenseCoverageViewModel @Inject constructor(
         fireGoalRepository.observeGoal()
     ) { income, goal ->
         val goalAmount = goal?.targetAmount
-        val hasGoal = goalAmount != null && goalAmount > 0
-        val ratio = if (hasGoal) income / goalAmount!! else 0.0
-        val diff = if (hasGoal) income - goalAmount!! else income
+        val targetAmount = goalAmount ?: 0.0
+        val hasGoal = targetAmount > 0
+        val ratio = if (hasGoal) income / targetAmount else 0.0
+        val diff = if (hasGoal) income - targetAmount else income
         val reached = hasGoal && ratio >= 1.0
         ExpenseCoverageUiState(
             year = currentYear,

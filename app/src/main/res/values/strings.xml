@@ -74,6 +74,6 @@
 
     <string name="expense_coverage_no_goal_status">未设置支出目标</string>
     <string name="expense_coverage_reached_status">已覆盖年度支出目标</string>
-    <string name="expense_coverage_shortfall_status">距离覆盖目标还差 ¥%1$.2f</string>
+    <string name="expense_coverage_shortfall_status">距离覆盖目标还差 %1$s</string>
 
 </resources>
