@@ -30,6 +30,8 @@ import com.stock.dividend.R
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.viewmodel.ExpenseCoverageUiState
 import com.stock.dividend.viewmodel.ExpenseCoverageViewModel
+import java.text.NumberFormat
+import java.util.Locale
 
 @Composable
 fun ExpenseCoverageScreen(
@@ -104,7 +106,7 @@ private fun StatusCard(state: ExpenseCoverageUiState) {
             )
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = if (state.hasGoal) "%.1f%%".format(state.coverageRatio * 100) else "--",
+                text = if (state.hasGoal) formatPercent(state.coverageRatio) else "--",
                 style = MaterialTheme.typography.headlineMedium,
                 color = statusColor,
                 fontWeight = FontWeight.Bold
@@ -159,8 +161,21 @@ private fun EmptyGoalCard(onGoSetup: () -> Unit) {
     }
 }
 
-private fun formatMoney(value: Double): String = "¥%.2f".format(value)
+private fun formatMoney(value: Double): String {
+    val formatter = NumberFormat.getCurrencyInstance(Locale.CHINA).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }
+    return formatter.format(value)
+}
 private fun formatSignedMoney(value: Double): String = if (value >= 0) "+${formatMoney(value)}" else "-${formatMoney(-value)}"
+private fun formatPercent(value: Double): String {
+    val formatter = NumberFormat.getPercentInstance(Locale.getDefault()).apply {
+        minimumFractionDigits = 1
+        maximumFractionDigits = 1
+    }
+    return formatter.format(value)
+}
 
 @Preview(showBackground = true)
 @Composable
