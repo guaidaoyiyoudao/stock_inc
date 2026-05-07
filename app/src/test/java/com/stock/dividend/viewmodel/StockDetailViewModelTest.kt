@@ -169,6 +169,23 @@ class StockDetailViewModelTest {
         }
     }
 
+    private fun makeDividend(
+        id: String,
+        reportDate: String,
+        dividendYield: Double?
+    ): DividendEntity {
+        return DividendEntity(
+            id = id,
+            stockCode = "sz.000001",
+            reportDate = reportDate,
+            cashPerShare = 0.1,
+            dividendYield = dividendYield,
+            exDividendDate = null,
+            recordDate = null,
+            planStatus = "实施方案"
+        )
+    }
+
     @Test
     fun `initial visibleCount is 5`() = runTest {
         val viewModel = createViewModel(dividends = makeDividends(12))
@@ -212,5 +229,105 @@ class StockDetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.visibleCount).isEqualTo(5)
+    }
+
+    @Test
+    fun `dividend rate points include only valid yields sorted by report date`() = runTest {
+        val viewModel = createViewModel(
+            dividends = listOf(
+                makeDividend("2024", "2024-12-31", 4.2),
+                makeDividend("2022", "2022-12-31", 2.8),
+                makeDividend("null", "2023-06-30", null),
+                makeDividend("negative", "2023-12-31", -1.0),
+                makeDividend("nan", "2021-12-31", Double.NaN),
+                makeDividend("infinite", "2020-12-31", Double.POSITIVE_INFINITY)
+            )
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val points = viewModel.uiState.value.dividendRatePoints
+
+        assertThat(points.map { it.period }).containsExactly("2022", "2024").inOrder()
+        assertThat(points.map { it.label }).containsExactly("2022", "2024").inOrder()
+        assertThat(points.map { it.ratePercent }).containsExactly(2.8, 4.2).inOrder()
+    }
+
+    @Test
+    fun `multiple valid dividend yields produce chart eligible points`() = runTest {
+        val viewModel = createViewModel(
+            dividends = listOf(
+                makeDividend("2022", "2022-12-31", 2.1),
+                makeDividend("2023", "2023-12-31", 3.4),
+                makeDividend("2024", "2024-12-31", 4.5)
+            )
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.dividendRatePoints).hasSize(3)
+    }
+
+    @Test
+    fun `null dividend yields produce empty dividend rate points`() = runTest {
+        val viewModel = createViewModel(
+            dividends = listOf(
+                makeDividend("2022", "2022-12-31", null),
+                makeDividend("2023", "2023-12-31", null)
+            )
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.dividendRatePoints).isEmpty()
+    }
+
+    @Test
+    fun `single valid dividend yield preserves one point and percent value`() = runTest {
+        val viewModel = createViewModel(
+            dividends = listOf(
+                makeDividend("2022", "2022-12-31", null),
+                makeDividend("2023", "2023-12-31", 3.25)
+            )
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val points = viewModel.uiState.value.dividendRatePoints
+
+        assertThat(points).hasSize(1)
+        assertThat(points[0].period).isEqualTo("2023")
+        assertThat(points[0].label).isEqualTo("2023")
+        assertThat(points[0].ratePercent).isEqualTo(3.25)
+    }
+
+    @Test
+    fun `out of order dividend records produce ascending dividend rate points`() = runTest {
+        val viewModel = createViewModel(
+            dividends = listOf(
+                makeDividend("2024", "2024-12-31", 4.5),
+                makeDividend("2021", "2021-12-31", 1.6),
+                makeDividend("2023", "2023-12-31", 3.1),
+                makeDividend("2022", "2022-12-31", 2.4)
+            )
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.dividendRatePoints.map { it.period })
+            .containsExactly("2021", "2022", "2023", "2024")
+            .inOrder()
+    }
+
+    @Test
+    fun `multiple dividends in the same year are summed into one dividend rate point`() = runTest {
+        val viewModel = createViewModel(
+            dividends = listOf(
+                makeDividend("2024-final", "2024-12-31", 2.3),
+                makeDividend("2023-final", "2023-12-31", 3.0),
+                makeDividend("2024-mid", "2024-06-30", 1.2)
+            )
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val points = viewModel.uiState.value.dividendRatePoints
+
+        assertThat(points.map { it.period }).containsExactly("2023", "2024").inOrder()
+        assertThat(points.map { it.ratePercent }).containsExactly(3.0, 3.5).inOrder()
     }
 }

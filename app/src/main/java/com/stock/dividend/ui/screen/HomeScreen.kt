@@ -236,18 +236,18 @@ private fun WatchlistContent(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
-                FireProgressCard(
-                    targetAmount = uiState.fireGoal?.targetAmount,
-                    forecastTotal = uiState.forecastTotal,
-                    progress = uiState.fireProgress,
-                    onClick = onFireCardClick
+                DividendSummaryCard(
+                    totalAmount = uiState.forecastTotal,
+                    totalMarketValue = uiState.totalMarketValue
                 )
             }
 
             item {
-                DividendSummaryCard(
-                    totalAmount = uiState.forecastTotal,
-                    totalMarketValue = uiState.totalMarketValue
+                FireProgressCard(
+                    targetAmount = uiState.livingExpenseTargetAmount,
+                    forecastTotal = uiState.forecastTotal,
+                    progress = uiState.fireProgress,
+                    onClick = onFireCardClick
                 )
             }
 

@@ -27,9 +27,17 @@ data class ForecastDetail(
 )
 
 @Stable
+data class DividendRatePoint(
+    val period: String,
+    val label: String,
+    val ratePercent: Double
+)
+
+@Stable
 data class StockDetailUiState(
     val stock: StockEntity? = null,
     val dividends: List<DividendEntity> = emptyList(),
+    val dividendRatePoints: List<DividendRatePoint> = emptyList(),
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val error: String? = null,
@@ -62,6 +70,7 @@ class StockDetailViewModel @Inject constructor(
             combine(stockFlow, dividendsFlow) { stock, dividends ->
                 Pair(stock, dividends)
             }.collect { (stock, dividends) ->
+                val dividendRatePoints = deriveDividendRatePoints(dividends)
                 if (stock != null) {
                     val allForecasts = mutableMapOf<String, ForecastDetail>()
                     for (period in listOf("1", "3", "5")) {
@@ -84,6 +93,7 @@ class StockDetailViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         stock = stock,
                         dividends = dividends,
+                        dividendRatePoints = dividendRatePoints,
                         isLoading = false,
                         visibleCount = 5,
                         allForecasts = allForecasts,
@@ -93,6 +103,7 @@ class StockDetailViewModel @Inject constructor(
                 } else {
                     _uiState.value = _uiState.value.copy(
                         dividends = dividends,
+                        dividendRatePoints = dividendRatePoints,
                         isLoading = false,
                         visibleCount = 5
                     )
@@ -128,5 +139,26 @@ class StockDetailViewModel @Inject constructor(
             selectedPeriod = period,
             forecast = state.allForecasts[period]
         )
+    }
+
+    private fun deriveDividendRatePoints(dividends: List<DividendEntity>): List<DividendRatePoint> {
+        return dividends
+            .mapNotNull { dividend ->
+                val yield = dividend.dividendYield
+                if (yield == null || !yield.isFinite() || yield < 0.0) {
+                    null
+                } else {
+                    dividend.reportDate.substringBefore("-") to yield
+                }
+            }
+            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+            .map { (year, yields) ->
+                DividendRatePoint(
+                    period = year,
+                    label = year,
+                    ratePercent = yields.sum()
+                )
+            }
+            .sortedBy { it.period }
     }
 }

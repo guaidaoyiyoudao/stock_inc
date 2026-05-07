@@ -4,12 +4,12 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.dao.DividendDao
-import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.TransactionDao
-import com.stock.dividend.data.local.entity.FireGoalEntity
+import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_MONTHLY
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -44,7 +44,7 @@ data class HomeUiState(
     val forecastTotal: Double = 0.0,
     val stockForecasts: Map<String, StockForecast> = emptyMap(),
     val totalMarketValue: Double? = null,
-    val fireGoal: FireGoalEntity? = null,
+    val livingExpenseTargetAmount: Double? = null,
     val fireProgress: Float? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -57,7 +57,7 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val stockRepository: StockRepository,
     private val dividendDao: DividendDao,
-    private val fireGoalDao: FireGoalDao,
+    private val livingExpenseRepository: LivingExpenseRepository,
     private val transactionDao: TransactionDao
 ) : ViewModel() {
 
@@ -69,7 +69,15 @@ class HomeViewModel @Inject constructor(
     val stocksFlow = stockRepository.observeAllStocks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val fireGoalFlow = fireGoalDao.observe()
+    private val livingExpenseTargetFlow = livingExpenseRepository.observeExpenses()
+        .map { expenses ->
+            expenses.sumOf { expense ->
+                when (expense.period) {
+                    EXPENSE_PERIOD_MONTHLY -> expense.amount * 12
+                    else -> expense.amount
+                }
+            }.takeIf { it > 0.0 }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val forecastMapFlow = stocksFlow.flatMapLatest { stocks ->
@@ -106,11 +114,11 @@ class HomeViewModel @Inject constructor(
             combine(
                 stocksFlow,
                 forecastMapFlow,
-                fireGoalFlow
-            ) { stocks, forecasts, goal ->
+                livingExpenseTargetFlow
+            ) { stocks, forecasts, livingExpenseTarget ->
                 val total = forecasts.values.sumOf { it.forecastIncome }
-                val progress = if (goal != null && goal.targetAmount > 0) {
-                    (total / goal.targetAmount * 100).toFloat().coerceAtMost(100f)
+                val progress = if (livingExpenseTarget != null && livingExpenseTarget > 0) {
+                    (total / livingExpenseTarget * 100).toFloat().coerceAtMost(100f)
                 } else null
                 val previousForecasts = _uiState.value.stockForecasts
                 val mergedForecasts = forecasts.mapValues { (code, forecast) ->
@@ -124,7 +132,7 @@ class HomeViewModel @Inject constructor(
                     stocks = stocks,
                     stockForecasts = mergedForecasts,
                     forecastTotal = total,
-                    fireGoal = goal,
+                    livingExpenseTargetAmount = livingExpenseTarget,
                     fireProgress = progress
                 )
             }.collect { state ->

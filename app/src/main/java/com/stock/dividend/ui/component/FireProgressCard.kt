@@ -67,7 +67,7 @@ fun FireProgressCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "FIRE",
+                        text = "支出",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -75,14 +75,14 @@ fun FireProgressCard(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "FIRE 退休目标",
+                        text = "生活支出覆盖",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "设定目标年度支出，追踪财务自由进度",
+                        text = "添加生活支出，查看股息优先覆盖哪些项目",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -120,7 +120,7 @@ fun FireProgressCard(
                             .background(MaterialTheme.colorScheme.primary)
                     )
                     Text(
-                        text = "FIRE 退休进度",
+                        text = "生活支出覆盖",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -130,7 +130,7 @@ fun FireProgressCard(
                         exit = fadeOut()
                     ) {
                         Text(
-                            text = "  ·  已达标",
+                            text = "  ·  已覆盖",
                             style = MaterialTheme.typography.labelSmall,
                             color = FinanceGreen
                         )
@@ -192,7 +192,7 @@ fun FireProgressCard(
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "目标年支出",
+                            text = "年化支出",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

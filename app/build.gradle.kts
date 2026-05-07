@@ -104,6 +104,7 @@ dependencies {
     // Charts
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)
+    implementation(libs.mpandroidchart)
 
     // Desugaring
     coreLibraryDesugaring(libs.desugar.jdk.libs)

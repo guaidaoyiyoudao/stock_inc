@@ -57,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.ui.component.CompactTopAppBar
+import com.stock.dividend.ui.component.DividendRateChart
+import com.stock.dividend.ui.component.DividendRateFallbackCard
 import com.stock.dividend.ui.component.ForecastComparisonCard
 import com.stock.dividend.viewmodel.ForecastDetail
 import com.stock.dividend.viewmodel.StockDetailViewModel
@@ -175,6 +177,25 @@ fun StockDetailScreen(
                                     allForecasts = uiState.allForecasts,
                                     selectedPeriod = uiState.selectedPeriod
                                 )
+                            }
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SectionHeader(title = "分红率趋势")
+                    }
+
+                    item {
+                        when {
+                            uiState.dividendRatePoints.size >= 2 -> {
+                                DividendRateChart(points = uiState.dividendRatePoints)
+                            }
+                            uiState.dividendRatePoints.size == 1 -> {
+                                DividendRateFallbackCard(point = uiState.dividendRatePoints.first())
+                            }
+                            else -> {
+                                DividendRateFallbackCard(point = null)
                             }
                         }
                     }
