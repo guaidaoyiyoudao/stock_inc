@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -42,6 +43,11 @@ fun FireProgressCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val coveragePercent = (progress ?: 0f).coerceIn(0f, 999f)
+    val coverageProgress = (coveragePercent / 100f).coerceIn(0f, 1f)
+    val coveredAmount = (targetAmount ?: 0.0) * coverageProgress
+    val gapAmount = ((targetAmount ?: 0.0) - coveredAmount).coerceAtLeast(0.0)
+
     if (targetAmount == null || progress == null) {
         Card(
             modifier = modifier
@@ -94,7 +100,7 @@ fun FireProgressCard(
                 )
             }
         }
-        } else {
+    } else {
         Card(
             modifier = modifier
                 .fillMaxWidth()
@@ -142,11 +148,11 @@ fun FireProgressCard(
                 Text(
                     text = buildAnnotatedString {
                         withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("%.1f%%".format(progress))
+                            append("%.1f%%".format(coveragePercent))
                         }
                     },
                     style = MaterialTheme.typography.headlineLarge,
-                    color = if (progress >= 100f) {
+                    color = if (coveragePercent >= 100f) {
                         FinanceGreen
                     } else {
                         MaterialTheme.colorScheme.onSurface
@@ -156,12 +162,12 @@ fun FireProgressCard(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 LinearProgressIndicator(
-                    progress = { (progress / 100f).coerceIn(0f, 1f) },
+                    progress = { coverageProgress },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp)),
-                    color = if (progress >= 100f) {
+                    color = if (coveragePercent >= 100f) {
                         FinanceGreen
                     } else {
                         MaterialTheme.colorScheme.primary
@@ -169,6 +175,29 @@ fun FireProgressCard(
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     strokeCap = StrokeCap.Round
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "已覆盖 ${formatAmount(coveredAmount)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = if (gapAmount > 0.0) "还差 ${formatAmount(gapAmount)}" else "已达成覆盖目标",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (gapAmount > 0.0) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            FinanceGreen
+                        },
+                        textAlign = TextAlign.End
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
