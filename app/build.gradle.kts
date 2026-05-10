@@ -101,6 +101,11 @@ dependencies {
     // Coroutines
     implementation(libs.coroutines.android)
 
+    // Image loading (SVG logos)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.svg)
+    implementation(libs.coil.network.okhttp)
+
     // Charts
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)

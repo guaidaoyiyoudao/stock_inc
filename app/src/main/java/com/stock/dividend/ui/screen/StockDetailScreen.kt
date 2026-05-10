@@ -56,6 +56,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.component.DividendRateChart
 import com.stock.dividend.ui.component.DividendRateFallbackCard
@@ -152,7 +153,8 @@ fun StockDetailScreen(
                         item {
                             HoldingInfoBanner(
                                 shares = stock.shares,
-                                stockName = stock.name
+                                stockName = stock.name,
+                                stockCode = stock.code
                             )
                         }
 
@@ -239,7 +241,7 @@ fun StockDetailScreen(
 }
 
 @Composable
-private fun HoldingInfoBanner(shares: Int, stockName: String) {
+private fun HoldingInfoBanner(shares: Int, stockName: String, stockCode: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -253,20 +255,11 @@ private fun HoldingInfoBanner(shares: Int, stockName: String) {
                 .padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "持",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            CompanyIcon(
+                stockCode = stockCode,
+                stockName = stockName,
+                size = 36
+            )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
                 text = "持有 $shares 股 $stockName",
