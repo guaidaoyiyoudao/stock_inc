@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -104,6 +105,16 @@ fun AddStockScreen(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 },
+                trailingIcon = if (uiState.searchQuery.isNotBlank()) {
+                    {
+                        IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "清空搜索"
+                            )
+                        }
+                    }
+                } else null,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
@@ -116,6 +127,16 @@ fun AddStockScreen(
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            AnimatedVisibility(
+                visible = uiState.searchQuery.isBlank() && uiState.selectedStock == null && uiState.addedStock == null
+            ) {
+                Text(
+                    text = "💡 小提示：输入“茅台”或“600519”可更快找到股票",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             AnimatedVisibility(
                 visible = uiState.isSearching,
@@ -282,16 +303,24 @@ fun AddStockScreen(
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                LazyColumn(
-                    contentPadding = PaddingValues(vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(uiState.searchResults, key = { it.code }) { result ->
-                        StockSearchItem(
-                            result = result,
-                            isSelected = false,
-                            onClick = { viewModel.selectStock(result) }
-                        )
+                Column {
+                    TextButton(
+                        onClick = viewModel::quickAddFirstResult,
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("快速选择第一个结果")
+                    }
+                    LazyColumn(
+                        contentPadding = PaddingValues(vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(uiState.searchResults, key = { it.code }) { result ->
+                            StockSearchItem(
+                                result = result,
+                                isSelected = false,
+                                onClick = { viewModel.selectStock(result) }
+                            )
+                        }
                     }
                 }
             }
@@ -374,6 +403,9 @@ fun AddStockScreen(
 
                     Button(
                         onClick = { viewModel.confirmAddStock() },
+                        enabled = uiState.sharesError == null
+                                && uiState.costPerShareError == null
+                                && uiState.buyDateError == null,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp)
                     ) {
