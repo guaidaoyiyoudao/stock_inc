@@ -31,7 +31,8 @@ data class AddStockUiState(
     val costPerShareInput: String = "",
     val costPerShareError: String? = null,
     val buyDateInput: String = LocalDate.now().toString(),
-    val buyDateError: String? = null
+    val buyDateError: String? = null,
+    val hasSearched: Boolean = false
 )
 
 @OptIn(FlowPreview::class)
@@ -69,8 +70,17 @@ class AddStockViewModel @Inject constructor(
         )
         searchQuery.value = query
         if (query.isBlank()) {
-            _uiState.value = _uiState.value.copy(searchResults = emptyList())
+            _uiState.value = _uiState.value.copy(
+                searchResults = emptyList(),
+                selectedStock = null,
+                hasSearched = false,
+                isSearching = false
+            )
         }
+    }
+
+    fun quickAddFirstResult() {
+        _uiState.value.searchResults.firstOrNull()?.let(::selectStock)
     }
 
     fun onSharesChanged(input: String) {
@@ -119,6 +129,7 @@ class AddStockViewModel @Inject constructor(
 
     fun confirmAddStock() {
         val result = _uiState.value.selectedStock ?: return
+        if (!isInputValid()) return
         addStock(result)
     }
 
@@ -181,9 +192,15 @@ class AddStockViewModel @Inject constructor(
             costPerShareInput = "",
             costPerShareError = null,
             buyDateInput = LocalDate.now().toString(),
-            buyDateError = null
+            buyDateError = null,
+            hasSearched = false
         )
         searchQuery.value = ""
+    }
+
+    private fun isInputValid(): Boolean {
+        val state = _uiState.value
+        return state.sharesError == null && state.costPerShareError == null && state.buyDateError == null
     }
 
     private suspend fun performSearch(query: String) {
@@ -193,13 +210,15 @@ class AddStockViewModel @Inject constructor(
             .onSuccess { results ->
                 _uiState.value = _uiState.value.copy(
                     searchResults = results,
-                    isSearching = false
+                    isSearching = false,
+                    hasSearched = true
                 )
             }
             .onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     searchResults = emptyList(),
                     isSearching = false,
+                    hasSearched = true,
                     error = e.message ?: "搜索失败，请重试",
                     canRetry = true
                 )
