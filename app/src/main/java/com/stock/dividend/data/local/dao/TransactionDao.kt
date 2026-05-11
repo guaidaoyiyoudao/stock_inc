@@ -18,6 +18,9 @@ interface TransactionDao {
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("UPDATE transactions SET date = :date WHERE id = :id")
+    suspend fun updateDate(id: Long, date: String)
+
     @Query("SELECT * FROM transactions WHERE stockCode = :stockCode ORDER BY date ASC, createdAt ASC")
     fun observeByStock(stockCode: String): Flow<List<TransactionEntity>>
 

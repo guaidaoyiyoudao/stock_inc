@@ -26,7 +26,10 @@ data class EditHoldingUiState(
     val addSharesInput: String = "",
     val addPriceInput: String = "",
     val addDateInput: String = LocalDate.now().toString(),
-    val addInputError: String? = null
+    val addInputError: String? = null,
+    val editDateTransaction: TransactionEntity? = null,
+    val editDateInput: String = "",
+    val editDateError: String? = null
 )
 
 @HiltViewModel
@@ -187,6 +190,47 @@ class EditHoldingViewModel @Inject constructor(
                 totalShares = totalShares,
                 avgCostPerShare = avgCost,
                 transactions = transactions
+            )
+        }
+    }
+
+    fun showEditDateDialog(transaction: TransactionEntity) {
+        _uiState.value = _uiState.value.copy(
+            editDateTransaction = transaction,
+            editDateInput = transaction.date,
+            editDateError = null
+        )
+    }
+
+    fun onEditDateChanged(input: String) {
+        _uiState.value = _uiState.value.copy(editDateInput = input)
+    }
+
+    fun dismissEditDateDialog() {
+        _uiState.value = _uiState.value.copy(
+            editDateTransaction = null,
+            editDateInput = "",
+            editDateError = null
+        )
+    }
+
+    fun confirmEditDate() {
+        val transaction = _uiState.value.editDateTransaction ?: return
+        val date = _uiState.value.editDateInput.trim()
+
+        if (date.isBlank()) {
+            _uiState.value = _uiState.value.copy(editDateError = "请输入日期")
+            return
+        }
+
+        viewModelScope.launch {
+            transactionRepository.updateTransactionDate(transaction.id, date)
+            val transactions = transactionRepository.getByStock(stockCode)
+            _uiState.value = _uiState.value.copy(
+                transactions = transactions,
+                editDateTransaction = null,
+                editDateInput = "",
+                editDateError = null
             )
         }
     }
