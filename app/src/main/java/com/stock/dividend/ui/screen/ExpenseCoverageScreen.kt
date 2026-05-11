@@ -19,10 +19,13 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,15 +36,20 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import kotlin.math.roundToInt
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -53,6 +61,7 @@ import com.stock.dividend.viewmodel.ExpenseCoverageRow
 import com.stock.dividend.viewmodel.ExpenseCoverageUiState
 import com.stock.dividend.viewmodel.ExpenseCoverageViewModel
 import com.stock.dividend.viewmodel.ExpensePeriod
+import kotlin.math.roundToInt
 
 @Composable
 fun ExpenseCoverageScreen(
@@ -113,16 +122,9 @@ private fun ExpenseCoverageContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item {
-                Text(
-                    text = stringResource(R.string.expense_coverage_description),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
             item { SummaryCard(state) }
             if (state.rows.isEmpty()) {
                 item { EmptyExpenseCard(onAddExpense = onAddExpense) }
@@ -158,49 +160,106 @@ private fun ExpenseCoverageContent(
 private fun SummaryCard(state: ExpenseCoverageUiState) {
     Card(
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = stringResource(R.string.expense_coverage_status_title),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "%.1f%%".format(state.coverageRatio * 100),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.expense_coverage_status_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = stringResource(R.string.expense_coverage_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
+                    )
+                }
+                Text(
+                    text = "%.1f%%".format(state.coverageRatio * 100),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.End
+                )
+            }
             LinearProgressIndicator(
                 progress = { state.coverageRatio.coerceIn(0.0, 1.0).toFloat() },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp),
                 color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                trackColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
             )
-            MetricRow(
-                stringResource(R.string.expense_coverage_metric_forecast_income),
-                formatMoney(state.forecastAnnualDividendIncome)
-            )
-            MetricRow(
-                stringResource(R.string.expense_coverage_metric_total_expense),
-                formatMoney(state.totalAnnualExpense)
-            )
-            MetricRow(
-                stringResource(R.string.expense_coverage_metric_covered_items),
-                "${state.coveredItemCount}/${state.rows.size}"
-            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                SummaryMetric(
+                    label = stringResource(R.string.expense_coverage_metric_forecast_income),
+                    value = formatMoney(state.forecastAnnualDividendIncome)
+                )
+                SummaryMetric(
+                    label = stringResource(R.string.expense_coverage_metric_total_expense),
+                    value = formatMoney(state.totalAnnualExpense)
+                )
+                SummaryMetric(
+                    label = stringResource(R.string.expense_coverage_metric_covered_items),
+                    value = "${state.coveredItemCount}/${state.rows.size}"
+                )
+            }
             Text(
                 text = coverageStatusText(state),
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SummaryMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.End
             )
         }
     }
@@ -216,25 +275,6 @@ private fun coverageStatusText(state: ExpenseCoverageUiState): String =
         state.rows.isNotEmpty() -> stringResource(R.string.expense_coverage_all_covered)
         else -> stringResource(R.string.expense_coverage_no_income)
     }
-
-@Composable
-private fun MetricRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
 
 @Composable
 private fun EmptyExpenseCard(onAddExpense: () -> Unit) {
@@ -276,6 +316,7 @@ private fun ExpenseRowCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
@@ -287,7 +328,8 @@ private fun ExpenseRowCard(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
@@ -309,27 +351,23 @@ private fun ExpenseRowCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Row {
-                    IconButton(onClick = onMoveUp, enabled = canMoveUp) {
-                        Icon(
-                            Icons.Default.KeyboardArrowUp,
-                            contentDescription = stringResource(R.string.expense_coverage_action_move_up)
-                        )
-                    }
-                    IconButton(onClick = onMoveDown, enabled = canMoveDown) {
-                        Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            contentDescription = stringResource(R.string.expense_coverage_action_move_down)
-                        )
-                    }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    StatusPill(status = row.status)
+                    ExpenseRowActionMenu(
+                        expanded = showMenu,
+                        canMoveUp = canMoveUp,
+                        canMoveDown = canMoveDown,
+                        onExpandedChange = { showMenu = it },
+                        onMoveUp = onMoveUp,
+                        onMoveDown = onMoveDown,
+                        onEdit = onEdit,
+                        onDelete = onDelete
+                    )
                 }
             }
-            Text(
-                text = stringResource(statusStringRes(row.status)),
-                style = MaterialTheme.typography.labelLarge,
-                color = statusColor(row.status),
-                fontWeight = FontWeight.SemiBold
-            )
             val coverageProgress = if (row.annualAmount > 0.0) {
                 (row.coveredAmount / row.annualAmount).toFloat().coerceIn(0f, 1f)
             } else {
@@ -353,24 +391,146 @@ private fun ExpenseRowCard(
                     fontWeight = FontWeight.SemiBold
                 )
             }
-            MetricRow(
-                stringResource(R.string.expense_coverage_covered_amount, row.coveredAmount),
-                stringResource(R.string.expense_coverage_gap_amount, row.gapAmount)
-            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                TextButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = null)
-                    Text(stringResource(R.string.expense_coverage_action_edit))
-                }
-                TextButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = null)
-                    Text(stringResource(R.string.expense_coverage_action_delete))
-                }
+                ExpenseAmountMetric(
+                    label = stringResource(R.string.expense_coverage_metric_annualized),
+                    value = formatMoney(row.annualAmount),
+                    modifier = Modifier.weight(1f)
+                )
+                ExpenseAmountMetric(
+                    label = stringResource(R.string.expense_coverage_metric_covered),
+                    value = formatMoney(row.coveredAmount),
+                    modifier = Modifier.weight(1f)
+                )
+                ExpenseAmountMetric(
+                    label = stringResource(R.string.expense_coverage_metric_gap),
+                    value = formatMoney(row.gapAmount),
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun ExpenseRowActionMenu(
+    expanded: Boolean,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    IconButton(onClick = { onExpandedChange(true) }) {
+        Icon(
+            imageVector = Icons.Default.MoreVert,
+            contentDescription = stringResource(R.string.expense_coverage_action_more)
+        )
+    }
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = { onExpandedChange(false) }
+    ) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.expense_coverage_action_move_up)) },
+            enabled = canMoveUp,
+            leadingIcon = {
+                Icon(
+                    Icons.Default.KeyboardArrowUp,
+                    contentDescription = null
+                )
+            },
+            onClick = {
+                onExpandedChange(false)
+                onMoveUp()
+            }
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.expense_coverage_action_move_down)) },
+            enabled = canMoveDown,
+            leadingIcon = {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = null
+                )
+            },
+            onClick = {
+                onExpandedChange(false)
+                onMoveDown()
+            }
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.expense_coverage_action_edit)) },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = null
+                )
+            },
+            onClick = {
+                onExpandedChange(false)
+                onEdit()
+            }
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.expense_coverage_action_delete)) },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = null
+                )
+            },
+            onClick = {
+                onExpandedChange(false)
+                onDelete()
+            }
+        )
+    }
+}
+
+@Composable
+private fun StatusPill(status: CoverageStatus) {
+    val color = statusColor(status)
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = color.copy(alpha = 0.12f)
+    ) {
+        Text(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            text = stringResource(statusStringRes(status)),
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun ExpenseAmountMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 

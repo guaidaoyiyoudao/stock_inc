@@ -64,7 +64,7 @@
     <!-- Expense Coverage Screen -->
     <string name="expense_coverage_title">生活支出覆盖</string>
     <string name="expense_coverage_description">用预测年度股息收入按顺序覆盖你的生活支出。</string>
-    <string name="expense_coverage_status_title">生活支持进度</string>
+    <string name="expense_coverage_status_title">生活支出进度</string>
     <string name="expense_coverage_metric_forecast_income">预测年度股息</string>
     <string name="expense_coverage_metric_total_expense">年度生活支出</string>
     <string name="expense_coverage_metric_covered_items">已覆盖支出</string>
@@ -72,10 +72,11 @@
     <string name="expense_coverage_all_covered">全部生活支出已覆盖</string>
     <string name="expense_coverage_no_income">还没有可用于覆盖支出的预测股息</string>
     <string name="expense_coverage_empty_title">还没有生活支出项</string>
-    <string name="expense_coverage_empty_message">添加房租、餐饮、交通等支出，查看股息收入可以先覆盖哪些生活支持。</string>
+    <string name="expense_coverage_empty_message">添加房租、餐饮、交通等支出，查看股息收入可以先覆盖哪些生活支出。</string>
     <string name="expense_coverage_action_add_expense">添加支出</string>
     <string name="expense_coverage_action_edit">编辑</string>
     <string name="expense_coverage_action_delete">删除</string>
+    <string name="expense_coverage_action_more">更多操作</string>
     <string name="expense_coverage_action_move_up">上移</string>
     <string name="expense_coverage_action_move_down">下移</string>
     <string name="expense_coverage_dialog_add_title">添加生活支出</string>
@@ -85,8 +86,9 @@
     <string name="expense_coverage_period_monthly">每月</string>
     <string name="expense_coverage_period_yearly">每年</string>
     <string name="expense_coverage_annual_amount">年化 ¥%1$.2f</string>
-    <string name="expense_coverage_covered_amount">已覆盖 ¥%1$.2f</string>
-    <string name="expense_coverage_gap_amount">缺口 ¥%1$.2f</string>
+    <string name="expense_coverage_metric_annualized">年化</string>
+    <string name="expense_coverage_metric_covered">已覆盖</string>
+    <string name="expense_coverage_metric_gap">缺口</string>
     <string name="expense_coverage_status_covered">已覆盖</string>
     <string name="expense_coverage_status_partial">部分覆盖</string>
     <string name="expense_coverage_status_uncovered">未覆盖</string>

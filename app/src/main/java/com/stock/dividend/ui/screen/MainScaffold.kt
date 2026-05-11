@@ -1,15 +1,10 @@
 package com.stock.dividend.ui.screen
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,10 +40,6 @@ fun MainScaffold(rootNavController: NavHostController) {
 
     val selectedTabIndex = bottomNavItems.indexOfFirst { it.route == currentTabRoute }.coerceAtLeast(0)
 
-    val fabVisible = currentTabRoute in listOf("watchlist", "income")
-    val fabOnWatchlist = currentTabRoute == "watchlist"
-
-    var incomeFabTrigger by remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     Scaffold(
@@ -89,30 +80,6 @@ fun MainScaffold(rootNavController: NavHostController) {
                     )
                 }
             }
-        },
-        floatingActionButton = {
-            AnimatedVisibility(
-                visible = fabVisible,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        if (fabOnWatchlist) tabNavController.navigate("addStock")
-                        else incomeFabTrigger++
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = MaterialTheme.shapes.large,
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = {
-                        Text(
-                            if (fabOnWatchlist) "添加股票" else "添加收入",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                )
-            }
         }
     ) { padding ->
         NavHost(
@@ -129,7 +96,7 @@ fun MainScaffold(rootNavController: NavHostController) {
                 )
             }
             composable("income") {
-                IncomeScreen(fabTrigger = incomeFabTrigger)
+                IncomeScreen()
             }
             composable("achievements") {
                 AchievementScreen()

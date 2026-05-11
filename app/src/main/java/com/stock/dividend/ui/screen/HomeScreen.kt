@@ -100,6 +100,7 @@ fun WatchlistScreen(
     } else {
         WatchlistContent(
             uiState = uiState,
+            onAddStockClick = onAddStockClick,
             onStockClick = onStockClick,
             onFireCardClick = onFireCardClick,
             onDeleteStock = { viewModel.deleteStock(it) },
@@ -111,7 +112,6 @@ fun WatchlistScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IncomeScreen(
-    fabTrigger: Int = 0,
     viewModel: DividendIncomeViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -120,13 +120,10 @@ fun IncomeScreen(
     var correctAmount by remember { mutableStateOf("") }
     var correctNote by remember { mutableStateOf("") }
 
-    LaunchedEffect(fabTrigger) {
-        if (fabTrigger > 0) showAddIncomeDialog = true
-    }
-
     IncomeTabContent(
         state = state,
-        viewModel = viewModel
+        viewModel = viewModel,
+        onAddIncomeClick = { showAddIncomeDialog = true }
     )
 
     if (showAddIncomeDialog) {
@@ -215,6 +212,7 @@ fun AchievementScreen(
 @Composable
 private fun WatchlistContent(
     uiState: com.stock.dividend.viewmodel.HomeUiState,
+    onAddStockClick: () -> Unit,
     onStockClick: (String) -> Unit,
     onFireCardClick: () -> Unit,
     onDeleteStock: (StockEntity) -> Unit,
@@ -252,13 +250,30 @@ private fun WatchlistContent(
             }
 
             item {
-                Text(
-                    text = "持仓列表",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp, bottom = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "持仓列表",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    TextButton(onClick = onAddStockClick) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null
+                        )
+                        Text(
+                            text = "添加股票",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
             }
 
             items(
@@ -281,6 +296,7 @@ private fun WatchlistContent(
 private fun IncomeTabContent(
     state: DividendIncomeUiState,
     viewModel: DividendIncomeViewModel,
+    onAddIncomeClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -319,6 +335,33 @@ private fun IncomeTabContent(
         )
 
         Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "收入记录",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+            TextButton(onClick = onAddIncomeClick) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null
+                )
+                Text(
+                    text = "添加收入",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
 
         if (state.records.isEmpty()) {
             Box(
