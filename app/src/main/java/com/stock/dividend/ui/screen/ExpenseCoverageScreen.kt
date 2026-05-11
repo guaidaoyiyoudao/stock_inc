@@ -36,8 +36,10 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import kotlin.math.roundToInt
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
@@ -328,6 +330,29 @@ private fun ExpenseRowCard(
                 color = statusColor(row.status),
                 fontWeight = FontWeight.SemiBold
             )
+            val coverageProgress = if (row.annualAmount > 0.0) {
+                (row.coveredAmount / row.annualAmount).toFloat().coerceIn(0f, 1f)
+            } else {
+                1f
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                LinearProgressIndicator(
+                    progress = { coverageProgress },
+                    modifier = Modifier.weight(1f),
+                    color = statusColor(row.status),
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+                Text(
+                    text = "${(coverageProgress * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = statusColor(row.status),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
             MetricRow(
                 stringResource(R.string.expense_coverage_covered_amount, row.coveredAmount),
                 stringResource(R.string.expense_coverage_gap_amount, row.gapAmount)

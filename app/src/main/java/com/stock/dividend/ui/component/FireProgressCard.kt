@@ -1,8 +1,6 @@
 package com.stock.dividend.ui.component
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,8 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,11 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.stock.dividend.ui.theme.FinanceGreen
 
@@ -54,6 +46,7 @@ fun FireProgressCard(
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
             shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
             )
@@ -61,14 +54,14 @@ fun FireProgressCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                    .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
@@ -81,21 +74,16 @@ fun FireProgressCard(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "生活支出覆盖",
+                        text = "生活支出",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "添加生活支出，查看股息优先覆盖哪些项目",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
                 Text(
-                    text = "→",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = "去设置",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                 )
             }
@@ -106,6 +94,7 @@ fun FireProgressCard(
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
             shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
             )
@@ -113,53 +102,31 @@ fun FireProgressCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
+                    .padding(16.dp)
             ) {
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary)
-                    )
                     Text(
-                        text = "生活支出覆盖",
+                        text = "生活支出",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    AnimatedVisibility(
-                        visible = progress >= 100f,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
-                        Text(
-                            text = "  ·  已覆盖",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = FinanceGreen
-                        )
-                    }
+                    Text(
+                        text = "%.1f%%".format(coveragePercent),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (coveragePercent >= 100f) {
+                            FinanceGreen
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        }
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    text = buildAnnotatedString {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("%.1f%%".format(coveragePercent))
-                        }
-                    },
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = if (coveragePercent >= 100f) {
-                        FinanceGreen
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 LinearProgressIndicator(
                     progress = { coverageProgress },
@@ -176,7 +143,7 @@ fun FireProgressCard(
                     strokeCap = StrokeCap.Round
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -188,18 +155,17 @@ fun FireProgressCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = if (gapAmount > 0.0) "还差 ${formatAmount(gapAmount)}" else "已达成覆盖目标",
+                        text = if (gapAmount > 0.0) "差 ${formatAmount(gapAmount)}" else "已覆盖",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (gapAmount > 0.0) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
                             FinanceGreen
-                        },
-                        textAlign = TextAlign.End
+                        }
                     )
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -207,28 +173,26 @@ fun FireProgressCard(
                 ) {
                     Column {
                         Text(
-                            text = "年股息收入",
+                            text = "收入",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = formatAmount(forecastTotal),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "年化支出",
+                            text = "支出",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = formatAmount(targetAmount),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
