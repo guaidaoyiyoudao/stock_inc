@@ -19,6 +19,9 @@ class TransactionRepository @Inject constructor(
     suspend fun deleteTransactionById(id: Long) =
         transactionDao.deleteById(id)
 
+    suspend fun updateTransactionDate(id: Long, date: String) =
+        transactionDao.updateDate(id, date)
+
     fun observeByStock(stockCode: String): Flow<List<TransactionEntity>> =
         transactionDao.observeByStock(stockCode)
 

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -228,6 +229,7 @@ fun EditHoldingScreen(
                 items(uiState.transactions.sortedByDescending { it.date }, key = { it.id }) { transaction ->
                     TransactionCard(
                         transaction = transaction,
+                        onEditDate = { viewModel.showEditDateDialog(transaction) },
                         onDelete = { viewModel.deleteTransaction(transaction) }
                     )
                 }
@@ -289,11 +291,22 @@ fun EditHoldingScreen(
             onDismiss = { viewModel.dismissDialog() }
         )
     }
+
+    uiState.editDateTransaction?.let {
+        EditTransactionDateDialog(
+            dateInput = uiState.editDateInput,
+            error = uiState.editDateError,
+            onDateChanged = viewModel::onEditDateChanged,
+            onConfirm = viewModel::confirmEditDate,
+            onDismiss = viewModel::dismissEditDateDialog
+        )
+    }
 }
 
 @Composable
 private fun TransactionCard(
     transaction: TransactionEntity,
+    onEditDate: () -> Unit,
     onDelete: () -> Unit
 ) {
     val isBuy = transaction.type == "BUY"
@@ -347,16 +360,72 @@ private fun TransactionCard(
                 }
             }
 
-            IconButton(onClick = onDelete) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "删除交易",
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                    modifier = Modifier.size(20.dp)
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onEditDate) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "编辑交易日期",
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "删除交易",
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun EditTransactionDateDialog(
+    dateInput: String,
+    error: String?,
+    onDateChanged: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "编辑交易日期", fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = dateInput,
+                    onValueChange = onDateChanged,
+                    label = { Text("日期（YYYY-MM-DD）") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                if (error != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("确认")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 @Composable
