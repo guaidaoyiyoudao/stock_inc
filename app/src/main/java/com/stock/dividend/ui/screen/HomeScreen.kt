@@ -45,10 +45,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.stock.dividend.R
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CategorizedAchievementList
 import com.stock.dividend.ui.component.DividendSummaryCard
 import com.stock.dividend.ui.component.EmptyStateView
@@ -57,6 +60,7 @@ import com.stock.dividend.ui.component.IncomeBreakdownChart
 import com.stock.dividend.ui.component.IncomeSummaryCard
 import com.stock.dividend.ui.component.IncomeTimelineCard
 import com.stock.dividend.ui.component.IncomeTrendChart
+import com.stock.dividend.ui.component.SectionHeader
 import com.stock.dividend.ui.component.StockCard
 import com.stock.dividend.ui.component.YearSelector
 import com.stock.dividend.viewmodel.AchievementUiState
@@ -250,30 +254,12 @@ private fun WatchlistContent(
             }
 
             item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp, bottom = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "持仓列表",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    TextButton(onClick = onAddStockClick) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null
-                        )
-                        Text(
-                            text = "添加股票",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                }
+                SectionHeader(
+                    title = stringResource(R.string.watchlist_section_holdings),
+                    actionText = stringResource(R.string.add_stock),
+                    actionIcon = Icons.Default.Add,
+                    onActionClick = onAddStockClick
+                )
             }
 
             items(
@@ -336,30 +322,13 @@ private fun IncomeTabContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "收入记录",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.SemiBold
-            )
-            TextButton(onClick = onAddIncomeClick) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null
-                )
-                Text(
-                    text = "添加收入",
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-        }
+        SectionHeader(
+            title = stringResource(R.string.income_section_records),
+            actionText = stringResource(R.string.income_action_add),
+            actionIcon = Icons.Default.Add,
+            onActionClick = onAddIncomeClick,
+            modifier = Modifier.padding(horizontal = AppCardDefaults.PageHorizontalPadding)
+        )
 
         Spacer(modifier = Modifier.height(4.dp))
 
