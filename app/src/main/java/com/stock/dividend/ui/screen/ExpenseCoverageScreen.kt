@@ -36,7 +36,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,7 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.R
+import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CompactTopAppBar
+import com.stock.dividend.ui.component.FinanceMetric
+import com.stock.dividend.ui.component.FinanceStatusTone
+import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.viewmodel.CoverageStatus
 import com.stock.dividend.viewmodel.ExpenseCoverageRow
 import com.stock.dividend.viewmodel.ExpenseCoverageUiState
@@ -122,7 +125,12 @@ private fun ExpenseCoverageContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(
+                start = AppCardDefaults.PageHorizontalPadding,
+                top = AppCardDefaults.PageHorizontalPadding,
+                end = AppCardDefaults.PageHorizontalPadding,
+                bottom = 96.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { SummaryCard(state) }
@@ -160,12 +168,12 @@ private fun ExpenseCoverageContent(
 private fun SummaryCard(state: ExpenseCoverageUiState) {
     Card(
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        colors = AppCardDefaults.summaryCardColors()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
+                .padding(AppCardDefaults.SummaryPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -209,15 +217,15 @@ private fun SummaryCard(state: ExpenseCoverageUiState) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                SummaryMetric(
+                FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_forecast_income),
                     value = formatMoney(state.forecastAnnualDividendIncome)
                 )
-                SummaryMetric(
+                FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_total_expense),
                     value = formatMoney(state.totalAnnualExpense)
                 )
-                SummaryMetric(
+                FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_covered_items),
                     value = "${state.coveredItemCount}/${state.rows.size}"
                 )
@@ -226,40 +234,6 @@ private fun SummaryCard(state: ExpenseCoverageUiState) {
                 text = coverageStatusText(state),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SummaryMetric(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.End
             )
         }
     }
@@ -318,12 +292,12 @@ private fun ExpenseRowCard(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = AppCardDefaults.listCardColors()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(AppCardDefaults.ListPadding),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
@@ -355,7 +329,10 @@ private fun ExpenseRowCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    StatusPill(status = row.status)
+                    StatusPill(
+                        text = stringResource(statusStringRes(row.status)),
+                        tone = statusTone(row.status)
+                    )
                     ExpenseRowActionMenu(
                         expanded = showMenu,
                         canMoveUp = canMoveUp,
@@ -395,17 +372,17 @@ private fun ExpenseRowCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ExpenseAmountMetric(
+                FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_annualized),
                     value = formatMoney(row.annualAmount),
                     modifier = Modifier.weight(1f)
                 )
-                ExpenseAmountMetric(
+                FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_covered),
                     value = formatMoney(row.coveredAmount),
                     modifier = Modifier.weight(1f)
                 )
-                ExpenseAmountMetric(
+                FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_gap),
                     value = formatMoney(row.gapAmount),
                     modifier = Modifier.weight(1f)
@@ -494,52 +471,18 @@ private fun ExpenseRowActionMenu(
 }
 
 @Composable
-private fun StatusPill(status: CoverageStatus) {
-    val color = statusColor(status)
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = color.copy(alpha = 0.12f)
-    ) {
-        Text(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            text = stringResource(statusStringRes(status)),
-            style = MaterialTheme.typography.labelMedium,
-            color = color,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
-private fun ExpenseAmountMetric(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
 private fun statusColor(status: CoverageStatus) =
     when (status) {
         CoverageStatus.COVERED -> MaterialTheme.colorScheme.primary
         CoverageStatus.PARTIAL -> MaterialTheme.colorScheme.tertiary
         CoverageStatus.UNCOVERED -> MaterialTheme.colorScheme.error
+    }
+
+private fun statusTone(status: CoverageStatus): FinanceStatusTone =
+    when (status) {
+        CoverageStatus.COVERED -> FinanceStatusTone.Positive
+        CoverageStatus.PARTIAL -> FinanceStatusTone.Warning
+        CoverageStatus.UNCOVERED -> FinanceStatusTone.Negative
     }
 
 @StringRes
