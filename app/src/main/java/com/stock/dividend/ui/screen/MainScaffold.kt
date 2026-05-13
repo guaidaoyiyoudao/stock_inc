@@ -112,8 +112,15 @@ fun MainScaffold(rootNavController: NavHostController) {
                 StockDetailScreen(
                     stockCode = code,
                     onBack = { tabNavController.popBackStack() },
-                    onEditHolding = { c -> tabNavController.navigate("editHolding/$c") }
+                    onEditHolding = { c -> tabNavController.navigate("editHolding/$c") },
+                    onOpenDividendValuation = { c -> tabNavController.navigate("dividendValuation/$c") }
                 )
+            }
+            composable(
+                route = "dividendValuation/{code}",
+                arguments = listOf(navArgument("code") { type = NavType.StringType })
+            ) {
+                DividendValuationScreen(onBack = { tabNavController.popBackStack() })
             }
             composable(
                 route = "editHolding/{code}",

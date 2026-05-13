@@ -56,6 +56,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.component.DividendRateChart
@@ -70,6 +71,7 @@ fun StockDetailScreen(
     stockCode: String,
     onBack: () -> Unit,
     onEditHolding: (String) -> Unit = {},
+    onOpenDividendValuation: (String) -> Unit = {},
     viewModel: StockDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -86,6 +88,12 @@ fun StockDetailScreen(
                         isRefreshing = uiState.isRefreshing,
                         onClick = { viewModel.refreshDividends() }
                     )
+                    TextButton(onClick = { onOpenDividendValuation(stockCode) }) {
+                        Text(
+                            text = "估值",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                     TextButton(onClick = { onEditHolding(stockCode) }) {
                         Text(
                             "编辑持仓",
@@ -183,6 +191,14 @@ fun StockDetailScreen(
                         }
                     }
 
+                    if (stock != null) {
+                        item {
+                            DividendValuationEntryCard(
+                                onClick = { onOpenDividendValuation(stockCode) }
+                            )
+                        }
+                    }
+
                     item {
                         Spacer(modifier = Modifier.height(8.dp))
                         SectionHeader(title = "分红率趋势")
@@ -235,6 +251,44 @@ fun StockDetailScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DividendValuationEntryCard(onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = AppCardDefaults.listCardColors(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(AppCardDefaults.ListPadding),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "股息折现估值",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "基于近 5 年股息和未来增长假设评估合理价值",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = onClick) {
+                Text("查看")
             }
         }
     }
