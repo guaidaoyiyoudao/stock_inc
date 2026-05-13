@@ -8,12 +8,12 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,9 +23,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,7 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -49,10 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.DividendEntity
@@ -61,7 +57,11 @@ import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.component.DividendRateChart
 import com.stock.dividend.ui.component.DividendRateFallbackCard
+import com.stock.dividend.ui.component.FinanceMetric
+import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.ForecastComparisonCard
+import com.stock.dividend.ui.component.SectionHeader
+import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.viewmodel.ForecastDetail
 import com.stock.dividend.viewmodel.StockDetailViewModel
 
@@ -94,10 +94,11 @@ fun StockDetailScreen(
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
-                    TextButton(onClick = { onEditHolding(stockCode) }) {
-                        Text(
-                            "编辑持仓",
-                            style = MaterialTheme.typography.labelLarge
+                    IconButton(onClick = { onEditHolding(stockCode) }) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "编辑持仓",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -152,8 +153,13 @@ fun StockDetailScreen(
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
             ) {
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(
+                        start = AppCardDefaults.PageHorizontalPadding,
+                        top = 12.dp,
+                        end = AppCardDefaults.PageHorizontalPadding,
+                        bottom = AppCardDefaults.BottomNavigationPadding
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(AppCardDefaults.SectionSpacing)
                 ) {
                     val stock = uiState.stock
 
@@ -220,7 +226,7 @@ fun StockDetailScreen(
 
                     item {
                         Spacer(modifier = Modifier.height(8.dp))
-                        SectionHeader(title = "分红记录", count = uiState.dividends.size)
+                        SectionHeader(title = "分红记录 (${uiState.dividends.size})")
                     }
 
                     items(
@@ -228,12 +234,9 @@ fun StockDetailScreen(
                         key = { index -> uiState.dividends[index].id }
                     ) { index ->
                         val dividend = uiState.dividends[index]
-                        val visibleLast = minOf(uiState.visibleCount, uiState.dividends.size) - 1
-                        val isLast = index == visibleLast
                         DividendRecordCard(
                             dividend = dividend,
-                            shares = stock?.shares ?: 0,
-                            isLast = isLast
+                            shares = stock?.shares ?: 0
                         )
                     }
 
@@ -298,66 +301,61 @@ private fun DividendValuationEntryCard(onClick: () -> Unit) {
 private fun HoldingInfoBanner(shares: Int, stockName: String, stockCode: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
+        shape = MaterialTheme.shapes.medium,
+        colors = AppCardDefaults.summaryCardColors(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(AppCardDefaults.SummaryPadding),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            CompanyIcon(
-                stockCode = stockCode,
-                stockName = stockName,
-                size = 36
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = "持有 $shares 股 $stockName",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
-}
-
-@Composable
-private fun SectionHeader(title: String, count: Int? = null) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .width(3.dp)
-                .height(16.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.primary)
-        )
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        if (count != null) {
-            Box(
-                modifier = Modifier
-                    .background(
-                        MaterialTheme.colorScheme.secondaryContainer,
-                        RoundedCornerShape(6.dp)
-                    )
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "$count",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    fontWeight = FontWeight.SemiBold
+                CompanyIcon(
+                    stockCode = stockCode,
+                    stockName = stockName,
+                    size = 40
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stockName,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = stockCode,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusPill(
+                    text = "持仓中",
+                    tone = FinanceStatusTone.Positive
+                )
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                FinanceMetric(
+                    label = "持仓股数",
+                    value = "$shares 股",
+                    modifier = Modifier.weight(1f)
+                )
+                FinanceMetric(
+                    label = "股票代码",
+                    value = stockCode,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.End
                 )
             }
         }
@@ -368,34 +366,38 @@ private fun SectionHeader(title: String, count: Int? = null) {
 private fun ForecastMainCard(forecast: ForecastDetail, selectedPeriod: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+        shape = MaterialTheme.shapes.medium,
+        colors = AppCardDefaults.summaryCardColors(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Text(
-                text = "${selectedPeriod}年平均预测",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                        append("¥")
+        Column(
+            modifier = Modifier.padding(AppCardDefaults.SummaryPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                FinanceMetric(
+                    label = "${selectedPeriod}年平均预测",
+                    value = "¥%.2f".format(forecast.forecastIncome),
+                    valueColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                StatusPill(
+                    text = "${forecast.actualYears} 年数据",
+                    tone = if (forecast.actualYears < selectedPeriod.toInt()) {
+                        FinanceStatusTone.Warning
+                    } else {
+                        FinanceStatusTone.Neutral
                     }
-                    append("%.2f".format(forecast.forecastIncome))
-                },
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+                )
+            }
             if (forecast.actualYears < selectedPeriod.toInt()) {
-                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "基于 ${forecast.actualYears} 年数据",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+                    text = "历史分红样本少于选择周期，预测结果会随新数据更新。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -405,81 +407,77 @@ private fun ForecastMainCard(forecast: ForecastDetail, selectedPeriod: String) {
 @Composable
 private fun DividendRecordCard(
     dividend: DividendEntity,
-    shares: Int,
-    isLast: Boolean
+    shares: Int
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+        shape = MaterialTheme.shapes.medium,
+        colors = AppCardDefaults.listCardColors(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(AppCardDefaults.ListPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             val year = dividend.reportDate.substringBefore("-")
-            Box(
-                modifier = Modifier
-                    .background(
-                        MaterialTheme.colorScheme.primaryContainer,
-                        RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
+                StatusPill(
                     text = year,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    tone = FinanceStatusTone.Neutral
                 )
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "每股 ¥${"%.4f".format(dividend.cashPerShare)}",
+                    text = dividend.planStatus ?: "分红记录",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
                 )
-
-                val details = buildList {
-                    dividend.exDividendDate?.let { add("除息日 $it") }
-                    dividend.planStatus?.let { add(it) }
-                }
-                if (details.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = details.joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                }
-            }
-
-            Column(horizontalAlignment = Alignment.End) {
                 dividend.dividendYield?.let { yield ->
                     Text(
                         text = "${"%.2f".format(yield)}%",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                if (shares > 0) {
-                    val total = dividend.cashPerShare * shares
-                    Text(
-                        text = "¥${"%.2f".format(total)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                FinanceMetric(
+                    label = "每股派息",
+                    value = "¥${"%.4f".format(dividend.cashPerShare)}",
+                    valueColor = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                if (shares > 0) {
+                    val total = dividend.cashPerShare * shares
+                    FinanceMetric(
+                        label = "预计到账",
+                        value = "¥${"%.2f".format(total)}",
+                        valueColor = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            dividend.exDividendDate?.let { exDate ->
+                Text(
+                    text = "除权除息日 $exDate",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
         }
     }
 }
