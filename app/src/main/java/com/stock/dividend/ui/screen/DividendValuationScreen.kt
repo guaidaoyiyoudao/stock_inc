@@ -10,13 +10,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -35,6 +45,38 @@ import com.stock.dividend.viewmodel.DividendValuationPreset
 import com.stock.dividend.viewmodel.DividendValuationUiState
 import com.stock.dividend.viewmodel.DividendValuationViewModel
 import java.util.Locale
+
+data class DividendValuationFieldHelp(
+    val title: String,
+    val description: String
+)
+
+val dividendValuationFieldHelp = listOf(
+    DividendValuationFieldHelp(
+        title = "股息基准",
+        description = "估值的起点股息，默认取最近 5 个可用分红年份的每股现金分红平均值；没有历史分红时可手动输入。"
+    ),
+    DividendValuationFieldHelp(
+        title = "未来股息增长率",
+        description = "假设未来每年股息增长的比例。"
+    ),
+    DividendValuationFieldHelp(
+        title = "折现率",
+        description = "把未来现金流折算成今天价值时使用的回报率要求，越高则估值越低。"
+    ),
+    DividendValuationFieldHelp(
+        title = "终值增长率",
+        description = "预测期结束后，假设股息长期稳定增长的比例；必须低于折现率。"
+    ),
+    DividendValuationFieldHelp(
+        title = "预测年限",
+        description = "逐年预测股息现金流的年数。"
+    ),
+    DividendValuationFieldHelp(
+        title = "安全边际",
+        description = "在内在价值基础上打折得到更保守的买入价。"
+    )
+)
 
 @Composable
 fun DividendValuationScreen(
@@ -226,6 +268,8 @@ private fun AssumptionCard(
     onMarginOfSafetyChanged: (String) -> Unit,
     onPreset: (DividendValuationPreset) -> Unit
 ) {
+    var selectedHelp by remember { mutableStateOf<DividendValuationFieldHelp?>(null) }
+
     Card(colors = AppCardDefaults.listCardColors()) {
         Column(
             modifier = Modifier
@@ -241,12 +285,48 @@ private fun AssumptionCard(
                     )
                 }
             }
-            AssumptionField("股息基准", state.dividendBasisInput, onDividendBasisChanged)
-            AssumptionField("未来股息增长率 (%)", state.growthRateInput, onGrowthRateChanged)
-            AssumptionField("折现率 (%)", state.discountRateInput, onDiscountRateChanged)
-            AssumptionField("终值增长率 (%)", state.terminalGrowthRateInput, onTerminalGrowthRateChanged)
-            AssumptionField("预测年限", state.projectionYearsInput, onProjectionYearsChanged)
-            AssumptionField("安全边际 (%)", state.marginOfSafetyInput, onMarginOfSafetyChanged)
+            AssumptionField(
+                label = "股息基准",
+                value = state.dividendBasisInput,
+                help = helpFor("股息基准"),
+                onHelpClick = { selectedHelp = it },
+                onValueChange = onDividendBasisChanged
+            )
+            AssumptionField(
+                label = "未来股息增长率 (%)",
+                value = state.growthRateInput,
+                help = helpFor("未来股息增长率"),
+                onHelpClick = { selectedHelp = it },
+                onValueChange = onGrowthRateChanged
+            )
+            AssumptionField(
+                label = "折现率 (%)",
+                value = state.discountRateInput,
+                help = helpFor("折现率"),
+                onHelpClick = { selectedHelp = it },
+                onValueChange = onDiscountRateChanged
+            )
+            AssumptionField(
+                label = "终值增长率 (%)",
+                value = state.terminalGrowthRateInput,
+                help = helpFor("终值增长率"),
+                onHelpClick = { selectedHelp = it },
+                onValueChange = onTerminalGrowthRateChanged
+            )
+            AssumptionField(
+                label = "预测年限",
+                value = state.projectionYearsInput,
+                help = helpFor("预测年限"),
+                onHelpClick = { selectedHelp = it },
+                onValueChange = onProjectionYearsChanged
+            )
+            AssumptionField(
+                label = "安全边际 (%)",
+                value = state.marginOfSafetyInput,
+                help = helpFor("安全边际"),
+                onHelpClick = { selectedHelp = it },
+                onValueChange = onMarginOfSafetyChanged
+            )
             if (state.dividendBasisYears > 0) {
                 Text(
                     text = "股息基准来自近 ${state.dividendBasisYears} 年平均每股股息。",
@@ -256,18 +336,41 @@ private fun AssumptionCard(
             }
         }
     }
+
+    selectedHelp?.let { help ->
+        AlertDialog(
+            onDismissRequest = { selectedHelp = null },
+            title = { Text(help.title) },
+            text = { Text(help.description) },
+            confirmButton = {
+                TextButton(onClick = { selectedHelp = null }) {
+                    Text("知道了")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun AssumptionField(
     label: String,
     value: String,
+    help: DividendValuationFieldHelp,
+    onHelpClick: (DividendValuationFieldHelp) -> Unit,
     onValueChange: (String) -> Unit
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        trailingIcon = {
+            IconButton(onClick = { onHelpClick(help) }) {
+                Icon(
+                    imageVector = Icons.Filled.Info,
+                    contentDescription = "${help.title}说明"
+                )
+            }
+        },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -323,6 +426,9 @@ private fun TerminalValueCard(state: DividendValuationUiState) {
 private fun formatCurrency(value: Double): String = String.format(Locale.US, "¥%.2f", value)
 
 private fun formatPercent(value: Double): String = String.format(Locale.US, "%.1f%%", value * 100)
+
+private fun helpFor(title: String): DividendValuationFieldHelp =
+    dividendValuationFieldHelp.first { it.title == title }
 
 private fun statusText(status: DividendValuationStatus): String = when (status) {
     DividendValuationStatus.UNDERVALUED -> "低估"
