@@ -116,6 +116,20 @@ class DividendValuationViewModelTest {
     }
 
     @Test
+    fun `continues without market comparison when quote loading throws`() = runTest {
+        coEvery { stockRepository.fetchQuotes(any()) } throws RuntimeException("network failed")
+        stockFlow.value = StockEntity("sz.000001", "平安银行", "0")
+        dividendsFlow.value = listOf(dividend(2025, 6.0))
+
+        val viewModel = viewModel()
+        advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.currentPrice).isNull()
+        assertThat(viewModel.uiState.value.result?.intrinsicValuePerShare).isGreaterThan(0.0)
+        assertThat(viewModel.uiState.value.result?.discountOrPremiumPercent).isNull()
+    }
+
+    @Test
     fun `assumption changes recalculate result`() = runTest {
         stockFlow.value = StockEntity("sz.000001", "平安银行", "0")
         dividendsFlow.value = listOf(dividend(2025, 2.0))

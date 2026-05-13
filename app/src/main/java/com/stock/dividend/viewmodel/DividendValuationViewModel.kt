@@ -58,7 +58,13 @@ class DividendValuationViewModel @Inject constructor(
             combine(stockFlow, dividendsFlow) { stock, dividends -> stock to dividends }
                 .collect { (stock, dividends) ->
                     val basis = DividendDiscountCalculator.deriveDividendBasis(dividends)
-                    val currentPrice = stock?.let { stockRepository.fetchQuotes(listOf(it))[it.code] }
+                    val currentPrice = stock?.let {
+                        try {
+                            stockRepository.fetchQuotes(listOf(it))[it.code]
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
                     _uiState.value = _uiState.value.copy(
                         stock = stock,
                         isLoading = false,
