@@ -67,6 +67,7 @@ import com.stock.dividend.viewmodel.AchievementViewModel
 import com.stock.dividend.viewmodel.DividendIncomeUiState
 import com.stock.dividend.viewmodel.DividendIncomeViewModel
 import com.stock.dividend.viewmodel.HomeViewModel
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -449,6 +450,10 @@ private fun AddIncomeDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+
+internal fun formatHoldingsTotalMarketValue(value: Double?): String {
+    return "总市值 ¥${"%,.2f".format(Locale.US, value ?: 0.0)}"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
