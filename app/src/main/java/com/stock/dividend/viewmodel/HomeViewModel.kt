@@ -1,5 +1,7 @@
 package com.stock.dividend.viewmodel
 
+import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,6 +15,7 @@ import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +31,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneId
 import javax.inject.Inject
 
 @Stable
@@ -61,8 +68,12 @@ class HomeViewModel @Inject constructor(
     private val dividendDao: DividendDao,
     private val livingExpenseRepository: LivingExpenseRepository,
     private val transactionDao: TransactionDao,
-    private val notificationCheckCoordinator: NotificationCheckCoordinator
+    private val notificationCheckCoordinator: NotificationCheckCoordinator,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -111,6 +122,36 @@ class HomeViewModel @Inject constructor(
             }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    private fun isTradingHours(timestampMs: Long): Boolean {
+        val now = Instant.ofEpochMilli(timestampMs).atZone(ZoneId.of("Asia/Shanghai"))
+        val dayOfWeek = now.dayOfWeek
+        if (dayOfWeek == DayOfWeek.SATURDAY || dayOfWeek == DayOfWeek.SUNDAY) return false
+        val time = now.toLocalTime()
+        val open = LocalTime.of(9, 30)
+        val close = LocalTime.of(15, 0)
+        return !time.isBefore(open) && !time.isAfter(close)
+    }
+
+    private fun shouldAutoRefresh(): Boolean {
+        val lastRefreshMs = prefs.getLong(KEY_LAST_REFRESH, 0L)
+        if (lastRefreshMs == 0L) return true
+        val now = System.currentTimeMillis()
+        val ttl = if (isTradingHours(now)) TTL_TRADING_MS else TTL_NON_TRADING_MS
+        return (now - lastRefreshMs) > ttl
+    }
+
+    fun onResume() {
+        if (shouldAutoRefresh()) {
+            refreshQuotes()
+        }
+    }
+
+    companion object {
+        private const val KEY_LAST_REFRESH = "last_quote_refresh_ms"
+        private const val TTL_TRADING_MS = 5 * 60 * 1000L
+        private const val TTL_NON_TRADING_MS = 60 * 60 * 1000L
+    }
 
     init {
         viewModelScope.launch {
@@ -174,6 +215,9 @@ class HomeViewModel @Inject constructor(
                                 )
                             }
                             notificationCheckCoordinator.checkWithPrices(stocksWithShares, prices)
+                            val now = System.currentTimeMillis()
+                            prefs.edit().putLong(KEY_LAST_REFRESH, now).apply()
+                            stockRepository.updateAllLastUpdated(stocksWithShares.map { it.code }, now)
                         } catch (_: Exception) {
                             _uiState.update { it.copy(isLoading = false) }
                         }
