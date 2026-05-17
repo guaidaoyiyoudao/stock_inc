@@ -16,6 +16,9 @@ class TransactionRepository @Inject constructor(
     suspend fun deleteTransaction(transaction: TransactionEntity) =
         transactionDao.delete(transaction)
 
+    suspend fun updateTransaction(transaction: TransactionEntity) =
+        transactionDao.update(transaction)
+
     suspend fun deleteTransactionById(id: Long) =
         transactionDao.deleteById(id)
 

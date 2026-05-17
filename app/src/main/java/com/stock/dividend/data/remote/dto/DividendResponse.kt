@@ -25,6 +25,8 @@ data class DividendResponse(
         val exDividendDate: String?,
         @SerializedName("EQUITY_RECORD_DATE")
         val equityRecordDate: String?,
+        @SerializedName("PLAN_NOTICE_DATE")
+        val planNoticeDate: String? = null,
         @SerializedName("ASSIGN_PROGRESS")
         val assignProgress: String?
     )

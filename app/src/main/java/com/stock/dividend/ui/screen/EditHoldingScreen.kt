@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -228,6 +229,7 @@ fun EditHoldingScreen(
                 items(uiState.transactions.sortedByDescending { it.date }, key = { it.id }) { transaction ->
                     TransactionCard(
                         transaction = transaction,
+                        onEdit = { viewModel.showEditTransactionDialog(transaction) },
                         onDelete = { viewModel.deleteTransaction(transaction) }
                     )
                 }
@@ -289,11 +291,32 @@ fun EditHoldingScreen(
             onDismiss = { viewModel.dismissDialog() }
         )
     }
+
+    if (uiState.showEditTransactionDialog) {
+        val transaction = uiState.editingTransaction
+        if (transaction != null) {
+            val isBuy = transaction.type == "BUY"
+            AddTransactionDialog(
+                title = if (isBuy) "编辑买入" else "编辑卖出",
+                isBuy = isBuy,
+                sharesInput = uiState.editSharesInput,
+                priceInput = uiState.editPriceInput,
+                dateInput = uiState.editDateInput,
+                error = uiState.editInputError,
+                onSharesChanged = viewModel::onEditSharesChanged,
+                onPriceChanged = viewModel::onEditPriceChanged,
+                onDateChanged = viewModel::onEditDateChanged,
+                onConfirm = { viewModel.confirmEditTransaction() },
+                onDismiss = { viewModel.dismissDialog() }
+            )
+        }
+    }
 }
 
 @Composable
 private fun TransactionCard(
     transaction: TransactionEntity,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val isBuy = transaction.type == "BUY"
@@ -347,6 +370,15 @@ private fun TransactionCard(
                 }
             }
 
+            IconButton(onClick = onEdit) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "编辑交易",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
             IconButton(onClick = onDelete) {
                 Icon(
                     Icons.Default.Delete,
@@ -361,6 +393,7 @@ private fun TransactionCard(
 
 @Composable
 private fun AddTransactionDialog(
+    title: String? = null,
     isBuy: Boolean,
     sharesInput: String,
     priceInput: String,
@@ -372,13 +405,13 @@ private fun AddTransactionDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val title = if (isBuy) "添加买入" else "添加卖出"
+    val dialogTitle = title ?: if (isBuy) "添加买入" else "添加卖出"
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = title,
+                text = dialogTitle,
                 fontWeight = FontWeight.SemiBold
             )
         },

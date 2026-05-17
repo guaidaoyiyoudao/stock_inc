@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +30,7 @@ private data class BottomNavItem(
 private val bottomNavItems = listOf(
     BottomNavItem("watchlist", "持仓", Icons.Filled.AccountBalance),
     BottomNavItem("income", "股息收入", Icons.AutoMirrored.Filled.TrendingUp),
+    BottomNavItem("calendar", "日历", Icons.Filled.DateRange),
     BottomNavItem("achievements", "成就", Icons.Filled.EmojiEvents)
 )
 
@@ -97,6 +99,9 @@ fun MainScaffold(rootNavController: NavHostController) {
             }
             composable("income") {
                 IncomeScreen()
+            }
+            composable("calendar") {
+                DividendCalendarScreen()
             }
             composable("achievements") {
                 AchievementScreen()

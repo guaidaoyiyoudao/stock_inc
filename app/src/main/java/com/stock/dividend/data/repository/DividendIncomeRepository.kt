@@ -26,12 +26,22 @@ class DividendIncomeRepository @Inject constructor(
     suspend fun generateMissingAutoRecords() {
         val allDividends = dividendDao.getAllWithExDate()
         val existingIds = incomeRecordDao.getAllIds().toSet()
+        val existingRecords = incomeRecordDao.getAllRecords()
+        deleteAutoRecordsDuplicatedByManual(existingRecords)
+        val existingEventKeys = existingRecords
+            .mapNotNull { record ->
+                val stockCode = record.stockCode ?: return@mapNotNull null
+                val date = (record.exDividendDate ?: record.date).toDateOnlyOrNull() ?: return@mapNotNull null
+                stockCode to date
+            }
+            .toSet()
 
         val newRecords = mutableListOf<DividendIncomeRecordEntity>()
         for (dividend in allDividends) {
-            val exDate = dividend.exDividendDate ?: continue
+            val exDate = dividend.exDividendDate.toDateOnlyOrNull() ?: continue
             val autoId = "auto_${dividend.stockCode}_${exDate}"
             if (autoId in existingIds) continue
+            if (dividend.stockCode to exDate in existingEventKeys) continue
 
             val stock = stockDao.getByCode(dividend.stockCode) ?: continue
 
@@ -58,6 +68,30 @@ class DividendIncomeRepository @Inject constructor(
         }
     }
 
+    private suspend fun deleteAutoRecordsDuplicatedByManual(records: List<DividendIncomeRecordEntity>) {
+        val manualEventKeys = records
+            .filter { it.source == "manual" }
+            .mapNotNull { record ->
+                val stockCode = record.stockCode ?: return@mapNotNull null
+                val date = (record.exDividendDate ?: record.date).toDateOnlyOrNull() ?: return@mapNotNull null
+                stockCode to date
+            }
+            .toSet()
+
+        val duplicateAutoIds = records
+            .filter { it.source == "auto" }
+            .filter { record ->
+                val stockCode = record.stockCode ?: return@filter false
+                val date = (record.exDividendDate ?: record.date).toDateOnlyOrNull() ?: return@filter false
+                stockCode to date in manualEventKeys
+            }
+            .map { it.id }
+
+        if (duplicateAutoIds.isNotEmpty()) {
+            incomeRecordDao.deleteByIds(duplicateAutoIds)
+        }
+    }
+
     suspend fun regenerateAutoRecords() {
         incomeRecordDao.deleteAllAutoRecords()
         generateMissingAutoRecords()
@@ -72,6 +106,12 @@ class DividendIncomeRepository @Inject constructor(
             .sumOf { if (it.type == "BUY") it.shares else -it.shares }
         return held.coerceAtLeast(0)
     }
+
+    private fun String?.toDateOnlyOrNull(): String? =
+        this
+            ?.substringBefore("T")
+            ?.substringBefore(" ")
+            ?.takeIf { it.isNotBlank() }
 
     fun observeByYear(year: Int): Flow<List<DividendIncomeRecordEntity>> =
         incomeRecordDao.observeByYear(year)

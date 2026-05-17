@@ -28,5 +28,6 @@ data class DividendEntity(
     val dividendYield: Double? = null,
     val exDividendDate: String? = null,
     val recordDate: String? = null,
+    val planNoticeDate: String? = null,
     val planStatus: String? = null
 )

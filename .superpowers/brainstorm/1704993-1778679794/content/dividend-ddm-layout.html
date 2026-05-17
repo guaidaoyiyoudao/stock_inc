@@ -1,0 +1,70 @@
+<h2>股息折现估值页布局</h2>
+<p class="subtitle">方案 B：从股票详情进入独立页面。请关注信息顺序是否适合快速判断。</p>
+
+<div class="mockup">
+  <div class="mockup-header">DividendDiscountValuationScreen - 贵州茅台 sh.600519</div>
+  <div class="mockup-body">
+    <div style="display:grid;gap:14px;">
+      <div style="border:1px solid #d5dae3;border-radius:8px;padding:14px;background:#f8fafc;">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+          <div>
+            <div class="label">估值结论</div>
+            <h3 style="margin:4px 0 6px;">合理价值 ¥186.40 / 股</h3>
+            <p style="margin:0;color:#475569;">当前价 ¥168.20，低估 9.8%</p>
+          </div>
+          <div style="padding:6px 10px;border-radius:6px;background:#dcfce7;color:#166534;font-weight:700;">低估</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;">
+          <div><div class="label">安全买入价</div><strong>¥149.12</strong></div>
+          <div><div class="label">年化股息基准</div><strong>¥8.20</strong></div>
+          <div><div class="label">安全边际</div><strong>20%</strong></div>
+        </div>
+      </div>
+
+      <div style="border:1px solid #d5dae3;border-radius:8px;padding:14px;background:white;">
+        <div class="label">估值假设</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:10px;">
+          <input class="mock-input" value="未来股息增长率 5.0%">
+          <input class="mock-input" value="折现率 9.0%">
+          <input class="mock-input" value="终值增长率 2.0%">
+          <input class="mock-input" value="预测年限 10 年">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button class="mock-button">保守</button>
+          <button class="mock-button">基准</button>
+          <button class="mock-button">乐观</button>
+        </div>
+      </div>
+
+      <div style="border:1px solid #d5dae3;border-radius:8px;padding:14px;background:white;">
+        <div class="label">未来现金流明细</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;font-weight:700;color:#334155;">
+          <span>年份</span><span>预估股息</span><span>折现值</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;color:#475569;">
+          <span>第 1 年</span><span>¥8.61</span><span>¥7.90</span>
+          <span>第 2 年</span><span>¥9.04</span><span>¥7.61</span>
+          <span>第 3 年</span><span>¥9.49</span><span>¥7.33</span>
+          <span>终值</span><span>¥146.80</span><span>¥62.11</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve-layout" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>认可这个结构</h3>
+      <p>首屏先判断，再调假设，最后看现金流明细。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="revise-layout" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>需要调整结构</h3>
+      <p>例如把假设放到首屏更靠前，或减少明细密度。</p>
+    </div>
+  </div>
+</div>

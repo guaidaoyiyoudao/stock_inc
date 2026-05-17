@@ -23,7 +23,7 @@ class DividendRepository @Inject constructor(
             val items = response.result?.data ?: emptyList()
 
             val entities = items.mapNotNull { item ->
-                val reportDate = item.reportDate?.substringBefore("T") ?: return@mapNotNull null
+                val reportDate = item.reportDate.toDateOnlyOrNull() ?: return@mapNotNull null
                 val cashRatio = item.pretaxBonusRmb ?: return@mapNotNull null
                 if (cashRatio <= 0) return@mapNotNull null
 
@@ -33,8 +33,9 @@ class DividendRepository @Inject constructor(
                     reportDate = reportDate,
                     cashPerShare = cashRatio / 10.0,
                     dividendYield = item.dividentRatio?.let { it * 100.0 },
-                    exDividendDate = item.exDividendDate?.substringBefore("T"),
-                    recordDate = item.equityRecordDate?.substringBefore("T"),
+                    exDividendDate = item.exDividendDate.toDateOnlyOrNull(),
+                    recordDate = item.equityRecordDate.toDateOnlyOrNull(),
+                    planNoticeDate = item.planNoticeDate.toDateOnlyOrNull(),
                     planStatus = item.assignProgress
                 )
             }
@@ -55,6 +56,12 @@ class DividendRepository @Inject constructor(
         return dividendDao.getLatestByStock(stockCode)
     }
 }
+
+private fun String?.toDateOnlyOrNull(): String? =
+    this
+        ?.substringBefore("T")
+        ?.substringBefore(" ")
+        ?.takeIf { it.isNotBlank() }
 
 internal fun Exception.toUserMessage(): String {
     return when (this) {

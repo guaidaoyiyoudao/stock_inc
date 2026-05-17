@@ -110,6 +110,96 @@ class DividendRepositoryTest {
     }
 
     @Test
+    fun `fetchAndCacheDividends strips space time from eastmoney dates`() = runTest {
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+
+        coEvery { api.getDividends(filter = any()) } returns DividendResponse(
+            success = true,
+            result = DividendResponse.DividendResult(
+                data = listOf(
+                    DividendResponse.DividendItem(
+                        securityCode = "600398",
+                        securityNameAbbr = "海澜之家",
+                        reportDate = "2025-12-31 00:00:00",
+                        pretaxBonusRmb = 4.1,
+                        dividentRatio = 0.062,
+                        exDividendDate = "2026-05-11 00:00:00",
+                        equityRecordDate = "2026-05-08 00:00:00",
+                        assignProgress = "实施分配"
+                    )
+                )
+            )
+        )
+
+        repository.fetchAndCacheDividends("sh.600398", "600398")
+
+        val entity = entitiesSlot.last().single()
+        assertThat(entity.reportDate).isEqualTo("2025-12-31")
+        assertThat(entity.exDividendDate).isEqualTo("2026-05-11")
+        assertThat(entity.recordDate).isEqualTo("2026-05-08")
+    }
+
+    @Test
+    fun `fetchAndCacheDividends persists ex dividend date for calendar`() = runTest {
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+
+        coEvery { api.getDividends(filter = any()) } returns DividendResponse(
+            success = true,
+            result = DividendResponse.DividendResult(
+                data = listOf(
+                    DividendResponse.DividendItem(
+                        securityCode = "000001",
+                        securityNameAbbr = "平安银行",
+                        reportDate = "2098-12-31T00:00:00",
+                        pretaxBonusRmb = 3.0,
+                        dividentRatio = null,
+                        exDividendDate = "2099-06-18T00:00:00",
+                        equityRecordDate = "2099-06-17T00:00:00",
+                        assignProgress = "实施分配"
+                    )
+                )
+            )
+        )
+
+        repository.fetchAndCacheDividends("sz.000001", "000001")
+
+        val entity = entitiesSlot.last().single()
+        assertThat(entity.exDividendDate).isEqualTo("2099-06-18")
+        assertThat(entity.recordDate).isEqualTo("2099-06-17")
+    }
+
+    @Test
+    fun `fetchAndCacheDividends persists plan notice date for yearly plan calendar`() = runTest {
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+
+        coEvery { api.getDividends(filter = any()) } returns DividendResponse(
+            success = true,
+            result = DividendResponse.DividendResult(
+                data = listOf(
+                    DividendResponse.DividendItem(
+                        securityCode = "600398",
+                        securityNameAbbr = "海澜之家",
+                        reportDate = "2026-06-30 00:00:00",
+                        pretaxBonusRmb = 1.0,
+                        dividentRatio = null,
+                        exDividendDate = null,
+                        equityRecordDate = null,
+                        assignProgress = "预披露",
+                        planNoticeDate = "2026-04-30 00:00:00"
+                    )
+                )
+            )
+        )
+
+        repository.fetchAndCacheDividends("sh.600398", "600398")
+
+        assertThat(entitiesSlot.last().single().planNoticeDate).isEqualTo("2026-04-30")
+    }
+
+    @Test
     fun `fetchAndCacheDividends deletes old data before inserting new`() = runTest {
         val deleteSlot = mutableListOf<String>()
         coEvery { dao.deleteByStockCode(capture(deleteSlot)) } returns Unit

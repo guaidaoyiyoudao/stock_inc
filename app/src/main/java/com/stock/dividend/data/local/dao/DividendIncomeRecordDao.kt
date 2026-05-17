@@ -29,6 +29,9 @@ interface DividendIncomeRecordDao {
     @Query("SELECT id FROM dividend_income_records")
     suspend fun getAllIds(): List<String>
 
+    @Query("SELECT * FROM dividend_income_records")
+    suspend fun getAllRecords(): List<DividendIncomeRecordEntity>
+
     @Query("SELECT * FROM dividend_income_records WHERE source = 'auto'")
     suspend fun getAllAutoRecords(): List<DividendIncomeRecordEntity>
 
@@ -37,6 +40,9 @@ interface DividendIncomeRecordDao {
 
     @Query("DELETE FROM dividend_income_records WHERE id = :id AND source = 'manual'")
     suspend fun deleteManualRecord(id: String): Int
+
+    @Query("DELETE FROM dividend_income_records WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>): Int
 
     @Query("DELETE FROM dividend_income_records WHERE source = 'auto'")
     suspend fun deleteAllAutoRecords(): Int

@@ -140,6 +140,68 @@ class DividendIncomeRepositoryTest {
     }
 
     @Test
+    fun `generateMissingAutoRecords does not duplicate corrected legacy date record`() = runTest {
+        val dividends = listOf(
+            DividendEntity(
+                id = "sh.600398_2025-12-31",
+                stockCode = "sh.600398",
+                reportDate = "2025-12-31",
+                cashPerShare = 0.41,
+                exDividendDate = "2026-05-11"
+            )
+        )
+        val correctedLegacyRecord = DividendIncomeRecordEntity(
+            id = "auto_sh.600398_2026-05-11 00:00:00",
+            stockCode = "sh.600398",
+            year = 2026,
+            date = "2026-05-11 00:00:00",
+            amount = 40.0,
+            exDividendDate = "2026-05-11 00:00:00",
+            source = "manual",
+            note = "实际到账"
+        )
+        coEvery { dividendDao.getAllWithExDate() } returns dividends
+        coEvery { incomeRecordDao.getAllIds() } returns listOf(correctedLegacyRecord.id)
+        coEvery { incomeRecordDao.getAllRecords() } returns listOf(correctedLegacyRecord)
+        coEvery { stockDao.getByCode("sh.600398") } returns testStock.copy(code = "sh.600398", shares = 100)
+
+        repository.generateMissingAutoRecords()
+
+        coVerify(exactly = 0) { incomeRecordDao.insertAll(any()) }
+    }
+
+    @Test
+    fun `generateMissingAutoRecords removes auto duplicate when manual record exists for same dividend`() = runTest {
+        val manualRecord = DividendIncomeRecordEntity(
+            id = "auto_sh.600398_2026-05-11 00:00:00",
+            stockCode = "sh.600398",
+            year = 2026,
+            date = "2026-05-11 00:00:00",
+            amount = 40.0,
+            exDividendDate = "2026-05-11 00:00:00",
+            source = "manual",
+            note = "实际到账"
+        )
+        val duplicateAutoRecord = DividendIncomeRecordEntity(
+            id = "auto_sh.600398_2026-05-11",
+            stockCode = "sh.600398",
+            year = 2026,
+            date = "2026-05-11",
+            amount = 41.0,
+            exDividendDate = "2026-05-11",
+            source = "auto"
+        )
+        coEvery { dividendDao.getAllWithExDate() } returns emptyList()
+        coEvery { incomeRecordDao.getAllIds() } returns listOf(manualRecord.id, duplicateAutoRecord.id)
+        coEvery { incomeRecordDao.getAllRecords() } returns listOf(manualRecord, duplicateAutoRecord)
+        coEvery { incomeRecordDao.deleteByIds(any()) } returns 1
+
+        repository.generateMissingAutoRecords()
+
+        coVerify { incomeRecordDao.deleteByIds(listOf("auto_sh.600398_2026-05-11")) }
+    }
+
+    @Test
     fun `generateMissingAutoRecords handles multiple dividends per stock`() = runTest {
         val dividends = listOf(
             DividendEntity(

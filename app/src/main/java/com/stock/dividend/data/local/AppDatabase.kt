@@ -29,7 +29,7 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         AchievementEntity::class,
         LivingExpenseItemEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -131,6 +131,12 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_living_expense_items_sortOrder` " +
                             "ON `living_expense_items`(`sortOrder`)"
                 )
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE dividends ADD COLUMN planNoticeDate TEXT")
             }
         }
     }
