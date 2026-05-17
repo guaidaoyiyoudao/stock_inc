@@ -2,6 +2,7 @@ package com.stock.dividend.data.notification
 
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
+import javax.inject.Inject
 
 data class NotificationRuleEvaluation(
     val isComparable: Boolean,
@@ -11,7 +12,7 @@ data class NotificationRuleEvaluation(
     val checkedAt: Long
 )
 
-class NotificationRuleEvaluator {
+class NotificationRuleEvaluator @Inject constructor() {
 
     fun evaluate(
         rule: NotificationRuleEntity,
