@@ -7,7 +7,7 @@ The app currently requires manual pull-to-refresh to update stock prices. Users 
 ## Goals
 
 1. Auto-refresh stock prices when the user returns to the app, but only if data is stale
-2. Avoid unnecessary network requests during non-trading hours
+2. Reduce unnecessary network requests with tiered TTL
 3. Fix the race condition between forecast computation and quote fetching in HomeViewModel
 4. Fix `lastUpdated` timestamp to reflect actual refresh time
 
@@ -26,7 +26,7 @@ The app currently requires manual pull-to-refresh to update stock prices. Users 
 | Period | TTL | Behavior |
 |--------|-----|----------|
 | Trading hours (Mon–Fri 9:30–15:00 CST) | 5 minutes | Auto-refresh if stale |
-| Non-trading hours (all other times) | ∞ | No auto-refresh, manual only |
+| Non-trading hours (all other times) | 1 hour | Auto-refresh if stale |
 
 The TTL timestamp is stored in `SharedPreferences` (key: `last_quote_refresh_ms`), surviving process restart.
 
@@ -34,11 +34,10 @@ The TTL timestamp is stored in `SharedPreferences` (key: `last_quote_refresh_ms`
 
 ```
 App resumes (ON_RESUME)
-  → Check if within trading hours
-    → YES: now - lastRefreshMs > 5 min?
-      → YES: emit to _refreshTrigger → fetch quotes → update lastRefreshMs
-      → NO: skip (data is fresh)
-    → NO: skip (only manual pull-to-refresh works)
+  → now - lastRefreshMs > TTL?
+    → YES: emit to _refreshTrigger → fetch quotes → update lastRefreshMs
+    → NO: skip (data is fresh)
+  → TTL = 5 min during trading hours, 1 hour during non-trading hours
 
 Manual pull-to-refresh:
   → Always triggers fetch → updates lastRefreshMs regardless of TTL
@@ -92,5 +91,5 @@ If Coroutine B reads forecasts before the network call, and Coroutine A updates 
 2. Pull-to-refresh → verify prices update + "更新于" timestamp updates
 3. Switch to another app for 3 minutes (within trading hours) → switch back → verify no refresh (within TTL)
 4. Manually advance `lastRefreshMs` to 6 minutes ago → switch back → verify auto-refresh triggers
-5. Test outside trading hours → verify no auto-refresh
+5. Test outside trading hours → verify auto-refresh triggers with 1-hour TTL
 6. Unit test: verify `HomeViewModel` race condition fix with concurrent forecast updates

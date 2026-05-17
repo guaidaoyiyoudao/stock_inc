@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Auto-refresh stock prices on app resume when data is stale (trading hours: 5-min TTL; non-trading: no auto-refresh), fix race condition in HomeViewModel, and fix misleading `lastUpdated` timestamp.
+**Goal:** Auto-refresh stock prices on app resume when data is stale (trading hours: 5-min TTL; non-trading: 1-hour TTL), fix race condition in HomeViewModel, and fix misleading `lastUpdated` timestamp.
 
 **Architecture:** Add TTL check in HomeViewModel triggered by lifecycle ON_RESUME; fix concurrent-flow race condition by re-reading latest state after network call; persist refresh timestamp to SharedPreferences and `lastUpdated` to Room.
 
@@ -249,8 +249,8 @@ Add inside the class body, before `init`:
         val lastRefreshMs = prefs.getLong(KEY_LAST_REFRESH, 0L)
         if (lastRefreshMs == 0L) return true
         val now = System.currentTimeMillis()
-        if (!isTradingHours(now)) return false
-        return (now - lastRefreshMs) > TTL_TRADING_MS
+        val ttl = if (isTradingHours(now)) TTL_TRADING_MS else TTL_NON_TRADING_MS
+        return (now - lastRefreshMs) > ttl
     }
 
     fun onResume() {
@@ -264,7 +264,8 @@ Add companion object with constants:
 ```kotlin
     companion object {
         private const val KEY_LAST_REFRESH = "last_quote_refresh_ms"
-        private const val TTL_TRADING_MS = 5 * 60 * 1000L // 5 minutes
+        private const val TTL_TRADING_MS = 5 * 60 * 1000L      // 5 minutes
+        private const val TTL_NON_TRADING_MS = 60 * 60 * 1000L // 1 hour
     }
 ```
 
