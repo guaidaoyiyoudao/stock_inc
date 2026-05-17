@@ -9,6 +9,7 @@ import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
+import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.AchievementEntity
@@ -16,6 +17,7 @@ import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
+import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 
@@ -27,9 +29,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         DividendIncomeRecordEntity::class,
         TransactionEntity::class,
         AchievementEntity::class,
-        LivingExpenseItemEntity::class
+        LivingExpenseItemEntity::class,
+        NotificationRuleEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -40,6 +43,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
     abstract fun achievementDao(): AchievementDao
     abstract fun livingExpenseItemDao(): LivingExpenseItemDao
+    abstract fun notificationRuleDao(): NotificationRuleDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -137,6 +141,28 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE dividends ADD COLUMN planNoticeDate TEXT")
+            }
+        }
+
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `notification_rules` (" +
+                            "`id` TEXT NOT NULL PRIMARY KEY, " +
+                            "`type` TEXT NOT NULL, " +
+                            "`stockCode` TEXT, " +
+                            "`enabled` INTEGER NOT NULL, " +
+                            "`thresholdPercent` REAL NOT NULL, " +
+                            "`lastWasAboveThreshold` INTEGER, " +
+                            "`lastCheckedAt` INTEGER, " +
+                            "`lastTriggeredAt` INTEGER, " +
+                            "`createdAt` INTEGER NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_notification_rules_type_stockCode` " +
+                            "ON `notification_rules`(`type`, `stockCode`)"
+                )
             }
         }
     }
