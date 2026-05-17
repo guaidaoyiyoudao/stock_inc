@@ -13,9 +13,10 @@ class NotificationCheckCoordinator @Inject constructor(
     private val dividendDao: DividendDao,
     private val ruleRepository: NotificationRuleRepository,
     private val evaluator: NotificationRuleEvaluator,
-    private val notifier: DividendAlertNotifier,
-    private val clock: () -> Long = { System.currentTimeMillis() }
+    private val notifier: DividendAlertNotifier
 ) {
+    internal var clock: () -> Long = { System.currentTimeMillis() }
+
     suspend fun checkActiveHoldings() {
         val stocks = stockRepository.observeAllStocksForSnapshot()
             .filter { it.shares > 0 }

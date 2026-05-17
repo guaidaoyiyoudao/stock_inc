@@ -9,6 +9,7 @@ import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_YEARLY
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.data.notification.NotificationCheckCoordinator
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.StockRepository
 import io.mockk.coEvery
@@ -32,6 +33,7 @@ class HomeViewModelTest {
     private val dividendDao: DividendDao = mockk()
     private val livingExpenseRepository: LivingExpenseRepository = mockk()
     private val transactionDao: TransactionDao = mockk()
+    private val notificationCheckCoordinator: NotificationCheckCoordinator = mockk(relaxed = true)
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
     private val totalDividendFlow = MutableStateFlow(0.0)
@@ -54,7 +56,7 @@ class HomeViewModelTest {
 
     @Test
     fun `initial state has empty stocks and zero total`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.stocks).isEmpty()
@@ -63,7 +65,7 @@ class HomeViewModelTest {
 
     @Test
     fun `stocks update when repository emits new data`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         val stock = StockEntity("sz.000001", "平安银行", "0")
 
         stocksFlow.value = listOf(stock)
@@ -75,7 +77,7 @@ class HomeViewModelTest {
 
     @Test
     fun `forecastTotal starts at zero`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.forecastTotal).isEqualTo(0.0)
@@ -98,7 +100,7 @@ class HomeViewModelTest {
             "sh.600000" to 7.25
         )
 
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.totalMarketValue).isEqualTo(2500.0)
@@ -108,7 +110,7 @@ class HomeViewModelTest {
     fun `deleteStock calls repository removeStock`() = runTest {
         coEvery { stockRepository.removeStock("sz.000001") } returns Unit
         coEvery { transactionDao.getByStock("sz.000001") } returns emptyList()
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
 
         val stock = StockEntity("sz.000001", "平安银行", "0")
         viewModel.deleteStock(stock)
@@ -124,7 +126,7 @@ class HomeViewModelTest {
         coEvery { transactionDao.getByStock("sz.000001") } returns emptyList()
         coEvery { transactionDao.insert(any<TransactionEntity>()) } returns 1L
 
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         val stock = StockEntity("sz.000001", "平安银行", "0")
 
         viewModel.deleteStock(stock)
@@ -140,7 +142,7 @@ class HomeViewModelTest {
     fun `clearDeleted removes deletedStock from state`() = runTest {
         coEvery { stockRepository.removeStock("sz.000001") } returns Unit
         coEvery { transactionDao.getByStock("sz.000001") } returns emptyList()
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
 
         val stock = StockEntity("sz.000001", "平安银行", "0")
         viewModel.deleteStock(stock)
@@ -153,7 +155,7 @@ class HomeViewModelTest {
 
     @Test
     fun `undoDelete does nothing when no deleted stock`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
         viewModel.undoDelete()
@@ -164,7 +166,7 @@ class HomeViewModelTest {
 
     @Test
     fun `initial isLoading is false`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.isLoading).isFalse()
@@ -172,7 +174,7 @@ class HomeViewModelTest {
 
     @Test
     fun `initial error is null`() = runTest {
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.error).isNull()
@@ -197,10 +199,18 @@ class HomeViewModelTest {
             LivingExpenseItemEntity(2, "保险", 400.0, EXPENSE_PERIOD_YEARLY, 1)
         )
 
-        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.livingExpenseTargetAmount).isEqualTo(4000.0)
         assertThat(viewModel.uiState.value.fireProgress).isWithin(0.0001f).of(25.0f)
     }
+
+    private fun createViewModel() = HomeViewModel(
+        stockRepository,
+        dividendDao,
+        livingExpenseRepository,
+        transactionDao,
+        notificationCheckCoordinator
+    )
 }

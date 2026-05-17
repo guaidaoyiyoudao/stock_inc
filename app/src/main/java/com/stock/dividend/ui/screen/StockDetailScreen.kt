@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -72,6 +73,7 @@ fun StockDetailScreen(
     onBack: () -> Unit,
     onEditHolding: (String) -> Unit = {},
     onOpenDividendValuation: (String) -> Unit = {},
+    onOpenNotificationSettings: (String) -> Unit = {},
     viewModel: StockDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -92,6 +94,13 @@ fun StockDetailScreen(
                         Text(
                             text = "估值",
                             style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                    IconButton(onClick = { onOpenNotificationSettings(stockCode) }) {
+                        Icon(
+                            imageVector = Icons.Filled.Notifications,
+                            contentDescription = "通知设置",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     IconButton(onClick = { onEditHolding(stockCode) }) {

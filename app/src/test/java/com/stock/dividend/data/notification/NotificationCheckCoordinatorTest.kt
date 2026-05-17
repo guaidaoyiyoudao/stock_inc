@@ -24,9 +24,10 @@ class NotificationCheckCoordinatorTest {
         dividendDao = dividendDao,
         ruleRepository = ruleRepository,
         evaluator = NotificationRuleEvaluator(),
-        notifier = notifier,
+        notifier = notifier
+    ).apply {
         clock = { 1000L }
-    )
+    }
 
     @Test
     fun `sends notification and persists state when yield crosses threshold`() = runTest {

@@ -7,6 +7,7 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -31,7 +32,8 @@ private val bottomNavItems = listOf(
     BottomNavItem("watchlist", "持仓", Icons.Filled.AccountBalance),
     BottomNavItem("income", "股息收入", Icons.AutoMirrored.Filled.TrendingUp),
     BottomNavItem("calendar", "日历", Icons.Filled.DateRange),
-    BottomNavItem("achievements", "成就", Icons.Filled.EmojiEvents)
+    BottomNavItem("achievements", "成就", Icons.Filled.EmojiEvents),
+    BottomNavItem("notifications", "通知", Icons.Filled.Notifications)
 )
 
 @Composable
@@ -106,6 +108,9 @@ fun MainScaffold(rootNavController: NavHostController) {
             composable("achievements") {
                 AchievementScreen()
             }
+            composable("notifications") {
+                NotificationSettingsScreen(onBack = { tabNavController.navigate("watchlist") })
+            }
             composable("addStock") {
                 AddStockScreen(onBack = { tabNavController.popBackStack() })
             }
@@ -118,7 +123,8 @@ fun MainScaffold(rootNavController: NavHostController) {
                     stockCode = code,
                     onBack = { tabNavController.popBackStack() },
                     onEditHolding = { c -> tabNavController.navigate("editHolding/$c") },
-                    onOpenDividendValuation = { c -> tabNavController.navigate("dividendValuation/$c") }
+                    onOpenDividendValuation = { c -> tabNavController.navigate("dividendValuation/$c") },
+                    onOpenNotificationSettings = { c -> tabNavController.navigate("stockNotificationSettings/$c") }
                 )
             }
             composable(
@@ -132,6 +138,12 @@ fun MainScaffold(rootNavController: NavHostController) {
                 arguments = listOf(navArgument("code") { type = NavType.StringType })
             ) {
                 EditHoldingScreen(onBack = { tabNavController.popBackStack() })
+            }
+            composable(
+                route = "stockNotificationSettings/{code}",
+                arguments = listOf(navArgument("code") { type = NavType.StringType })
+            ) {
+                StockNotificationSettingsScreen(onBack = { tabNavController.popBackStack() })
             }
         }
     }

@@ -8,6 +8,7 @@ import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_MONTHLY
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.data.notification.NotificationCheckCoordinator
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.StockRepository
@@ -58,7 +59,8 @@ class HomeViewModel @Inject constructor(
     private val stockRepository: StockRepository,
     private val dividendDao: DividendDao,
     private val livingExpenseRepository: LivingExpenseRepository,
-    private val transactionDao: TransactionDao
+    private val transactionDao: TransactionDao,
+    private val notificationCheckCoordinator: NotificationCheckCoordinator
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -168,6 +170,7 @@ class HomeViewModel @Inject constructor(
                                 stockForecasts = updatedForecasts,
                                 totalMarketValue = totalMV
                             )
+                            notificationCheckCoordinator.checkWithPrices(stocksWithShares, prices)
                         } finally {
                             _uiState.value = _uiState.value.copy(isLoading = false)
                         }
