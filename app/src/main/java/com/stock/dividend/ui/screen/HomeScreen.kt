@@ -254,11 +254,9 @@ private fun WatchlistContent(
             }
 
             item {
-                SectionHeader(
-                    title = stringResource(R.string.watchlist_section_holdings),
-                    actionText = stringResource(R.string.add_stock),
-                    actionIcon = Icons.Default.Add,
-                    onActionClick = onAddStockClick
+                HoldingsSectionHeader(
+                    totalMarketValue = uiState.totalMarketValue,
+                    onAddStockClick = onAddStockClick
                 )
             }
 
@@ -274,6 +272,46 @@ private fun WatchlistContent(
                     onClick = { onStockClick(stock.code) }
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun HoldingsSectionHeader(
+    totalMarketValue: Double?,
+    onAddStockClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = stringResource(R.string.watchlist_section_holdings),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = formatHoldingsTotalMarketValue(totalMarketValue),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        TextButton(onClick = onAddStockClick) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null
+            )
+            Text(
+                text = stringResource(R.string.add_stock),
+                style = MaterialTheme.typography.labelLarge
+            )
         }
     }
 }
