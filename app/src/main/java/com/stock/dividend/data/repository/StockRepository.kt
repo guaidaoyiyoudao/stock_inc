@@ -128,6 +128,14 @@ class StockRepository @Inject constructor(
         stockDao.updateCostPerShare(code, costPerShare.coerceAtLeast(0.0))
     }
 
+    suspend fun updateLastUpdated(code: String, timestamp: Long) {
+        stockDao.updateLastUpdated(code, timestamp)
+    }
+
+    suspend fun updateAllLastUpdated(codes: List<String>, timestamp: Long) {
+        codes.forEach { code -> stockDao.updateLastUpdated(code, timestamp) }
+    }
+
     suspend fun getFirstBuyDate(code: String): String? =
         transactionDao.getFirstBuyDate(code)
 
