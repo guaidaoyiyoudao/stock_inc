@@ -4,6 +4,7 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,7 +15,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,6 +38,64 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.viewmodel.NotificationSettingsViewModel
+
+internal data class SettingsEntry(
+    val title: String,
+    val description: String
+)
+
+internal val settingsEntries = listOf(
+    SettingsEntry(
+        title = "通知设置",
+        description = "管理全局股息率阈值提醒"
+    ),
+    SettingsEntry(
+        title = "数据管理",
+        description = "导入或导出本地备份文件"
+    )
+)
+
+@Composable
+fun SettingsScreen(
+    onOpenDataManagement: () -> Unit,
+    viewModel: NotificationSettingsViewModel = hiltViewModel()
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        viewModel.save()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            text = settingsEntries[0].title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        NotificationSettingsContent(
+            state = state,
+            onEnabledChange = viewModel::updateEnabled,
+            onThresholdChange = viewModel::updateThreshold,
+            onSave = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && state.enabled) {
+                    permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    viewModel.save()
+                }
+            }
+        )
+        SettingsEntryRow(
+            entry = settingsEntries[1],
+            onClick = onOpenDataManagement
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,55 +134,119 @@ fun NotificationSettingsScreen(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("全局提醒")
-                    Text(
-                        text = "任意持仓股息率从低于阈值变为达到阈值时通知",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = state.enabled,
-                    onCheckedChange = viewModel::updateEnabled
-                )
-            }
-            OutlinedTextField(
-                value = state.thresholdInput,
-                onValueChange = viewModel::updateThreshold,
-                label = { Text("阈值 (%)") },
-                singleLine = true,
-                isError = state.thresholdError != null,
-                supportingText = {
-                    Text(state.thresholdError ?: "例如：5.0")
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Button(
-                onClick = {
+            NotificationSettingsContent(
+                state = state,
+                onEnabledChange = viewModel::updateEnabled,
+                onThresholdChange = viewModel::updateThreshold,
+                onSave = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && state.enabled) {
                         permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else {
                         viewModel.save()
                     }
-                },
-                modifier = Modifier.fillMaxWidth()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun NotificationSettingsContent(
+    state: com.stock.dividend.viewmodel.NotificationSettingsUiState,
+    onEnabledChange: (Boolean) -> Unit,
+    onThresholdChange: (String) -> Unit,
+    onSave: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("全局提醒")
+            Text(
+                text = "任意持仓股息率从低于阈值变为达到阈值时通知",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = state.enabled,
+            onCheckedChange = onEnabledChange
+        )
+    }
+    OutlinedTextField(
+        value = state.thresholdInput,
+        onValueChange = onThresholdChange,
+        label = { Text("阈值 (%)") },
+        singleLine = true,
+        isError = state.thresholdError != null,
+        supportingText = {
+            Text(state.thresholdError ?: "例如：5.0")
+        },
+        modifier = Modifier.fillMaxWidth()
+    )
+    Button(
+        onClick = onSave,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("保存")
+    }
+    if (state.saved) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "已保存",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+@Composable
+private fun SettingsEntryRow(
+    entry: SettingsEntry,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = null
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text("保存")
-            }
-            if (state.saved) {
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "已保存",
+                    text = entry.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = entry.description,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null
+            )
         }
     }
 }

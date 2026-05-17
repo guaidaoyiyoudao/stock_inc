@@ -7,7 +7,6 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.*
@@ -24,18 +23,18 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.stock.dividend.ui.navigation.Routes
 
-private data class BottomNavItem(
+internal data class BottomNavItem(
     val route: String,
     val label: String,
     val icon: ImageVector
 )
 
-private val bottomNavItems = listOf(
+internal val bottomNavItems = listOf(
     BottomNavItem("watchlist", "持仓", Icons.Filled.AccountBalance),
     BottomNavItem("income", "股息收入", Icons.AutoMirrored.Filled.TrendingUp),
     BottomNavItem("calendar", "日历", Icons.Filled.DateRange),
     BottomNavItem("achievements", "成就", Icons.Filled.EmojiEvents),
-    BottomNavItem("notifications", "通知", Icons.Filled.Notifications)
+    BottomNavItem("settings", "设置", Icons.Filled.Settings)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,11 +57,7 @@ fun MainScaffold(rootNavController: NavHostController) {
                         fontWeight = FontWeight.SemiBold
                     )
                 },
-                actions = {
-                    IconButton(onClick = { rootNavController.navigate(Routes.BACKUP_RESTORE) }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "数据管理")
-                    }
-                }
+                actions = {}
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -126,8 +121,10 @@ fun MainScaffold(rootNavController: NavHostController) {
             composable("achievements") {
                 AchievementScreen()
             }
-            composable("notifications") {
-                NotificationSettingsScreen(onBack = { tabNavController.navigate("watchlist") })
+            composable("settings") {
+                SettingsScreen(
+                    onOpenDataManagement = { rootNavController.navigate(Routes.BACKUP_RESTORE) }
+                )
             }
             composable("addStock") {
                 AddStockScreen(onBack = { tabNavController.popBackStack() })
