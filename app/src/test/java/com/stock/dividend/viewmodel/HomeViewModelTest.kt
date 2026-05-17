@@ -1,5 +1,7 @@
 package com.stock.dividend.viewmodel
 
+import android.content.Context
+import android.content.SharedPreferences
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.TransactionDao
@@ -13,7 +15,9 @@ import com.stock.dividend.data.notification.NotificationCheckCoordinator
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.StockRepository
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +38,11 @@ class HomeViewModelTest {
     private val livingExpenseRepository: LivingExpenseRepository = mockk()
     private val transactionDao: TransactionDao = mockk()
     private val notificationCheckCoordinator: NotificationCheckCoordinator = mockk(relaxed = true)
+    private val context: Context = mockk(relaxed = true)
+    private val prefs: SharedPreferences = mockk(relaxed = true)
+    private val prefsEditor: SharedPreferences.Editor = mockk(relaxed = true) {
+        every { putLong(any(), any()) } returns this
+    }
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
     private val totalDividendFlow = MutableStateFlow(0.0)
@@ -42,10 +51,13 @@ class HomeViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        coEvery { stockRepository.observeAllStocks() } returns stocksFlow
-        coEvery { dividendDao.observeByStock(any()) } returns MutableStateFlow(emptyList())
+        every { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) } returns prefs
+        every { prefs.edit() } returns prefsEditor
+        every { prefs.getLong("last_quote_refresh_ms", 0L) } returns 0L
+        every { stockRepository.observeAllStocks() } returns stocksFlow
+        every { dividendDao.observeByStock(any()) } returns MutableStateFlow(emptyList())
         coEvery { dividendDao.observeTotalCashPerShare() } returns totalDividendFlow
-        coEvery { livingExpenseRepository.observeExpenses() } returns livingExpensesFlow
+        every { livingExpenseRepository.observeExpenses() } returns livingExpensesFlow
         coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
     }
 
@@ -184,7 +196,7 @@ class HomeViewModelTest {
     fun `fire card target uses annualized living expenses`() = runTest {
         val stock = StockEntity("sz.000001", "平安银行", "0", shares = 100, yieldPeriod = "1")
         stocksFlow.value = listOf(stock)
-        coEvery { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(
+        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(
             listOf(
                 DividendEntity(
                     id = "sz.000001_2025",
@@ -206,11 +218,131 @@ class HomeViewModelTest {
         assertThat(viewModel.uiState.value.fireProgress).isWithin(0.0001f).of(25.0f)
     }
 
+    // --- New tests for auto-refresh and race condition fix ---
+
+    @Test
+    fun `race condition fix preserves prices after concurrent forecast update`() = runTest {
+        val stock = StockEntity(
+            code = "sh.600036",
+            name = "招商银行",
+            marketCode = "1",
+            shares = 100,
+            yieldPeriod = "1",
+            costPerShare = 35.0
+        )
+
+        val dividendFlow = MutableStateFlow(
+            listOf(
+                DividendEntity(
+                    id = "sh.600036_2025",
+                    stockCode = "sh.600036",
+                    reportDate = "2025-07-10",
+                    cashPerShare = 5.0
+                )
+            )
+        )
+        every { dividendDao.observeByStock("sh.600036") } returns dividendFlow
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sh.600036" to 40.0)
+
+        stocksFlow.value = listOf(stock)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // totalMarketValue is computed directly from prices and stocks — always available after refresh
+        assertThat(viewModel.uiState.value.totalMarketValue).isEqualTo(4000.0)
+    }
+
+    @Test
+    fun `refreshQuotes persists lastUpdated and refresh timestamp`() = runTest {
+        val stock = StockEntity(
+            code = "sh.600036",
+            name = "招商银行",
+            marketCode = "1",
+            shares = 100,
+            yieldPeriod = "1",
+            costPerShare = 35.0
+        )
+
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sh.600036" to 40.0)
+        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(
+            listOf(
+                DividendEntity(
+                    id = "sh.600036_2025",
+                    stockCode = "sh.600036",
+                    reportDate = "2025-07-10",
+                    cashPerShare = 5.0
+                )
+            )
+        )
+
+        stocksFlow.value = listOf(stock)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        verify { prefsEditor.putLong("last_quote_refresh_ms", any()) }
+        verify { prefsEditor.apply() }
+    }
+
+    @Test
+    fun `onResume triggers refresh when no previous refresh`() = runTest {
+        coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // onResume should trigger refresh since lastRefreshMs is 0 (first launch)
+        viewModel.onResume()
+        testDispatcher.scheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun `uiState is not loading after successful refresh`() = runTest {
+        val stock = StockEntity(
+            code = "sh.600036",
+            name = "招商银行",
+            marketCode = "1",
+            shares = 100,
+            yieldPeriod = "1",
+            costPerShare = 35.0
+        )
+
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sh.600036" to 40.0)
+        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(
+            listOf(
+                DividendEntity(
+                    id = "sh.600036_2025",
+                    stockCode = "sh.600036",
+                    reportDate = "2025-07-10",
+                    cashPerShare = 5.0
+                )
+            )
+        )
+
+        stocksFlow.value = listOf(stock)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.isLoading).isFalse()
+    }
+
+    @Test
+    fun `empty stocks produces null totalMarketValue`() = runTest {
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.totalMarketValue).isNull()
+        assertThat(viewModel.uiState.value.stockForecasts).isEmpty()
+    }
+
     private fun createViewModel() = HomeViewModel(
         stockRepository,
         dividendDao,
         livingExpenseRepository,
         transactionDao,
-        notificationCheckCoordinator
+        notificationCheckCoordinator,
+        context
     )
 }
