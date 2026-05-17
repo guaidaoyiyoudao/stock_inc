@@ -289,29 +289,29 @@ private fun HoldingsSectionHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
-            Text(
-                text = stringResource(R.string.watchlist_section_holdings),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.SemiBold
-            )
+        Text(
+            text = stringResource(R.string.watchlist_section_holdings),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Column(horizontalAlignment = Alignment.End) {
             Text(
                 text = formatHoldingsTotalMarketValue(totalMarketValue),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-
-        TextButton(onClick = onAddStockClick) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = null
-            )
-            Text(
-                text = stringResource(R.string.add_stock),
-                style = MaterialTheme.typography.labelLarge
-            )
+            TextButton(onClick = onAddStockClick) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null
+                )
+                Text(
+                    text = stringResource(R.string.add_stock),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
         }
     }
 }
