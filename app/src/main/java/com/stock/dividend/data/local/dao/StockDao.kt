@@ -32,4 +32,13 @@ interface StockDao {
 
     @Query("UPDATE stocks SET costPerShare = :costPerShare WHERE code = :code")
     suspend fun updateCostPerShare(code: String, costPerShare: Double)
+
+    @Query("SELECT * FROM stocks")
+    suspend fun getAll(): List<StockEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(stocks: List<StockEntity>)
+
+    @Query("DELETE FROM stocks")
+    suspend fun deleteAll()
 }

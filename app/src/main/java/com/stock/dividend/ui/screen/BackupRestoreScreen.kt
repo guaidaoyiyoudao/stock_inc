@@ -1,0 +1,236 @@
+package com.stock.dividend.ui.screen
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.viewmodel.BackupViewModel
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BackupRestoreScreen(
+    onBack: () -> Unit,
+    viewModel: BackupViewModel = hiltViewModel()
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let { viewModel.exportBackup(context, it) }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.selectImportFile(context, it) }
+    }
+
+    val exportFileName = "股息追踪_备份_${
+        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+    }.json"
+
+    if (state.showConfirmRestoreDialog && state.backupMetadata != null) {
+        val metadata = state.backupMetadata!!
+        val exportTime = LocalDateTime.ofInstant(
+            Instant.ofEpochMilli(metadata.exportTimestamp),
+            ZoneId.systemDefault()
+        ).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissConfirmDialog() },
+            title = { Text("确认导入备份") },
+            text = {
+                Text(
+                    "导入将覆盖当前所有数据。\n\n" +
+                        "备份信息：\n" +
+                        "应用版本：${metadata.appVersion}\n" +
+                        "导出时间：$exportTime\n" +
+                        "数据库版本：${metadata.dbVersion}\n\n" +
+                        "此操作不可撤销，确定继续？"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.confirmRestore(context) },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("导入")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissConfirmDialog() }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("数据管理") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Export section
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "导出备份",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "将所有股票、股息、交易、生活支出等数据导出为 JSON 文件，可保存到设备任意位置。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(
+                            onClick = { exportLauncher.launch(exportFileName) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("导出备份文件")
+                        }
+                    }
+                }
+
+                // Import section
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "导入备份",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "从之前导出的备份文件恢复所有数据。请注意：导入将覆盖当前所有数据，此操作不可撤销！",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(
+                            onClick = { importLauncher.launch(arrayOf("application/json")) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("选择备份文件")
+                        }
+                    }
+                }
+
+                // Message banner
+                AnimatedVisibility(
+                    visible = state.message != null,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    state.message?.let { msg ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (state.isError)
+                                    MaterialTheme.colorScheme.errorContainer
+                                else
+                                    MaterialTheme.colorScheme.primaryContainer
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = msg,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (state.isError)
+                                        MaterialTheme.colorScheme.onErrorContainer
+                                    else
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                TextButton(onClick = { viewModel.clearMessage() }) {
+                                    Text("关闭")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Loading overlay
+            if (state.isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+        }
+    }
+}

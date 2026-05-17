@@ -3,6 +3,7 @@ package com.stock.dividend.data.local.dao
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.stock.dividend.data.local.entity.TransactionEntity
@@ -43,4 +44,10 @@ interface TransactionDao {
            WHERE stockCode = :stockCode AND type = 'BUY'"""
     )
     suspend fun getFirstBuyDate(stockCode: String): String?
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAll()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(transactions: List<TransactionEntity>)
 }

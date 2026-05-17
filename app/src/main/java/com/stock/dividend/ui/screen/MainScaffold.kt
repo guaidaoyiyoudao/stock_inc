@@ -8,6 +8,8 @@ import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -36,6 +38,7 @@ private val bottomNavItems = listOf(
     BottomNavItem("notifications", "通知", Icons.Filled.Notifications)
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScaffold(rootNavController: NavHostController) {
     val tabNavController = rememberNavController()
@@ -47,6 +50,21 @@ fun MainScaffold(rootNavController: NavHostController) {
     val snackbarHostState = remember { SnackbarHostState() }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        "股息追踪",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                actions = {
+                    IconButton(onClick = { rootNavController.navigate(Routes.BACKUP_RESTORE) }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "数据管理")
+                    }
+                }
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar(

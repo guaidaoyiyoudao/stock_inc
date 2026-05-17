@@ -16,6 +16,12 @@
 # Hilt
 -dontwarn dagger.hilt.**
 
+# Backup data model (Gson serialization)
+-keep class com.stock.dividend.data.local.backup.** { *; }
+-keepclassmembers class com.stock.dividend.data.local.entity.* {
+    <fields>;
+}
+
 # Gson
 -keepattributes *Annotation*
 -keep class com.google.gson.** { *; }

@@ -37,4 +37,10 @@ interface LivingExpenseItemDao {
 
     @Query("UPDATE living_expense_items SET sortOrder = :sortOrder, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateSortOrders(id: Long, sortOrder: Int, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM living_expense_items")
+    suspend fun deleteAll()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<LivingExpenseItemEntity>)
 }

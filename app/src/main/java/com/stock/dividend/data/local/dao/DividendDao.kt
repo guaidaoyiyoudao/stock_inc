@@ -35,4 +35,7 @@ interface DividendDao {
 
     @Query("SELECT * FROM dividends WHERE stockCode = :stockCode ORDER BY reportDate DESC LIMIT 1")
     suspend fun getLatestByStock(stockCode: String): DividendEntity?
+
+    @Query("SELECT * FROM dividends")
+    suspend fun getAll(): List<DividendEntity>
 }

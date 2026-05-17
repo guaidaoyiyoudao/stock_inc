@@ -23,4 +23,10 @@ interface FireGoalDao {
 
     @Query("DELETE FROM fire_goal")
     suspend fun delete()
+
+    @Query("SELECT * FROM fire_goal")
+    suspend fun getAll(): List<FireGoalEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(goals: List<FireGoalEntity>)
 }

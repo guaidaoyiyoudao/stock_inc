@@ -11,6 +11,7 @@ import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
+import com.stock.dividend.data.repository.BackupRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -57,4 +58,24 @@ object DatabaseModule {
 
     @Provides
     fun provideNotificationRuleDao(db: AppDatabase): NotificationRuleDao = db.notificationRuleDao()
+
+    @Provides
+    @Singleton
+    fun provideBackupRepository(
+        db: AppDatabase,
+        stockDao: StockDao,
+        dividendDao: DividendDao,
+        fireGoalDao: FireGoalDao,
+        dividendIncomeRecordDao: DividendIncomeRecordDao,
+        transactionDao: TransactionDao,
+        achievementDao: AchievementDao,
+        livingExpenseItemDao: LivingExpenseItemDao,
+        notificationRuleDao: NotificationRuleDao
+    ): BackupRepository {
+        return BackupRepository(
+            db, stockDao, dividendDao, fireGoalDao,
+            dividendIncomeRecordDao, transactionDao,
+            achievementDao, livingExpenseItemDao, notificationRuleDao
+        )
+    }
 }

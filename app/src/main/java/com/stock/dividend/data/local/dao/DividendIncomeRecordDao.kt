@@ -76,4 +76,7 @@ interface DividendIncomeRecordDao {
 
     @Query("SELECT stockCode, year, SUM(amount) as total FROM dividend_income_records WHERE stockCode IS NOT NULL GROUP BY stockCode, year")
     fun observePerStockYearlyIncome(): Flow<List<StockYearlyIncome>>
+
+    @Query("DELETE FROM dividend_income_records")
+    suspend fun deleteAll()
 }

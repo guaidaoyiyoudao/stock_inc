@@ -26,4 +26,13 @@ interface NotificationRuleDao {
 
     @Query("SELECT * FROM notification_rules WHERE type = :type AND stockCode = :stockCode LIMIT 1")
     suspend fun getStockRule(type: String, stockCode: String): NotificationRuleEntity?
+
+    @Query("SELECT * FROM notification_rules")
+    suspend fun getAll(): List<NotificationRuleEntity>
+
+    @Query("DELETE FROM notification_rules")
+    suspend fun deleteAll()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(rules: List<NotificationRuleEntity>)
 }

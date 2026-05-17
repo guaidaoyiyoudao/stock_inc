@@ -96,4 +96,22 @@
     <string name="expense_coverage_status_partial">部分覆盖</string>
     <string name="expense_coverage_status_uncovered">未覆盖</string>
 
+    <!-- Backup & Restore -->
+    <string name="backup_title">数据管理</string>
+    <string name="backup_export_section">导出备份</string>
+    <string name="backup_export_description">将所有股票、股息、交易、生活支出等数据导出为 JSON 文件，可保存到设备任意位置。</string>
+    <string name="backup_export_button">导出备份文件</string>
+    <string name="backup_import_section">导入备份</string>
+    <string name="backup_import_description">从之前导出的备份文件恢复所有数据。请注意：导入将覆盖当前所有数据，此操作不可撤销！</string>
+    <string name="backup_import_button">选择备份文件</string>
+    <string name="backup_confirm_title">确认导入备份</string>
+    <string name="backup_confirm_message">导入将覆盖当前所有数据。\n\n备份信息：\n应用版本：%1$s\n导出时间：%2$s\n数据库版本：%3$d\n\n此操作不可撤销，确定继续？</string>
+    <string name="backup_confirm_action">导入</string>
+    <string name="backup_export_success">数据已成功导出</string>
+    <string name="backup_export_error">导出失败：%1$s</string>
+    <string name="backup_import_success">数据已成功恢复</string>
+    <string name="backup_import_error">导入失败：%1$s</string>
+    <string name="backup_invalid_file">无效的备份文件：%1$s</string>
+    <string name="backup_file_name_prefix">股息追踪_备份_</string>
+
 </resources>

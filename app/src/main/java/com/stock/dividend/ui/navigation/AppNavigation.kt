@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.stock.dividend.ui.screen.BackupRestoreScreen
 import com.stock.dividend.ui.screen.ExpenseCoverageScreen
 import com.stock.dividend.ui.screen.FireGoalSetupScreen
 import com.stock.dividend.ui.screen.MainScaffold
@@ -12,6 +13,7 @@ object Routes {
     const val MAIN = "main"
     const val FIRE_GOAL_SETUP = "fireGoalSetup"
     const val EXPENSE_COVERAGE = "expenseCoverage"
+    const val BACKUP_RESTORE = "backupRestore"
 }
 
 @Composable
@@ -34,6 +36,11 @@ fun AppNavigation() {
             ExpenseCoverageScreen(
                 onBack = { rootNavController.popBackStack() },
                 onGoSetup = { rootNavController.navigate(Routes.FIRE_GOAL_SETUP) }
+            )
+        }
+        composable(Routes.BACKUP_RESTORE) {
+            BackupRestoreScreen(
+                onBack = { rootNavController.popBackStack() }
             )
         }
     }
