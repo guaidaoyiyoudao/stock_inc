@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -150,7 +151,7 @@ class HomeViewModel @Inject constructor(
                 .collect { stocks ->
                     val stocksWithShares = stocks.filter { it.shares > 0 }
                     if (stocksWithShares.isNotEmpty()) {
-                        _uiState.value = _uiState.value.copy(isLoading = true)
+                        _uiState.update { it.copy(isLoading = true) }
                         try {
                             val prices = stockRepository.fetchQuotes(stocksWithShares)
 
@@ -158,24 +159,26 @@ class HomeViewModel @Inject constructor(
                                 prices[stock.code]?.let { price -> price * stock.shares }
                             }.sum().let { if (it > 0) it else null }
 
-                            val forecasts = _uiState.value.stockForecasts
-                            val updatedForecasts = forecasts.mapValues { (code, forecast) ->
-                                val price = prices[code]
-                                forecast.copy(
-                                    currentPrice = price,
-                                    marketValue = if (price != null && forecast.shares > 0) price * forecast.shares else null
+                            _uiState.update { currentState ->
+                                val updatedForecasts = currentState.stockForecasts.mapValues { (code, forecast) ->
+                                    val price = prices[code]
+                                    forecast.copy(
+                                        currentPrice = price,
+                                        marketValue = if (price != null && forecast.shares > 0) price * forecast.shares else null
+                                    )
+                                }
+                                currentState.copy(
+                                    stockForecasts = updatedForecasts,
+                                    totalMarketValue = totalMV,
+                                    isLoading = false
                                 )
                             }
-                            _uiState.value = _uiState.value.copy(
-                                stockForecasts = updatedForecasts,
-                                totalMarketValue = totalMV
-                            )
                             notificationCheckCoordinator.checkWithPrices(stocksWithShares, prices)
-                        } finally {
-                            _uiState.value = _uiState.value.copy(isLoading = false)
+                        } catch (_: Exception) {
+                            _uiState.update { it.copy(isLoading = false) }
                         }
                     } else {
-                        _uiState.value = _uiState.value.copy(totalMarketValue = null)
+                        _uiState.update { it.copy(totalMarketValue = null) }
                     }
                 }
         }
