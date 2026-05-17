@@ -82,6 +82,29 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun `totalMarketValue sums quote price times shares for active holdings`() = runTest {
+        val stocks = listOf(
+            StockEntity("sz.000001", "平安银行", "0", shares = 100),
+            StockEntity("sh.600000", "浦发银行", "1", shares = 200),
+            StockEntity("sz.000002", "万科A", "0", shares = 0)
+        )
+        stocksFlow.value = stocks
+        coEvery {
+            stockRepository.fetchQuotes(match { requested ->
+                requested.map { it.code } == listOf("sz.000001", "sh.600000")
+            })
+        } returns mapOf(
+            "sz.000001" to 10.5,
+            "sh.600000" to 7.25
+        )
+
+        val viewModel = HomeViewModel(stockRepository, dividendDao, livingExpenseRepository, transactionDao)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.totalMarketValue).isEqualTo(2500.0)
+    }
+
+    @Test
     fun `deleteStock calls repository removeStock`() = runTest {
         coEvery { stockRepository.removeStock("sz.000001") } returns Unit
         coEvery { transactionDao.getByStock("sz.000001") } returns emptyList()
