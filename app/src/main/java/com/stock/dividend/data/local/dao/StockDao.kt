@@ -41,4 +41,7 @@ interface StockDao {
 
     @Query("DELETE FROM stocks")
     suspend fun deleteAll()
+
+    @Query("UPDATE stocks SET lastUpdated = :timestamp WHERE code = :code")
+    suspend fun updateLastUpdated(code: String, timestamp: Long)
 }
