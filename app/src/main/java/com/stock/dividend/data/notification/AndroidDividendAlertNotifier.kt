@@ -1,6 +1,7 @@
 package com.stock.dividend.data.notification
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -36,6 +37,7 @@ class AndroidDividendAlertNotifier @Inject constructor(
         return permissionGranted && NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
+    @SuppressLint("MissingPermission")
     override suspend fun sendDividendYieldAlert(
         stockCode: String,
         stockName: String,
@@ -69,7 +71,11 @@ class AndroidDividendAlertNotifier @Inject constructor(
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
 
-        NotificationManagerCompat.from(context).notify(stockCode.hashCode(), notification)
+        try {
+            NotificationManagerCompat.from(context).notify(stockCode.hashCode(), notification)
+        } catch (_: SecurityException) {
+            return
+        }
     }
 
     private fun createChannel() {
