@@ -18,6 +18,9 @@ interface DividendDao {
     @Query("SELECT * FROM dividends WHERE stockCode = :stockCode ORDER BY reportDate DESC")
     fun observeByStock(stockCode: String): Flow<List<DividendEntity>>
 
+    @Query("SELECT * FROM dividends WHERE stockCode = :stockCode ORDER BY reportDate DESC")
+    suspend fun getByStock(stockCode: String): List<DividendEntity>
+
     @Query("SELECT * FROM dividends ORDER BY COALESCE(exDividendDate, recordDate, reportDate) ASC")
     fun observeAll(): Flow<List<DividendEntity>>
 

@@ -7,6 +7,7 @@ import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -105,6 +106,10 @@ class StockRepository @Inject constructor(
 
     fun observeAllStocks(): Flow<List<StockEntity>> {
         return stockDao.observeAll()
+    }
+
+    suspend fun observeAllStocksForSnapshot(): List<StockEntity> {
+        return stockDao.observeAll().first()
     }
 
     fun observeStock(code: String): Flow<StockEntity?> {
