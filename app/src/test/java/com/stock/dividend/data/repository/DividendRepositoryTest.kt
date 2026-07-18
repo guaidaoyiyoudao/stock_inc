@@ -31,6 +31,7 @@ class DividendRepositoryTest {
                 data = listOf(
                     DividendResponse.DividendItem(
                         securityCode = "000001",
+                        secuCode = "000001.SZ",
                         securityNameAbbr = "平安银行",
                         reportDate = "2024-12-31T00:00:00",
                         pretaxBonusRmb = 3.62,
@@ -59,6 +60,7 @@ class DividendRepositoryTest {
                 data = listOf(
                     DividendResponse.DividendItem(
                         securityCode = "000001",
+                        secuCode = "000001.SZ",
                         securityNameAbbr = "平安银行",
                         reportDate = "2024-12-31T00:00:00",
                         pretaxBonusRmb = 2.46,
@@ -89,6 +91,7 @@ class DividendRepositoryTest {
                 data = listOf(
                     DividendResponse.DividendItem(
                         securityCode = "000001",
+                        secuCode = "000001.SZ",
                         securityNameAbbr = "平安银行",
                         reportDate = "2024-12-31T00:00:00",
                         pretaxBonusRmb = 2.46,
@@ -120,6 +123,7 @@ class DividendRepositoryTest {
                 data = listOf(
                     DividendResponse.DividendItem(
                         securityCode = "600398",
+                        secuCode = "600398.SH",
                         securityNameAbbr = "海澜之家",
                         reportDate = "2025-12-31 00:00:00",
                         pretaxBonusRmb = 4.1,
@@ -151,6 +155,7 @@ class DividendRepositoryTest {
                 data = listOf(
                     DividendResponse.DividendItem(
                         securityCode = "000001",
+                        secuCode = "000001.SZ",
                         securityNameAbbr = "平安银行",
                         reportDate = "2098-12-31T00:00:00",
                         pretaxBonusRmb = 3.0,
@@ -181,6 +186,7 @@ class DividendRepositoryTest {
                 data = listOf(
                     DividendResponse.DividendItem(
                         securityCode = "600398",
+                        secuCode = "600398.SH",
                         securityNameAbbr = "海澜之家",
                         reportDate = "2026-06-30 00:00:00",
                         pretaxBonusRmb = 1.0,
@@ -197,6 +203,35 @@ class DividendRepositoryTest {
         repository.fetchAndCacheDividends("sh.600398", "600398")
 
         assertThat(entitiesSlot.last().single().planNoticeDate).isEqualTo("2026-04-30")
+    }
+
+    @Test
+    fun `fetchAndCacheDividends skips rows for a different secucode`() = runTest {
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+
+        coEvery { api.getDividends(filter = any()) } returns DividendResponse(
+            success = true,
+            result = DividendResponse.DividendResult(
+                data = listOf(
+                    DividendResponse.DividendItem(
+                        securityCode = "000001",
+                        secuCode = "000001.SH",
+                        securityNameAbbr = "测试股票",
+                        reportDate = "2024-12-31T00:00:00",
+                        pretaxBonusRmb = 2.46,
+                        dividentRatio = null,
+                        exDividendDate = "2025-07-11T00:00:00",
+                        equityRecordDate = "2025-07-10T00:00:00",
+                        assignProgress = "实施分配"
+                    )
+                )
+            )
+        )
+
+        repository.fetchAndCacheDividends("sz.000001", "000001")
+
+        assertThat(entitiesSlot.last()).isEmpty()
     }
 
     @Test

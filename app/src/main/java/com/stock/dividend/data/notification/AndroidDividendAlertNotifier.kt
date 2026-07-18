@@ -14,6 +14,10 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.stock.dividend.MainActivity
 import com.stock.dividend.R
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_BELOW
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import javax.inject.Inject
@@ -44,6 +48,23 @@ class AndroidDividendAlertNotifier @Inject constructor(
         yieldPercent: Double,
         thresholdPercent: Double
     ) {
+        sendNotificationRuleAlert(
+            stockCode = stockCode,
+            stockName = stockName,
+            ruleType = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
+            metricValue = yieldPercent,
+            thresholdValue = thresholdPercent
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    override suspend fun sendNotificationRuleAlert(
+        stockCode: String,
+        stockName: String,
+        ruleType: String,
+        metricValue: Double,
+        thresholdValue: Double
+    ) {
         if (!canNotify()) return
 
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -55,17 +76,16 @@ class AndroidDividendAlertNotifier @Inject constructor(
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val (title, body) = notificationText(
+            stockName = stockName,
+            ruleType = ruleType,
+            metricValue = metricValue,
+            thresholdValue = thresholdValue
+        )
         val notification = NotificationCompat.Builder(context, DIVIDEND_ALERT_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("股息率达到目标")
-            .setContentText(
-                "%s 当前股息率 %.2f%% 已达到 %.2f%% 阈值".format(
-                    Locale.US,
-                    stockName,
-                    yieldPercent,
-                    thresholdPercent
-                )
-            )
+            .setContentTitle(title)
+            .setContentText(body)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -87,5 +107,23 @@ class AndroidDividendAlertNotifier @Inject constructor(
             NotificationManager.IMPORTANCE_DEFAULT
         )
         manager.createNotificationChannel(channel)
+    }
+
+    private fun notificationText(
+        stockName: String,
+        ruleType: String,
+        metricValue: Double,
+        thresholdValue: Double
+    ): Pair<String, String> {
+        return when (ruleType) {
+            NOTIFICATION_RULE_TYPE_PRICE_ABOVE -> "股价达到目标" to
+                "%s 当前价格 %.2f 已达到 %.2f".format(Locale.US, stockName, metricValue, thresholdValue)
+            NOTIFICATION_RULE_TYPE_PRICE_BELOW -> "股价跌破目标" to
+                "%s 当前价格 %.2f 已低于 %.2f".format(Locale.US, stockName, metricValue, thresholdValue)
+            NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD -> "股息率跌破目标" to
+                "%s 当前股息率 %.2f%% 已低于 %.2f%%".format(Locale.US, stockName, metricValue, thresholdValue)
+            else -> "股息率达到目标" to
+                "%s 当前股息率 %.2f%% 已达到 %.2f%% 阈值".format(Locale.US, stockName, metricValue, thresholdValue)
+        }
     }
 }

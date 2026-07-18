@@ -3,6 +3,11 @@ package com.stock.dividend.viewmodel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_BELOW
+import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,49 +16,139 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+val stockCustomNotificationRuleTypes = listOf(
+    NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
+    NOTIFICATION_RULE_TYPE_PRICE_BELOW,
+    NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
+    NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD
+)
+
+data class StockNotificationRuleSettingUiState(
+    val type: String,
+    val title: String,
+    val description: String,
+    val thresholdLabel: String,
+    val thresholdInput: String,
+    val enabled: Boolean = false,
+    val thresholdError: String? = null
+)
+
+data class StockCustomNotificationSettingsUiState(
+    val rules: List<StockNotificationRuleSettingUiState> = defaultStockRuleSettings(),
+    val saved: Boolean = false
+)
+
 @HiltViewModel
 class StockNotificationSettingsViewModel @Inject constructor(
     private val repository: NotificationRuleRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val stockCode: String = checkNotNull(savedStateHandle["code"])
-    private val _uiState = MutableStateFlow(NotificationSettingsUiState())
-    val uiState: StateFlow<NotificationSettingsUiState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow(StockCustomNotificationSettingsUiState())
+    val uiState: StateFlow<StockCustomNotificationSettingsUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
-            repository.observeStockDividendYieldRule(stockCode).collect { rule ->
+            repository.observeStockRules(stockCode).collect { rules ->
                 _uiState.value = _uiState.value.copy(
-                    enabled = rule?.enabled ?: false,
-                    thresholdInput = rule?.thresholdPercent?.toString() ?: "5.0",
-                    thresholdError = null
+                    rules = mergeRules(rules),
+                    saved = false
                 )
             }
         }
     }
 
-    fun updateEnabled(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(enabled = enabled, saved = false)
+    fun updateEnabled(type: String, enabled: Boolean) {
+        updateRule(type) { it.copy(enabled = enabled) }
     }
 
-    fun updateThreshold(value: String) {
-        _uiState.value = _uiState.value.copy(thresholdInput = value, thresholdError = null, saved = false)
+    fun updateThreshold(type: String, value: String) {
+        updateRule(type) { it.copy(thresholdInput = value, thresholdError = null) }
     }
 
     fun save() {
         val state = _uiState.value
-        val threshold = state.thresholdInput.toDoubleOrNull()
-        if (threshold == null || threshold <= 0.0) {
-            _uiState.value = state.copy(thresholdError = "请输入大于 0 的阈值", saved = false)
+        val validatedRules = state.rules.map { rule ->
+            val threshold = rule.thresholdInput.toDoubleOrNull()
+            if (rule.enabled && (threshold == null || threshold <= 0.0)) {
+                rule.copy(thresholdError = "请输入大于 0 的阈值")
+            } else {
+                rule.copy(thresholdError = null)
+            }
+        }
+        if (validatedRules.any { it.thresholdError != null }) {
+            _uiState.value = state.copy(rules = validatedRules, saved = false)
             return
         }
+
         viewModelScope.launch {
-            repository.saveDividendYieldRule(
-                stockCode = stockCode,
-                enabled = state.enabled,
-                thresholdPercent = threshold
-            )
+            validatedRules.forEach { rule ->
+                repository.saveRule(
+                    type = rule.type,
+                    stockCode = stockCode,
+                    enabled = rule.enabled,
+                    thresholdValue = rule.thresholdInput.toDoubleOrNull() ?: defaultThresholdFor(rule.type)
+                )
+            }
             _uiState.value = _uiState.value.copy(saved = true)
         }
     }
+
+    private fun mergeRules(savedRules: List<NotificationRuleEntity>): List<StockNotificationRuleSettingUiState> {
+        val savedByType = savedRules.associateBy { it.type }
+        return defaultStockRuleSettings().map { default ->
+            val saved = savedByType[default.type] ?: return@map default
+            default.copy(
+                enabled = saved.enabled,
+                thresholdInput = saved.thresholdPercent.toString(),
+                thresholdError = null
+            )
+        }
+    }
+
+    private fun updateRule(
+        type: String,
+        transform: (StockNotificationRuleSettingUiState) -> StockNotificationRuleSettingUiState
+    ) {
+        _uiState.value = _uiState.value.copy(
+            rules = _uiState.value.rules.map { rule ->
+                if (rule.type == type) transform(rule) else rule
+            },
+            saved = false
+        )
+    }
 }
+
+fun defaultStockRuleSettings(): List<StockNotificationRuleSettingUiState> = listOf(
+    StockNotificationRuleSettingUiState(
+        type = NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
+        title = "股价高于目标价",
+        description = "当前价格从低位上穿目标价时通知",
+        thresholdLabel = "目标价",
+        thresholdInput = "10.0"
+    ),
+    StockNotificationRuleSettingUiState(
+        type = NOTIFICATION_RULE_TYPE_PRICE_BELOW,
+        title = "股价低于目标价",
+        description = "当前价格从高位跌破目标价时通知",
+        thresholdLabel = "目标价",
+        thresholdInput = "10.0"
+    ),
+    StockNotificationRuleSettingUiState(
+        type = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
+        title = "股息率高于目标",
+        description = "股息率从低位上穿目标百分比时通知",
+        thresholdLabel = "目标股息率 (%)",
+        thresholdInput = "5.0"
+    ),
+    StockNotificationRuleSettingUiState(
+        type = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD,
+        title = "股息率低于目标",
+        description = "股息率从高位跌破目标百分比时通知",
+        thresholdLabel = "目标股息率 (%)",
+        thresholdInput = "3.0"
+    )
+)
+
+private fun defaultThresholdFor(type: String): Double =
+    defaultStockRuleSettings().first { it.type == type }.thresholdInput.toDouble()

@@ -18,11 +18,20 @@ class DividendRepository @Inject constructor(
 ) {
     suspend fun fetchAndCacheDividends(stockCode: String, securityCode: String): Result<Unit> {
         return try {
-            val filter = "(SECURITY_CODE=\"$securityCode\")"
+            val expectedSecuCode = stockCode.toEastmoneySecuCode()
+            val filter = expectedSecuCode
+                ?.let { "(SECUCODE=\"$it\")" }
+                ?: "(SECURITY_CODE=\"$securityCode\")"
             val response = api.getDividends(filter = filter)
             val items = response.result?.data ?: emptyList()
 
             val entities = items.mapNotNull { item ->
+                if (expectedSecuCode != null &&
+                    item.secuCode != null &&
+                    !item.secuCode.equals(expectedSecuCode, ignoreCase = true)
+                ) {
+                    return@mapNotNull null
+                }
                 val reportDate = item.reportDate.toDateOnlyOrNull() ?: return@mapNotNull null
                 val cashRatio = item.pretaxBonusRmb ?: return@mapNotNull null
                 if (cashRatio <= 0) return@mapNotNull null
@@ -62,6 +71,15 @@ private fun String?.toDateOnlyOrNull(): String? =
         ?.substringBefore("T")
         ?.substringBefore(" ")
         ?.takeIf { it.isNotBlank() }
+
+private fun String.toEastmoneySecuCode(): String? {
+    val code = substringAfter(".").takeIf { it.isNotBlank() } ?: return null
+    return when {
+        startsWith("sz.", ignoreCase = true) -> "$code.SZ"
+        startsWith("sh.", ignoreCase = true) -> "$code.SH"
+        else -> null
+    }
+}
 
 internal fun Exception.toUserMessage(): String {
     return when (this) {

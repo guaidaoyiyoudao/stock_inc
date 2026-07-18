@@ -192,14 +192,11 @@ class DividendCalendarViewModel @Inject constructor(
             val eventDate = (
                 dividend.exDividendDate
                     ?: dividend.recordDate
-                    ?: dividend.planNoticeDate
-                    ?: dividend.reportDate
+                    ?: return@mapNotNull null
                 ).toDateOnly()
             val dateType = when {
                 dividend.exDividendDate != null -> DividendCalendarDateType.EX_DIVIDEND
-                dividend.recordDate != null -> DividendCalendarDateType.RECORD
-                dividend.planNoticeDate != null -> DividendCalendarDateType.PLAN_NOTICE
-                else -> DividendCalendarDateType.REPORT
+                else -> DividendCalendarDateType.RECORD
             }
             val eventType = when (dateType) {
                 DividendCalendarDateType.EX_DIVIDEND -> "除权除息"

@@ -3,6 +3,9 @@ package com.stock.dividend.data.notification
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_BELOW
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import org.junit.Test
 
@@ -82,12 +85,67 @@ class NotificationRuleEvaluatorTest {
         assertThat(result.updatedLastWasAboveThreshold).isNull()
     }
 
+    @Test
+    fun `notifies when price crosses above target`() {
+        val result = evaluator.evaluate(
+            rule = rule(
+                type = NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
+                lastWasAboveThreshold = false,
+                thresholdPercent = 12.0
+            ),
+            dividends = emptyList(),
+            currentPrice = 12.5,
+            checkedAt = 1000L
+        )
+
+        assertThat(result.metricValue).isEqualTo(12.5)
+        assertThat(result.shouldNotify).isTrue()
+        assertThat(result.updatedLastWasAboveThreshold).isTrue()
+    }
+
+    @Test
+    fun `notifies when price crosses below target`() {
+        val result = evaluator.evaluate(
+            rule = rule(
+                type = NOTIFICATION_RULE_TYPE_PRICE_BELOW,
+                lastWasAboveThreshold = true,
+                thresholdPercent = 12.0
+            ),
+            dividends = emptyList(),
+            currentPrice = 11.5,
+            checkedAt = 1000L
+        )
+
+        assertThat(result.metricValue).isEqualTo(11.5)
+        assertThat(result.shouldNotify).isTrue()
+        assertThat(result.updatedLastWasAboveThreshold).isFalse()
+    }
+
+    @Test
+    fun `notifies when dividend yield crosses below target`() {
+        val result = evaluator.evaluate(
+            rule = rule(
+                type = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD,
+                lastWasAboveThreshold = true,
+                thresholdPercent = 5.0
+            ),
+            dividends = listOf(dividend("2025-12-31", 0.8)),
+            currentPrice = 20.0,
+            checkedAt = 1000L
+        )
+
+        assertThat(result.yieldPercent).isWithin(0.0001).of(4.0)
+        assertThat(result.shouldNotify).isTrue()
+        assertThat(result.updatedLastWasAboveThreshold).isFalse()
+    }
+
     private fun rule(
         lastWasAboveThreshold: Boolean?,
-        thresholdPercent: Double
+        thresholdPercent: Double,
+        type: String = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
     ) = NotificationRuleEntity(
         id = "global-dividend-yield",
-        type = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
+        type = type,
         stockCode = null,
         enabled = true,
         thresholdPercent = thresholdPercent,

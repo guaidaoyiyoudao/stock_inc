@@ -3,6 +3,7 @@ package com.stock.dividend.data.notification
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.NotificationRuleRepository
@@ -83,12 +84,48 @@ class NotificationCheckCoordinatorTest {
         }
     }
 
+    @Test
+    fun `sends custom rule notification when price crosses threshold`() = runTest {
+        val stock = StockEntity("sz.000001", "平安银行", "0", shares = 100)
+        val rule = rule(
+            type = NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
+            lastWasAboveThreshold = false,
+            thresholdPercent = 12.0
+        )
+        coEvery { ruleRepository.getEffectiveDividendYieldRules(listOf(stock.code)) } returns emptyMap()
+        coEvery { ruleRepository.getEnabledStockRules(listOf(stock.code)) } returns mapOf(stock.code to listOf(rule))
+        coEvery { dividendDao.getByStock(stock.code) } returns emptyList()
+        coEvery { notifier.canNotify() } returns true
+
+        coordinator.checkWithPrices(
+            stocks = listOf(stock),
+            prices = mapOf(stock.code to 12.5)
+        )
+
+        coVerify {
+            notifier.sendNotificationRuleAlert(
+                stockCode = stock.code,
+                stockName = stock.name,
+                ruleType = NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
+                metricValue = 12.5,
+                thresholdValue = 12.0
+            )
+            ruleRepository.updateRuleEvaluationState(
+                rule = rule,
+                lastWasAboveThreshold = true,
+                checkedAt = 1000L,
+                triggeredAt = 1000L
+            )
+        }
+    }
+
     private fun rule(
         lastWasAboveThreshold: Boolean?,
-        thresholdPercent: Double
+        thresholdPercent: Double,
+        type: String = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
     ) = NotificationRuleEntity(
         id = "global",
-        type = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
+        type = type,
         stockCode = null,
         enabled = true,
         thresholdPercent = thresholdPercent,

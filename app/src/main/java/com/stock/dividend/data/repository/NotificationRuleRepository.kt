@@ -17,6 +17,9 @@ class NotificationRuleRepository @Inject constructor(
     fun observeStockDividendYieldRule(stockCode: String): Flow<NotificationRuleEntity?> =
         dao.observeStockRule(NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD, stockCode)
 
+    fun observeStockRules(stockCode: String): Flow<List<NotificationRuleEntity>> =
+        dao.observeStockRules(stockCode)
+
     suspend fun getEffectiveDividendYieldRules(stockCodes: List<String>): Map<String, NotificationRuleEntity> {
         if (stockCodes.isEmpty()) return emptyMap()
         val rules = dao.getRulesByType(NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD)
@@ -31,6 +34,13 @@ class NotificationRuleRepository @Inject constructor(
         }.toMap()
     }
 
+    suspend fun getEnabledStockRules(stockCodes: List<String>): Map<String, List<NotificationRuleEntity>> {
+        if (stockCodes.isEmpty()) return emptyMap()
+        return stockCodes.associateWith { code ->
+            dao.getStockRules(code).filter { it.enabled }
+        }.filterValues { it.isNotEmpty() }
+    }
+
     suspend fun getGlobalDividendYieldRule(): NotificationRuleEntity? =
         dao.getGlobalRule(NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD)
 
@@ -43,19 +53,35 @@ class NotificationRuleRepository @Inject constructor(
         thresholdPercent: Double,
         now: Long = System.currentTimeMillis()
     ) {
+        saveRule(
+            type = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
+            stockCode = stockCode,
+            enabled = enabled,
+            thresholdValue = thresholdPercent,
+            now = now
+        )
+    }
+
+    suspend fun saveRule(
+        type: String,
+        stockCode: String?,
+        enabled: Boolean,
+        thresholdValue: Double,
+        now: Long = System.currentTimeMillis()
+    ) {
         val existing = if (stockCode == null) {
-            getGlobalDividendYieldRule()
+            dao.getGlobalRule(type)
         } else {
-            getStockDividendYieldRule(stockCode)
+            dao.getStockRule(type, stockCode)
         }
-        val id = stockCode?.let { "stock-$it-dividend-yield-threshold" } ?: "global-dividend-yield-threshold"
+        val id = defaultRuleId(type, stockCode)
         dao.upsert(
             NotificationRuleEntity(
                 id = existing?.id ?: id,
-                type = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
+                type = type,
                 stockCode = stockCode,
                 enabled = enabled,
-                thresholdPercent = thresholdPercent.coerceAtLeast(0.0),
+                thresholdPercent = thresholdValue.coerceAtLeast(0.0),
                 lastWasAboveThreshold = existing?.lastWasAboveThreshold,
                 lastCheckedAt = existing?.lastCheckedAt,
                 lastTriggeredAt = existing?.lastTriggeredAt,
@@ -63,6 +89,13 @@ class NotificationRuleRepository @Inject constructor(
                 updatedAt = now
             )
         )
+    }
+
+    private fun defaultRuleId(type: String, stockCode: String?): String {
+        if (type == NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD) {
+            return stockCode?.let { "stock-$it-dividend-yield-threshold" } ?: "global-dividend-yield-threshold"
+        }
+        return stockCode?.let { "stock-$it-$type" } ?: "global-$type"
     }
 
     suspend fun updateRuleEvaluationState(

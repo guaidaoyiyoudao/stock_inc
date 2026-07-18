@@ -3,6 +3,7 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -58,14 +59,58 @@ class NotificationRuleRepositoryTest {
         }
     }
 
+    @Test
+    fun `saves stock rule by type with stable id`() = runTest {
+        coEvery { dao.getStockRule(NOTIFICATION_RULE_TYPE_PRICE_ABOVE, "sz.000001") } returns null
+
+        repository.saveRule(
+            type = NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
+            stockCode = "sz.000001",
+            enabled = true,
+            thresholdValue = 12.5,
+            now = 1000L
+        )
+
+        coVerify {
+            dao.upsert(
+                match {
+                    it.id == "stock-sz.000001-PRICE_ABOVE" &&
+                        it.type == NOTIFICATION_RULE_TYPE_PRICE_ABOVE &&
+                        it.stockCode == "sz.000001" &&
+                        it.enabled &&
+                        it.thresholdPercent == 12.5 &&
+                        it.createdAt == 1000L &&
+                        it.updatedAt == 1000L
+                }
+            )
+        }
+    }
+
+    @Test
+    fun `returns enabled stock custom rules for requested stocks`() = runTest {
+        val priceRule = rule(
+            id = "price",
+            type = NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
+            stockCode = "sz.000001",
+            threshold = 12.5
+        )
+        val yieldRule = rule(id = "yield", stockCode = "sz.000001", threshold = 5.0)
+        coEvery { dao.getStockRules("sz.000001") } returns listOf(priceRule, yieldRule)
+
+        val result = repository.getEnabledStockRules(listOf("sz.000001"))
+
+        assertThat(result["sz.000001"]).containsExactly(priceRule, yieldRule).inOrder()
+    }
+
     private fun rule(
         id: String,
         stockCode: String?,
         threshold: Double,
-        enabled: Boolean = true
+        enabled: Boolean = true,
+        type: String = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
     ) = NotificationRuleEntity(
         id = id,
-        type = NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
+        type = type,
         stockCode = stockCode,
         enabled = enabled,
         thresholdPercent = threshold,

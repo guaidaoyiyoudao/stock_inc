@@ -9,4 +9,12 @@ interface DividendAlertNotifier {
         yieldPercent: Double,
         thresholdPercent: Double
     )
+
+    suspend fun sendNotificationRuleAlert(
+        stockCode: String,
+        stockName: String,
+        ruleType: String,
+        metricValue: Double,
+        thresholdValue: Double
+    )
 }

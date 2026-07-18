@@ -13,6 +13,8 @@ data class DividendResponse(
     data class DividendItem(
         @SerializedName("SECURITY_CODE")
         val securityCode: String?,
+        @SerializedName("SECUCODE")
+        val secuCode: String? = null,
         @SerializedName("SECURITY_NAME_ABBR")
         val securityNameAbbr: String?,
         @SerializedName("REPORT_DATE")

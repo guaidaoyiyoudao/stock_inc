@@ -4,15 +4,19 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,9 +30,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.viewmodel.StockNotificationRuleSettingUiState
 import com.stock.dividend.viewmodel.StockNotificationSettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,7 +53,7 @@ fun StockNotificationSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("单股通知") },
+                title = { Text("自定义通知规则") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -60,36 +66,20 @@ fun StockNotificationSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("启用单股覆盖")
-                    Text(
-                        text = "启用后该股票使用独立阈值；关闭时使用全局规则",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(checked = state.enabled, onCheckedChange = viewModel::updateEnabled)
+            state.rules.forEach { rule ->
+                StockNotificationRuleCard(
+                    rule = rule,
+                    onEnabledChange = { viewModel.updateEnabled(rule.type, it) },
+                    onThresholdChange = { viewModel.updateThreshold(rule.type, it) }
+                )
             }
-            OutlinedTextField(
-                value = state.thresholdInput,
-                onValueChange = viewModel::updateThreshold,
-                label = { Text("阈值 (%)") },
-                singleLine = true,
-                isError = state.thresholdError != null,
-                supportingText = { Text(state.thresholdError ?: "例如：5.0") },
-                modifier = Modifier.fillMaxWidth()
-            )
             Button(
                 onClick = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && state.enabled) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && state.rules.any { it.enabled }) {
                         permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     } else {
                         viewModel.save()
@@ -106,6 +96,57 @@ fun StockNotificationSettingsScreen(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun StockNotificationRuleCard(
+    rule: StockNotificationRuleSettingUiState,
+    onEnabledChange: (Boolean) -> Unit,
+    onThresholdChange: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = rule.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = rule.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = rule.enabled,
+                    onCheckedChange = onEnabledChange
+                )
+            }
+            OutlinedTextField(
+                value = rule.thresholdInput,
+                onValueChange = onThresholdChange,
+                label = { Text(rule.thresholdLabel) },
+                singleLine = true,
+                isError = rule.thresholdError != null,
+                supportingText = { Text(rule.thresholdError ?: "启用后按该阈值判断") },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }

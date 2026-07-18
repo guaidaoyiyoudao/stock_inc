@@ -297,7 +297,7 @@ class DividendCalendarViewModelTest {
     }
 
     @Test
-    fun `year filter includes dividend plans without execution dates`() = runTest {
+    fun `calendar ignores dividend plans without execution dates`() = runTest {
         val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
         stocksFlow.value = listOf(
             StockEntity(code = "sh.600398", name = "海澜之家", marketCode = "1", shares = 100)
@@ -318,9 +318,7 @@ class DividendCalendarViewModelTest {
         viewModel.onDateSelected("2026-04-30")
         testDispatcher.scheduler.advanceUntilIdle()
 
-        assertThat(viewModel.uiState.value.events.map { it.id }).containsExactly("plan-only")
-        assertThat(viewModel.uiState.value.events.single().eventType).isEqualTo("预案")
-        assertThat(viewModel.uiState.value.events.single().eventDate).isEqualTo("2026-04-30")
-        assertThat(viewModel.uiState.value.selectedDateEvents.map { it.id }).containsExactly("plan-only")
+        assertThat(viewModel.uiState.value.events).isEmpty()
+        assertThat(viewModel.uiState.value.selectedDateEvents).isEmpty()
     }
 }

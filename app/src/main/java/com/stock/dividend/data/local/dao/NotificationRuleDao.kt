@@ -21,11 +21,17 @@ interface NotificationRuleDao {
     @Query("SELECT * FROM notification_rules WHERE type = :type AND stockCode = :stockCode LIMIT 1")
     fun observeStockRule(type: String, stockCode: String): Flow<NotificationRuleEntity?>
 
+    @Query("SELECT * FROM notification_rules WHERE stockCode = :stockCode ORDER BY type")
+    fun observeStockRules(stockCode: String): Flow<List<NotificationRuleEntity>>
+
     @Query("SELECT * FROM notification_rules WHERE type = :type AND stockCode IS NULL LIMIT 1")
     suspend fun getGlobalRule(type: String): NotificationRuleEntity?
 
     @Query("SELECT * FROM notification_rules WHERE type = :type AND stockCode = :stockCode LIMIT 1")
     suspend fun getStockRule(type: String, stockCode: String): NotificationRuleEntity?
+
+    @Query("SELECT * FROM notification_rules WHERE stockCode = :stockCode ORDER BY type")
+    suspend fun getStockRules(stockCode: String): List<NotificationRuleEntity>
 
     @Query("SELECT * FROM notification_rules")
     suspend fun getAll(): List<NotificationRuleEntity>
