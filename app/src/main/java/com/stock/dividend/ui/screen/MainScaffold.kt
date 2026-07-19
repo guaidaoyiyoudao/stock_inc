@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,7 +31,8 @@ internal data class BottomNavItem(
 )
 
 internal val bottomNavItems = listOf(
-    BottomNavItem("watchlist", "持仓", Icons.Filled.AccountBalance),
+    BottomNavItem("portfolio", "持仓", Icons.Filled.AccountBalance),
+    BottomNavItem("watchlist", "自选", Icons.Filled.Star),
     BottomNavItem("income", "股息收入", Icons.AutoMirrored.Filled.TrendingUp),
     BottomNavItem("calendar", "日历", Icons.Filled.DateRange),
     BottomNavItem("achievements", "成就", Icons.Filled.EmojiEvents),
@@ -101,9 +103,15 @@ fun MainScaffold(rootNavController: NavHostController) {
     ) { padding ->
         NavHost(
             navController = tabNavController,
-            startDestination = "watchlist",
+            startDestination = "portfolio",
             modifier = Modifier.padding(padding)
         ) {
+            composable("portfolio") {
+                PortfolioScreen(
+                    onStockClick = { code -> tabNavController.navigate("stockDetail/$code") },
+                    onImportFromScreenshot = { tabNavController.navigate("portfolioImport") }
+                )
+            }
             composable("watchlist") {
                 WatchlistScreen(
                     snackbarHostState = snackbarHostState,
@@ -128,6 +136,9 @@ fun MainScaffold(rootNavController: NavHostController) {
             }
             composable("addStock") {
                 AddStockScreen(onBack = { tabNavController.popBackStack() })
+            }
+            composable("portfolioImport") {
+                PortfolioImportScreen(onBack = { tabNavController.popBackStack() })
             }
             composable(
                 route = "stockDetail/{code}",

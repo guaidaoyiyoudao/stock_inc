@@ -33,6 +33,9 @@ interface StockDao {
     @Query("UPDATE stocks SET costPerShare = :costPerShare WHERE code = :code")
     suspend fun updateCostPerShare(code: String, costPerShare: Double)
 
+    @Query("UPDATE stocks SET targetWeight = :weight WHERE code = :code")
+    suspend fun updateTargetWeight(code: String, weight: Double)
+
     @Query("SELECT * FROM stocks")
     suspend fun getAll(): List<StockEntity>
 

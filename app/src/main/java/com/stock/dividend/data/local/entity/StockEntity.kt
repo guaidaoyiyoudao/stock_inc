@@ -15,5 +15,6 @@ data class StockEntity(
     val lastUpdated: Long? = null,
     val shares: Int = 0,
     val yieldPeriod: String = "3",
-    val costPerShare: Double = 0.0
+    val costPerShare: Double = 0.0,
+    val targetWeight: Double = 0.0
 )

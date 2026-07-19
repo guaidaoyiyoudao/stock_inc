@@ -218,7 +218,6 @@ class HomeViewModel @Inject constructor(
                             notificationCheckCoordinator.checkWithPrices(stocksWithShares, prices)
                             val now = System.currentTimeMillis()
                             prefs.edit().putLong(KEY_LAST_REFRESH, now).apply()
-                            stockRepository.updateAllLastUpdated(stocksWithShares.map { it.code }, now)
                         } catch (_: Exception) {
                             _uiState.update { it.copy(isLoading = false) }
                         }

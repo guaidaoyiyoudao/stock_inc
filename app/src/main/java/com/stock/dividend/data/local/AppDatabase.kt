@@ -32,7 +32,7 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         LivingExpenseItemEntity::class,
         NotificationRuleEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -163,6 +163,12 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE UNIQUE INDEX IF NOT EXISTS `index_notification_rules_type_stockCode` " +
                             "ON `notification_rules`(`type`, `stockCode`)"
                 )
+            }
+        }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE stocks ADD COLUMN targetWeight REAL NOT NULL DEFAULT 0.0")
             }
         }
     }
