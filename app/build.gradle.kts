@@ -14,8 +14,8 @@ android {
         applicationId = "com.stock.dividend"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "3.0.1"
+        versionCode = 5
+        versionName = "3.0.2"
     }
 
     signingConfigs {
@@ -109,8 +109,8 @@ dependencies {
     implementation(libs.coil.svg)
     implementation(libs.coil.network.okhttp)
 
-    // OCR (on-device Chinese text recognition for screenshot import)
-    implementation(libs.mlkit.text.recognition.chinese)
+    // OCR (Chinese text recognition via Play Services; model downloaded on demand to keep APK small)
+    implementation(libs.mlkit.text.recognition)
 
     // Charts
     implementation(libs.vico.compose)
