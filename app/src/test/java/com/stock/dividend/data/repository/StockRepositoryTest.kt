@@ -1,9 +1,11 @@
 package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
+import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
 import com.stock.dividend.data.remote.dto.QuoteData
@@ -13,8 +15,13 @@ import com.stock.dividend.data.remote.dto.StockSearchResponse
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
+import io.mockk.slot
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Test
 import retrofit2.HttpException
 import retrofit2.Response
@@ -28,7 +35,23 @@ class StockRepositoryTest {
     private val quoteApi: QuoteApi = mockk()
     private val dao: StockDao = mockk(relaxed = true)
     private val transactionDao: TransactionDao = mockk(relaxed = true)
-    private val repository = StockRepository(api, quoteApi, dao, transactionDao)
+    private val appDatabase: AppDatabase = mockk(relaxed = true)
+    private val repository = StockRepository(api, quoteApi, dao, transactionDao, appDatabase)
+
+    @org.junit.Before
+    fun setUp() {
+        // Room 的 withTransaction 扩展函数默认会走真实 DB 事务，单测里 mock 为「直接执行 block」。
+        mockkStatic("androidx.room.RoomDatabaseKt")
+        val blockSlot = slot<suspend () -> Any>()
+        coEvery { appDatabase.withTransaction(capture(blockSlot)) } coAnswers {
+            blockSlot.captured.invoke()
+        }
+    }
+
+    @After
+    fun tearDown() {
+        unmockkStatic("androidx.room.RoomDatabaseKt")
+    }
 
     @Test
     fun `searchStocks returns filtered A-stock results`() = runTest {
@@ -457,4 +480,125 @@ class StockRepositoryTest {
 
         coVerify { dao.updateCostPerShare("sz.000001", 0.0) }
     }
+
+    @Test
+    fun `updateTargetWeight coerces negative to zero`() = runTest {
+        repository.updateTargetWeight("sz.000001", -5.0)
+
+        coVerify { dao.updateTargetWeight("sz.000001", 0.0) }
+    }
+
+    @Test
+    fun `updateTargetWeight coerces above 100 to 100`() = runTest {
+        repository.updateTargetWeight("sz.000001", 150.0)
+
+        coVerify { dao.updateTargetWeight("sz.000001", 100.0) }
+    }
+
+    @Test
+    fun `resolveStock prefers exact code match`() = runTest {
+        coEvery { api.searchStocks(input = "600519") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(
+                    stockItem("600519", "贵州茅台", "1"),
+                    stockItem("600520", "三一重工", "1")
+                )
+            )
+        )
+
+        val resolved = repository.resolveStock("600519")
+
+        assertThat(resolved).isNotNull()
+        assertThat(resolved!!.code).isEqualTo("sh.600519")
+    }
+
+    @Test
+    fun `resolveStock falls back to first A-stock for name`() = runTest {
+        coEvery { api.searchStocks(input = "贵州茅台") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("600519", "贵州茅台", "1"))
+            )
+        )
+
+        val resolved = repository.resolveStock("贵州茅台")
+
+        assertThat(resolved).isNotNull()
+        assertThat(resolved!!.name).isEqualTo("贵州茅台")
+    }
+
+    @Test
+    fun `resolveStock returns null when search yields no results`() = runTest {
+        coEvery { api.searchStocks(input = "不存在的") } returns StockSearchResponse(
+            quotationCodeTable = null
+        )
+
+        assertThat(repository.resolveStock("不存在的")).isNull()
+    }
+
+    @Test
+    fun `recomputeHolding updates denormalized shares and avg cost from transactions`() = runTest {
+        coEvery { transactionDao.getByStock("sh.600519") } returns listOf(
+            TransactionEntity(id = 1, stockCode = "sh.600519", type = "BUY", shares = 100, price = 1500.0, date = "2026-01-01"),
+            TransactionEntity(id = 2, stockCode = "sh.600519", type = "BUY", shares = 100, price = 1600.0, date = "2026-02-01"),
+            TransactionEntity(id = 3, stockCode = "sh.600519", type = "SELL", shares = 50, price = 1700.0, date = "2026-03-01")
+        )
+
+        repository.recomputeHolding("sh.600519")
+
+        // 净持仓 = 100 + 100 - 50 = 150
+        coVerify { dao.updateShares("sh.600519", 150) }
+        // 买入加权均价 = (1500*100 + 1600*100) / 200 = 1550
+        coVerify { dao.updateCostPerShare("sh.600519", 1550.0) }
+    }
+
+    @Test
+    fun `importHoldings succeeds for resolvable rows and recompute is called`() = runTest {
+        coEvery { api.searchStocks(input = "600519") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("600519", "贵州茅台", "1"))
+            )
+        )
+        coEvery { transactionDao.getByStock("sh.600519") } returns emptyList()
+
+        val summary = repository.importHoldings(
+            listOf(ImportRow(rawCodeOrName = "600519", shares = 100, costPerShare = 1500.0))
+        )
+
+        assertThat(summary.succeeded).containsExactly("sh.600519")
+        assertThat(summary.failed).isEmpty()
+        coVerify { dao.insert(any()) }
+        coVerify { transactionDao.insert(any()) }
+        coVerify { dao.updateShares("sh.600519", 0) }
+    }
+
+    @Test
+    fun `importHoldings records failed rows without blocking others`() = runTest {
+        coEvery { api.searchStocks(input = "600519") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("600519", "贵州茅台", "1"))
+            )
+        )
+        coEvery { api.searchStocks(input = "查无此股") } returns StockSearchResponse(
+            quotationCodeTable = null
+        )
+        coEvery { transactionDao.getByStock("sh.600519") } returns emptyList()
+
+        val summary = repository.importHoldings(
+            listOf(
+                ImportRow("查无此股", 100, 10.0),
+                ImportRow("600519", 100, 1500.0)
+            )
+        )
+
+        assertThat(summary.succeeded).containsExactly("sh.600519")
+        assertThat(summary.failed.map { it.rawCodeOrName }).containsExactly("查无此股")
+    }
+
+    private fun stockItem(code: String, name: String, mktNum: String) = StockSearchResponse.StockItem(
+        Code = code,
+        Name = name,
+        MktNum = mktNum,
+        SecurityTypeName = if (mktNum == "1") "沪A" else "深A",
+        Classify = "AStock"
+    )
 }

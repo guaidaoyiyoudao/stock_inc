@@ -109,6 +109,9 @@ dependencies {
     implementation(libs.coil.svg)
     implementation(libs.coil.network.okhttp)
 
+    // OCR (on-device Chinese text recognition for screenshot import)
+    implementation(libs.mlkit.text.recognition.chinese)
+
     // Charts
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)
