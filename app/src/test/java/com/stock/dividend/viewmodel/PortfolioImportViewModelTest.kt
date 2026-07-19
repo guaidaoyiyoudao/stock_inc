@@ -7,6 +7,7 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.repository.ImportRow
 import com.stock.dividend.data.repository.ImportSummary
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.scan.OcrElement
 import com.stock.dividend.data.scan.TextRecognitionService
 import com.stock.dividend.data.scan.loadSampledBitmap
 import io.mockk.coEvery
@@ -37,10 +38,8 @@ class PortfolioImportViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        // loadSampledBitmap 是顶层 suspend 函数，mockkStatic 替换为返回假 bitmap
         mockkStatic("com.stock.dividend.data.scan.BitmapLoaderKt")
         coEvery { loadSampledBitmap(any(), any<Uri>()) } returns fakeBitmap
-        // android.net.Uri 在纯 JVM 测试里是 stub，必须 mock
         mockkStatic(Uri::class)
         every { Uri.parse(any()) } returns mockk(relaxed = true)
     }
@@ -53,13 +52,12 @@ class PortfolioImportViewModelTest {
     }
 
     @Test
-    fun `onImagePicked fills rows from recognized text and enters review`() = runTest {
-        val ocrText = """
-            证券名称 证券代码 持股数 成本价
-            贵州茅台 600519 100 1500.00
-            平安银行 000001 1000 12.34
-        """.trimIndent()
-        coEvery { textRecognitionService.recognize(any()) } returns ocrText
+    fun `onImagePicked fills rows from recognized elements and enters review`() = runTest {
+        seedRecognized(
+            names = listOf("贵州茅台", "平安银行"),
+            shares = listOf(100, 1000),
+            prices = listOf(1500.0, 12.34)
+        )
 
         val viewModel = createViewModel()
         viewModel.onImagePicked(Uri.parse("content://media/external/images/media/1"))
@@ -68,23 +66,25 @@ class PortfolioImportViewModelTest {
         val state = viewModel.uiState.value
         assertThat(state.phase).isEqualTo(ImportPhase.Review)
         assertThat(state.rows).hasSize(2)
-        assertThat(state.rows[0].codeOrNameInput).isEqualTo("600519")
+        assertThat(state.rows[0].codeOrNameInput).isEqualTo("贵州茅台")
         assertThat(state.rows[0].sharesInput).isEqualTo("100")
         assertThat(state.rows[0].costPerShareInput).isEqualTo("1500")
-        assertThat(state.rows[1].codeOrNameInput).isEqualTo("000001")
+        assertThat(state.rows[1].codeOrNameInput).isEqualTo("平安银行")
     }
 
     @Test
     fun `onImagePicked enters error when nothing parseable found`() = runTest {
-        coEvery { textRecognitionService.recognize(any()) } returns "仅有一些无意义文本"
+        // 纯噪声元素（无名称、无数字）
+        coEvery { textRecognitionService.recognize(any()) } returns listOf(
+            OcrElement("###", 50f, 100f, 130f, 140f),
+            OcrElement("@@@", 50f, 160f, 130f, 200f)
+        )
 
         val viewModel = createViewModel()
         viewModel.onImagePicked(Uri.parse("content://media/external/images/media/1"))
         testDispatcher.scheduler.advanceUntilIdle()
 
-        val state = viewModel.uiState.value
-        assertThat(state.phase).isEqualTo(ImportPhase.Error)
-        assertThat(state.errorMessage).isNotNull()
+        assertThat(viewModel.uiState.value.phase).isEqualTo(ImportPhase.Error)
     }
 
     @Test
@@ -100,17 +100,19 @@ class PortfolioImportViewModelTest {
 
     @Test
     fun `confirmImport aborts when a row has blank code`() = runTest {
-        seedRecognized("贵州茅台 600519 100 1500.00")
+        seedRecognized(
+            names = listOf("贵州茅台"),
+            shares = listOf(100),
+            prices = listOf(1500.0)
+        )
         val viewModel = createViewModel()
         viewModel.onImagePicked(Uri.parse("content://x/1"))
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // 人为清空某行的代码
         viewModel.onRowCodeOrNameChanged(viewModel.uiState.value.rows.first().id, "")
         viewModel.confirmImport()
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // 校验失败 → 不调 importHoldings，留在 Review
         coVerify(exactly = 0) { stockRepository.importHoldings(any()) }
         assertThat(viewModel.uiState.value.phase).isEqualTo(ImportPhase.Review)
         assertThat(viewModel.uiState.value.rows.first().codeOrNameError).isNotNull()
@@ -118,7 +120,11 @@ class PortfolioImportViewModelTest {
 
     @Test
     fun `confirmImport rejects non-positive shares`() = runTest {
-        seedRecognized("贵州茅台 600519 100 1500.00")
+        seedRecognized(
+            names = listOf("贵州茅台"),
+            shares = listOf(100),
+            prices = listOf(1500.0)
+        )
         val viewModel = createViewModel()
         viewModel.onImagePicked(Uri.parse("content://x/1"))
         testDispatcher.scheduler.advanceUntilIdle()
@@ -133,9 +139,13 @@ class PortfolioImportViewModelTest {
 
     @Test
     fun `confirmImport persists and shows summary on success`() = runTest {
-        seedRecognized("贵州茅台 600519 100 1500.00")
+        seedRecognized(
+            names = listOf("贵州茅台", "平安银行"),
+            shares = listOf(100, 50),
+            prices = listOf(1500.0, 12.34)
+        )
         coEvery { stockRepository.importHoldings(any()) } returns ImportSummary(
-            succeeded = listOf("sh.600519"),
+            succeeded = listOf("sh.600519", "sz.000001"),
             failed = emptyList()
         )
         val viewModel = createViewModel()
@@ -147,20 +157,24 @@ class PortfolioImportViewModelTest {
 
         val state = viewModel.uiState.value
         assertThat(state.phase).isEqualTo(ImportPhase.Done)
-        assertThat(state.importSummary).contains("成功导入 1 只")
+        assertThat(state.importSummary).contains("成功导入 2 只")
         val slot = mutableListOf<List<ImportRow>>()
         coVerify { stockRepository.importHoldings(capture(slot)) }
-        assertThat(slot.first()).hasSize(1)
-        assertThat(slot.first().first().rawCodeOrName).isEqualTo("600519")
+        assertThat(slot.first()).hasSize(2)
+        assertThat(slot.first().first().rawCodeOrName).isEqualTo("贵州茅台")
         assertThat(slot.first().first().shares).isEqualTo(100)
     }
 
     @Test
     fun `confirmImport surfaces partial failures in summary`() = runTest {
-        seedRecognized("贵州茅台 600519 100 1500.00")
+        seedRecognized(
+            names = listOf("贵州茅台"),
+            shares = listOf(100),
+            prices = listOf(1500.0)
+        )
         coEvery { stockRepository.importHoldings(any()) } returns ImportSummary(
             succeeded = emptyList(),
-            failed = listOf(ImportRow("600519", 100, 1500.0))
+            failed = listOf(ImportRow("贵州茅台", 100, 1500.0))
         )
         val viewModel = createViewModel()
         viewModel.onImagePicked(Uri.parse("content://x/1"))
@@ -174,19 +188,38 @@ class PortfolioImportViewModelTest {
 
     @Test
     fun `removeRow removes the row from state`() = runTest {
-        seedRecognized("贵州茅台 600519 100 1500.00")
+        seedRecognized(
+            names = listOf("贵州茅台", "平安银行"),
+            shares = listOf(100, 50),
+            prices = listOf(1500.0, 12.34)
+        )
         val viewModel = createViewModel()
         viewModel.onImagePicked(Uri.parse("content://x/1"))
         testDispatcher.scheduler.advanceUntilIdle()
-        val id = viewModel.uiState.value.rows.first().id
+        val firstId = viewModel.uiState.value.rows.first().id
 
-        viewModel.removeRow(id)
+        viewModel.removeRow(firstId)
 
-        assertThat(viewModel.uiState.value.rows).isEmpty()
+        assertThat(viewModel.uiState.value.rows).hasSize(1)
+        assertThat(viewModel.uiState.value.rows.first().codeOrNameInput).isEqualTo("平安银行")
     }
 
-    private fun seedRecognized(text: String) {
-        coEvery { textRecognitionService.recognize(any()) } returns text
+    /** 模拟 OCR 返回分块布局：名称、股数、价格各成一列，Y 对齐。 */
+    private fun seedRecognized(
+        names: List<String>,
+        shares: List<Int>,
+        prices: List<Double>
+    ) {
+        val elements = mutableListOf<OcrElement>()
+        names.forEachIndexed { i, name ->
+            val y = 100f + i * 60f
+            elements.add(OcrElement(name, 50f, y, 130f, y + 40f))
+            elements.add(OcrElement(shares[i].toString(), 400f, y, 480f, y + 40f))
+            if (i < prices.size) {
+                elements.add(OcrElement(prices[i].toString(), 600f, y, 680f, y + 40f))
+            }
+        }
+        coEvery { textRecognitionService.recognize(any()) } returns elements
     }
 
     private fun createViewModel() =

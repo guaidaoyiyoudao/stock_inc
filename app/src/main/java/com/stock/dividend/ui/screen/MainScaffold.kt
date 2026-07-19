@@ -131,7 +131,8 @@ fun MainScaffold(rootNavController: NavHostController) {
             }
             composable("settings") {
                 SettingsScreen(
-                    onOpenDataManagement = { rootNavController.navigate(Routes.BACKUP_RESTORE) }
+                    onOpenDataManagement = { rootNavController.navigate(Routes.BACKUP_RESTORE) },
+                    onOpenOcrDebug = { tabNavController.navigate("ocrDebug") }
                 )
             }
             composable("addStock") {
@@ -139,6 +140,9 @@ fun MainScaffold(rootNavController: NavHostController) {
             }
             composable("portfolioImport") {
                 PortfolioImportScreen(onBack = { tabNavController.popBackStack() })
+            }
+            composable("ocrDebug") {
+                OcrDebugScreen(onBack = { tabNavController.popBackStack() })
             }
             composable(
                 route = "stockDetail/{code}",

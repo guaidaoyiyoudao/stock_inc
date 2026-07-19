@@ -71,14 +71,15 @@ class PortfolioImportViewModel @Inject constructor(
             try {
                 _uiState.update { it.copy(phase = ImportPhase.OcrRunning) }
                 val bitmap = loadSampledBitmap(context, uri)
-                val rawText = textRecognitionService.recognize(bitmap)
-                val parsed = HoldingScreenshotParser.parse(rawText)
+                val elements = textRecognitionService.recognize(bitmap)
+                val rawText = elements.joinToString("\n") { it.text }
+                val parsed = HoldingScreenshotParser.parseFromElements(elements)
                 if (parsed.isEmpty()) {
                     _uiState.update {
                         it.copy(
                             phase = ImportPhase.Error,
                             ocrRawText = rawText,
-                            errorMessage = "未在截图中识别到持仓行，请确认截图来自同花顺持仓页，或手动添加行后导入。"
+                            errorMessage = "未在截图中识别到持仓行，请确认截图来自持仓页，或手动添加行后导入。"
                         )
                     }
                     return@launch

@@ -58,6 +58,7 @@ internal val settingsEntries = listOf(
 @Composable
 fun SettingsScreen(
     onOpenDataManagement: () -> Unit,
+    onOpenOcrDebug: () -> Unit,
     viewModel: NotificationSettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -93,6 +94,14 @@ fun SettingsScreen(
         SettingsEntryRow(
             entry = settingsEntries[1],
             onClick = onOpenDataManagement
+        )
+        // 临时调试入口，定位 OCR 识别问题后删除
+        SettingsEntryRow(
+            entry = SettingsEntry(
+                title = "OCR 调试（临时）",
+                description = "测试不同预处理方式对截图识别的影响"
+            ),
+            onClick = onOpenOcrDebug
         )
     }
 }
