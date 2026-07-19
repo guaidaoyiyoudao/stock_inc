@@ -5,6 +5,7 @@ pluginManagement {
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("com\\.google.*")
                 includeGroupByRegex("androidx.*")
+                excludeGroup("com.google.devtools.ksp")
             }
         }
         maven("https://maven.aliyun.com/repository/central")
@@ -14,6 +15,7 @@ pluginManagement {
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("com\\.google.*")
                 includeGroupByRegex("androidx.*")
+                excludeGroup("com.google.devtools.ksp")
             }
         }
         mavenCentral()
