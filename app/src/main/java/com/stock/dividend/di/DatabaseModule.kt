@@ -7,6 +7,7 @@ import com.stock.dividend.data.local.dao.AchievementDao
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FireGoalDao
+import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.StockDao
@@ -31,7 +32,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "stock_dividend.db"
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11, AppDatabase.MIGRATION_11_12)
             .build()
     }
 
@@ -58,6 +59,9 @@ object DatabaseModule {
 
     @Provides
     fun provideNotificationRuleDao(db: AppDatabase): NotificationRuleDao = db.notificationRuleDao()
+
+    @Provides
+    fun provideIndustryTargetDao(db: AppDatabase): IndustryTargetDao = db.industryTargetDao()
 
     @Provides
     @Singleton

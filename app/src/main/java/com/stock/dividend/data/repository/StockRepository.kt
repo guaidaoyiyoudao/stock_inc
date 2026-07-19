@@ -1,8 +1,10 @@
 package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.AppDatabase
+import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
+import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
@@ -40,6 +42,7 @@ class StockRepository @Inject constructor(
     private val quoteApi: QuoteApi,
     private val stockDao: StockDao,
     private val transactionDao: TransactionDao,
+    private val industryTargetDao: IndustryTargetDao,
     private val appDatabase: AppDatabase
 ) {
     suspend fun searchStocks(query: String): Result<List<StockSearchResult>> {
@@ -187,6 +190,42 @@ class StockRepository @Inject constructor(
     }
 
     /**
+     * 拉取单只股票的所属行业（东财一级行业，f127）并缓存到 [StockEntity.industry]。
+     * 网络失败或返回空时不写入。
+     */
+    suspend fun fetchAndCacheIndustry(code: String) {
+        val stock = stockDao.getByCode(code) ?: return
+        val secid = "${stock.marketCode}.${stock.code.substringAfter(".")}"
+        val response = try {
+            quoteApi.getStockInfo(secid = secid)
+        } catch (_: Exception) {
+            return
+        }
+        val industry = response.data?.industry?.trim().orEmpty()
+        if (industry.isNotEmpty()) {
+            stockDao.updateIndustry(code, industry)
+        }
+    }
+
+    // ---------- 行业目标配比 ----------
+
+    fun observeIndustryTargets(): Flow<List<IndustryTargetEntity>> =
+        industryTargetDao.observeAll()
+
+    suspend fun getIndustryTargets(): List<IndustryTargetEntity> =
+        industryTargetDao.getAll()
+
+    suspend fun updateIndustryTarget(industry: String, weight: Double) {
+        industryTargetDao.upsert(
+            IndustryTargetEntity(industry = industry, targetWeight = weight.coerceIn(0.0, 100.0))
+        )
+    }
+
+    suspend fun deleteIndustryTarget(industry: String) {
+        industryTargetDao.deleteByIndustry(industry)
+    }
+
+    /**
      * 通过 OCR/手动输入的代码或名称解析为 [StockSearchResult]。
      * - 若输入是 6 位代码，优先精确匹配 code；
      * - 否则取首个 A 股结果。
@@ -255,6 +294,10 @@ class StockRepository @Inject constructor(
                     failed.add(row)
                 }
             }
+        }
+        // 事务外补充行业信息（网络调用，失败不阻塞导入结果）
+        succeeded.forEach { code ->
+            try { fetchAndCacheIndustry(code) } catch (_: Exception) { /* 行业缺失不影响导入 */ }
         }
         return ImportSummary(succeeded = succeeded, failed = failed)
     }

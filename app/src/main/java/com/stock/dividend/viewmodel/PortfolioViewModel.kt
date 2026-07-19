@@ -34,20 +34,39 @@ data class PortfolioItem(
     val marketCode: String,
     val shares: Int,
     val costPerShare: Double,
+    val industry: String = "",
     val currentPrice: Double? = null,
     val marketValue: Double? = null,
     val totalCost: Double,
     val unrealizedPnl: Double? = null,
     val unrealizedPnlRate: Double? = null,
     val actualWeight: Double? = null,
+    /** 个股目标：占其所属行业的 %（两层配比模型，行业主个股次）。 */
     val targetWeight: Double,
     val targetValue: Double? = null,
     val targetDiff: Double? = null
 )
 
+/**
+ * 按行业聚合的分组。actualWeight 为该行业占组合总资产 %；
+*  targetWeight 为该行业目标占总资产 %；个股目标在其内部各自占行业 %。
+ */
+@Stable
+data class IndustryGroup(
+    val name: String,                        // "银行"；空串归入"未分类"
+    val stocks: List<PortfolioItem>,
+    val holdingsMarketValue: Double,
+    val actualWeight: Double?,               // 行业市值 / 总资产 * 100
+    val targetWeight: Double,                // 行业目标占总资产 %
+    val targetValue: Double?,                // 总资产 * 行业目标 / 100
+    val stockTargetSum: Double               // 行业内个股目标占比之和（应≈100，软提示）
+)
+
 @Stable
 data class PortfolioUiState(
     val items: List<PortfolioItem> = emptyList(),
+    val industryGroups: List<IndustryGroup> = emptyList(),
+    val industryTargetSum: Double = 0.0,     // 行业目标合计（软提示）
     val totalAssets: Double = 0.0,
     val holdingsMarketValue: Double = 0.0,
     val totalCost: Double = 0.0,
@@ -61,7 +80,10 @@ data class PortfolioUiState(
     val editingWeightError: String? = null,
     val editingTotalAssets: Boolean = false,
     val editingTotalAssetsInput: String = "",
-    val editingTotalAssetsError: String? = null
+    val editingTotalAssetsError: String? = null,
+    val editingIndustry: String? = null,
+    val editingIndustryWeightInput: String = "",
+    val editingIndustryWeightError: String? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -123,6 +145,13 @@ class PortfolioViewModel @Inject constructor(
                     }
                 }
         }
+
+        // Collector 3: 行业目标变化时重算（行业聚合依赖它）
+        viewModelScope.launch {
+            stockRepository.observeIndustryTargets().collect {
+                publish(recompute(lastStocksSnapshot, lastPricesSnapshot))
+            }
+        }
     }
 
     fun refreshQuotes() {
@@ -153,8 +182,44 @@ class PortfolioViewModel @Inject constructor(
                 editingWeightError = null,
                 editingTotalAssets = false,
                 editingTotalAssetsInput = "",
-                editingTotalAssetsError = null
+                editingTotalAssetsError = null,
+                editingIndustry = null,
+                editingIndustryWeightInput = "",
+                editingIndustryWeightError = null
             )
+        }
+    }
+
+    fun showEditIndustryDialog(industry: String, currentWeight: Double) {
+        _uiState.update {
+            it.copy(
+                editingIndustry = industry,
+                editingIndustryWeightInput = currentWeight.toString(),
+                editingIndustryWeightError = null
+            )
+        }
+    }
+
+    fun onIndustryWeightInputChanged(input: String) {
+        _uiState.update { it.copy(editingIndustryWeightInput = input, editingIndustryWeightError = null) }
+    }
+
+    fun confirmEditIndustry() {
+        val industry = _uiState.value.editingIndustry ?: return
+        val weight = _uiState.value.editingIndustryWeightInput.toDoubleOrNull()
+        if (weight == null || weight < 0.0 || weight > 100.0) {
+            _uiState.update { it.copy(editingIndustryWeightError = "请输入 0 到 100 之间的数字") }
+            return
+        }
+        viewModelScope.launch {
+            stockRepository.updateIndustryTarget(industry, weight)
+            _uiState.update {
+                it.copy(
+                    editingIndustry = null,
+                    editingIndustryWeightInput = "",
+                    editingIndustryWeightError = null
+                )
+            }
         }
     }
 
@@ -213,7 +278,7 @@ class PortfolioViewModel @Inject constructor(
                 editingTotalAssetsError = null
             )
         }
-        publish(recompute(lastStocksSnapshot, lastPricesSnapshot))
+        viewModelScope.launch { publish(recompute(lastStocksSnapshot, lastPricesSnapshot)) }
     }
 
     private fun readTotalAssetsFromPrefs(): Double =
@@ -230,6 +295,8 @@ class PortfolioViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 items = result.items,
+                industryGroups = result.industryGroups,
+                industryTargetSum = result.industryTargetSum,
                 holdingsMarketValue = result.holdingsMarketValue,
                 totalCost = result.totalCost,
                 totalPnl = result.totalPnl,
@@ -241,7 +308,10 @@ class PortfolioViewModel @Inject constructor(
         }
     }
 
-    private fun recompute(stocks: List<StockEntity>, prices: Map<String, Double>): RecomputeResult {
+    private suspend fun recompute(
+        stocks: List<StockEntity>,
+        prices: Map<String, Double>
+    ): RecomputeResult {
         if (stocks.isEmpty()) return RecomputeResult.Empty
         val rawItems = stocks.map { stock ->
             val price = prices[stock.code]
@@ -251,29 +321,59 @@ class PortfolioViewModel @Inject constructor(
         val totalCost = rawItems.sumOf { it.totalCost }
         val totalPnl = rawItems.sumOf { it.unrealizedPnl ?: 0.0 }
         val totalPnlRate = if (totalCost > 0.0) totalPnl / totalCost else 0.0
-        val targetWeightSum = rawItems.sumOf { it.targetWeight }
         val totalAssets = currentTotalAssets
 
-        val items = rawItems
-            .map { item ->
-                // Actual weight = market value / total assets (user-configured denominator).
-                val actualWeight = if (totalAssets > 0.0 && item.marketValue != null) {
-                    item.marketValue / totalAssets * 100.0
-                } else null
-                // Target value = total assets × target weight (e.g. 400000 × 10% = 40000).
-                val targetValue = if (totalAssets > 0.0) {
-                    totalAssets * item.targetWeight / 100.0
-                } else null
-                item.copy(
-                    actualWeight = actualWeight,
-                    targetValue = targetValue,
-                    targetDiff = actualWeight?.minus(item.targetWeight)
+        // 行业目标映射：industry -> 占总资产 %
+        val industryTargets = stockRepository.getIndustryTargets().associate { it.industry to it.targetWeight }
+        val industryTargetSum = industryTargets.values.sum()
+
+        // 个股层：actualWeight 占总资产 %；targetWeight 是占行业 %（用户在卡片上设）
+        val itemsWithActual = rawItems.map { item ->
+            val actualWeight = if (totalAssets > 0.0 && item.marketValue != null) {
+                item.marketValue / totalAssets * 100.0
+            } else null
+            item.copy(actualWeight = actualWeight)
+        }
+
+        // 行业聚合
+        val groups = itemsWithActual
+            .groupBy { it.industry.ifEmpty { "未分类" } }
+            .map { (industry, members) ->
+                val groupMarketValue = members.sumOf { it.marketValue ?: 0.0 }
+                val groupActualWeight = if (totalAssets > 0.0) groupMarketValue / totalAssets * 100.0 else null
+                val groupTargetWeight = industryTargets[industry] ?: 0.0
+                val groupTargetValue = if (totalAssets > 0.0) totalAssets * groupTargetWeight / 100.0 else null
+                val stockTargetSum = members.sumOf { it.targetWeight }
+                // 个股目标金额 = 行业目标金额 × 个股占行业% / 100
+                val membersWithTargetValue = members.map { m ->
+                    val tv = if (totalAssets > 0.0 && groupTargetValue != null) {
+                        groupTargetValue * m.targetWeight / 100.0
+                    } else null
+                    m.copy(
+                        targetValue = tv,
+                        targetDiff = m.actualWeight?.minus(m.targetWeight)
+                    )
+                }
+                IndustryGroup(
+                    name = industry,
+                    stocks = membersWithTargetValue.sortedByDescending { it.marketValue ?: 0.0 },
+                    holdingsMarketValue = groupMarketValue,
+                    actualWeight = groupActualWeight,
+                    targetWeight = groupTargetWeight,
+                    targetValue = groupTargetValue,
+                    stockTargetSum = stockTargetSum
                 )
             }
-            .sortedByDescending { it.marketValue ?: 0.0 }
+            .sortedByDescending { it.holdingsMarketValue }
+
+        // 展平后的 items（保留原有按市值排序的扁平视图）
+        val items = groups.flatMap { it.stocks }
+        val targetWeightSum = items.sumOf { it.targetWeight }
 
         return RecomputeResult(
             items = items,
+            industryGroups = groups,
+            industryTargetSum = industryTargetSum,
             holdingsMarketValue = holdingsMarketValue,
             totalCost = totalCost,
             totalPnl = totalPnl,
@@ -317,6 +417,7 @@ class PortfolioViewModel @Inject constructor(
             marketCode = marketCode,
             shares = shares,
             costPerShare = costPerShare,
+            industry = industry,
             currentPrice = currentPrice,
             marketValue = marketValue,
             totalCost = totalCost,
@@ -328,6 +429,8 @@ class PortfolioViewModel @Inject constructor(
 
     private data class RecomputeResult(
         val items: List<PortfolioItem>,
+        val industryGroups: List<IndustryGroup>,
+        val industryTargetSum: Double,
         val holdingsMarketValue: Double,
         val totalCost: Double,
         val totalPnl: Double,
@@ -338,6 +441,8 @@ class PortfolioViewModel @Inject constructor(
         companion object {
             val Empty = RecomputeResult(
                 items = emptyList(),
+                industryGroups = emptyList(),
+                industryTargetSum = 0.0,
                 holdingsMarketValue = 0.0,
                 totalCost = 0.0,
                 totalPnl = 0.0,

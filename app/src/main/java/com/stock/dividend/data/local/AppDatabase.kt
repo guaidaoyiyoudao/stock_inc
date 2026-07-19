@@ -8,6 +8,7 @@ import com.stock.dividend.data.local.dao.AchievementDao
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FireGoalDao
+import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.StockDao
@@ -16,6 +17,7 @@ import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
+import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
@@ -30,9 +32,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         TransactionEntity::class,
         AchievementEntity::class,
         LivingExpenseItemEntity::class,
-        NotificationRuleEntity::class
+        NotificationRuleEntity::class,
+        IndustryTargetEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,6 +47,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun achievementDao(): AchievementDao
     abstract fun livingExpenseItemDao(): LivingExpenseItemDao
     abstract fun notificationRuleDao(): NotificationRuleDao
+    abstract fun industryTargetDao(): IndustryTargetDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -169,6 +173,22 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE stocks ADD COLUMN targetWeight REAL NOT NULL DEFAULT 0.0")
+            }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 新增 industry 列
+                db.execSQL("ALTER TABLE stocks ADD COLUMN industry TEXT NOT NULL DEFAULT ''")
+                // 个股 targetWeight 语义从「占总资产%」改为「占其行业%」，清零旧值让用户在新模型下重设
+                db.execSQL("UPDATE stocks SET targetWeight = 0.0")
+                // 行业目标配比表
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS industry_targets (" +
+                            "industry TEXT NOT NULL PRIMARY KEY, " +
+                            "targetWeight REAL NOT NULL DEFAULT 0.0" +
+                            ")"
+                )
             }
         }
     }

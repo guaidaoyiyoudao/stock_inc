@@ -41,6 +41,8 @@ class PortfolioViewModelTest {
         every { prefs.getLong("last_portfolio_refresh_ms", 0L) } returns 0L
         every { prefs.contains("portfolio_total_assets") } returns false
         every { stockRepository.observeAllStocks() } returns stocksFlow
+        every { stockRepository.observeIndustryTargets() } returns MutableStateFlow(emptyList())
+        coEvery { stockRepository.getIndustryTargets() } returns emptyList()
         coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
     }
 
@@ -123,9 +125,13 @@ class PortfolioViewModelTest {
         every { prefs.contains("portfolio_total_assets") } returns true
         every { prefs.getLong("portfolio_total_assets", any()) } returns 400000.0.toRawBits()
         stocksFlow.value = listOf(
-            stock("sz.000001", shares = 100, costPerShare = 10.0, targetWeight = 10.0)
+            stock("sz.000001", shares = 100, costPerShare = 10.0, targetWeight = 10.0, industry = "消费")
         )
         coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sz.000001" to 12.0)
+        // 行业目标 50%，个股占行业 10% → 目标金额 = 400000 * 50% * 10% / 100 = 20000
+        coEvery { stockRepository.getIndustryTargets() } returns listOf(
+            com.stock.dividend.data.local.entity.IndustryTargetEntity("消费", 50.0)
+        )
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -133,8 +139,8 @@ class PortfolioViewModelTest {
         val item = viewModel.uiState.value.items.first()
         // market value 1200 / total assets 400000 * 100 = 0.3%
         assertThat(item.actualWeight).isWithin(0.001).of(0.3)
-        // target value = 400000 * 10% = 40000
-        assertThat(item.targetValue).isWithin(0.01).of(40000.0)
+        // 新两层配比语义：targetValue = 行业目标金额(200000) * 个股占行业(10%) / 100 = 20000
+        assertThat(item.targetValue).isWithin(0.01).of(20000.0)
     }
 
     @Test
@@ -200,7 +206,8 @@ class PortfolioViewModelTest {
         assertThat(viewModel.uiState.value.editingTotalAssets).isFalse()
         coVerify { prefsEditor.putLong("portfolio_total_assets", 400000.0.toRawBits()) }
         val item = viewModel.uiState.value.items.first()
-        assertThat(item.targetValue).isWithin(0.01).of(40000.0)
+        // 新两层配比：无行业目标时 targetValue 为 0
+        assertThat(item.targetValue).isWithin(0.01).of(0.0)
     }
 
     @Test
@@ -219,19 +226,67 @@ class PortfolioViewModelTest {
         assertThat(viewModel.uiState.value.editingTotalAssetsError).isNotNull()
     }
 
+    @Test
+    fun `industry groups aggregate market value and map target weight`() = runTest {
+        every { prefs.contains("portfolio_total_assets") } returns true
+        every { prefs.getLong("portfolio_total_assets", any()) } returns 100000.0.toRawBits()
+        coEvery { stockRepository.getIndustryTargets() } returns listOf(
+            com.stock.dividend.data.local.entity.IndustryTargetEntity("银行", 30.0)
+        )
+        stocksFlow.value = listOf(
+            stock("sh.600036", shares = 100, costPerShare = 30.0, industry = "银行"),  // 招商银行
+            stock("sh.601398", shares = 200, costPerShare = 5.0, industry = "银行"),    // 工商银行
+            stock("sh.600519", shares = 10, costPerShare = 1500.0, industry = "食品饮料")
+        )
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf(
+            "sh.600036" to 40.0,  // 4000
+            "sh.601398" to 5.0,   // 1000
+            "sh.600519" to 1600.0 // 16000
+        )
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val groups = viewModel.uiState.value.industryGroups
+        assertThat(groups.map { it.name }).containsExactly("食品饮料", "银行")  // 按市值降序
+        val bankGroup = groups.first { it.name == "银行" }
+        // 银行市值 = 4000 + 1000 = 5000；占 100000 = 5.0%
+        assertThat(bankGroup.holdingsMarketValue).isWithin(0.01).of(5000.0)
+        assertThat(bankGroup.actualWeight).isWithin(0.001).of(5.0)
+        assertThat(bankGroup.targetWeight).isEqualTo(30.0)  // 从 industryTargets 映射
+        assertThat(bankGroup.stocks).hasSize(2)
+    }
+
+    @Test
+    fun `confirmEditIndustry persists via repository`() = runTest {
+        coEvery { stockRepository.updateIndustryTarget(any(), any()) } returns Unit
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.showEditIndustryDialog("银行", 0.0)
+        viewModel.onIndustryWeightInputChanged("30")
+        viewModel.confirmEditIndustry()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify { stockRepository.updateIndustryTarget("银行", 30.0) }
+        assertThat(viewModel.uiState.value.editingIndustry).isNull()
+    }
+
     private fun createViewModel() = PortfolioViewModel(stockRepository, context)
 
     private fun stock(
         code: String,
         shares: Int,
         costPerShare: Double,
-        targetWeight: Double = 0.0
+        targetWeight: Double = 0.0,
+        industry: String = ""
     ) = StockEntity(
         code = code,
         name = if (code.startsWith("sh")) "茅台" else "平安银行",
         marketCode = if (code.startsWith("sh")) "1" else "0",
         shares = shares,
         costPerShare = costPerShare,
-        targetWeight = targetWeight
+        targetWeight = targetWeight,
+        industry = industry
     )
 }

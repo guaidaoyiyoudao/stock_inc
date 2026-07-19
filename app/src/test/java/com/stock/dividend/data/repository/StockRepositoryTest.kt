@@ -2,8 +2,10 @@ package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.AppDatabase
+import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
+import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
@@ -11,6 +13,8 @@ import com.stock.dividend.data.remote.SearchApi
 import com.stock.dividend.data.remote.dto.QuoteData
 import com.stock.dividend.data.remote.dto.QuoteItem
 import com.stock.dividend.data.remote.dto.QuoteResponse
+import com.stock.dividend.data.remote.dto.StockInfoData
+import com.stock.dividend.data.remote.dto.StockInfoResponse
 import com.stock.dividend.data.remote.dto.StockSearchResponse
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -35,8 +39,9 @@ class StockRepositoryTest {
     private val quoteApi: QuoteApi = mockk()
     private val dao: StockDao = mockk(relaxed = true)
     private val transactionDao: TransactionDao = mockk(relaxed = true)
+    private val industryTargetDao: IndustryTargetDao = mockk(relaxed = true)
     private val appDatabase: AppDatabase = mockk(relaxed = true)
-    private val repository = StockRepository(api, quoteApi, dao, transactionDao, appDatabase)
+    private val repository = StockRepository(api, quoteApi, dao, transactionDao, industryTargetDao, appDatabase)
 
     @org.junit.Before
     fun setUp() {
@@ -592,6 +597,43 @@ class StockRepositoryTest {
 
         assertThat(summary.succeeded).containsExactly("sh.600519")
         assertThat(summary.failed.map { it.rawCodeOrName }).containsExactly("查无此股")
+    }
+
+    @Test
+    fun `fetchAndCacheIndustry parses f127 and persists`() = runTest {
+        coEvery { dao.getByCode("sh.600519") } returns StockEntity(
+            code = "sh.600519", name = "贵州茅台", marketCode = "1", shares = 0
+        )
+        coEvery { quoteApi.getStockInfo(secid = "1.600519") } returns StockInfoResponse(
+            data = StockInfoData(code = "600519", name = "贵州茅台", industry = "食品饮料")
+        )
+
+        repository.fetchAndCacheIndustry("sh.600519")
+
+        coVerify { dao.updateIndustry("sh.600519", "食品饮料") }
+    }
+
+    @Test
+    fun `fetchAndCacheIndustry does not write when industry is blank`() = runTest {
+        coEvery { dao.getByCode("sh.600519") } returns StockEntity(
+            code = "sh.600519", name = "贵州茅台", marketCode = "1", shares = 0
+        )
+        coEvery { quoteApi.getStockInfo(secid = "1.600519") } returns StockInfoResponse(
+            data = StockInfoData(code = "600519", name = "贵州茅台", industry = null)
+        )
+
+        repository.fetchAndCacheIndustry("sh.600519")
+
+        coVerify(exactly = 0) { dao.updateIndustry(any(), any()) }
+    }
+
+    @Test
+    fun `updateIndustryTarget coerces weight into 0-100`() = runTest {
+        repository.updateIndustryTarget("银行", -5.0)
+        coVerify { industryTargetDao.upsert(IndustryTargetEntity("银行", 0.0)) }
+
+        repository.updateIndustryTarget("银行", 150.0)
+        coVerify { industryTargetDao.upsert(IndustryTargetEntity("银行", 100.0)) }
     }
 
     private fun stockItem(code: String, name: String, mktNum: String) = StockSearchResponse.StockItem(

@@ -141,6 +141,8 @@ class AddStockViewModel @Inject constructor(
             stockRepository.addStock(result, _uiState.value.shares, costPerShare, buyDate)
                 .onSuccess {
                     val securityCode = result.code.substringAfter(".")
+                    // 拉取行业信息（失败不影响添加）
+                    try { stockRepository.fetchAndCacheIndustry(result.code) } catch (_: Exception) {}
                     dividendRepository.fetchAndCacheDividends(result.code, securityCode)
                         .onSuccess {
                             _uiState.value = _uiState.value.copy(
