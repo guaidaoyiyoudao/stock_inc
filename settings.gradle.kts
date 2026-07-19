@@ -1,24 +1,9 @@
 pluginManagement {
     repositories {
-        maven("https://maven.aliyun.com/repository/google") {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("androidx.*")
-                // Google Maven 上 com.google.* 实际涉及的 group（精确列出，避免误吞 KSP/Firebase 等
-                // 这些不在 Google Maven 的 artifact；KSP 在 mavenCentral/gradlePluginPortal）
-                includeGroupByRegex("com\\.google\\.android\\..*")
-                includeGroup("com.google.android")
-                includeGroup("com.google.mlkit")
-                includeGroup("com.google.gms")
-                includeGroup("com.google.firebase")
-                includeGroup("com.google.ar")
-                includeGroup("com.google.android.gms")
-                // AGP 8.7+ 传递依赖，仅托管在 Google Maven
-                includeGroup("com.google.testing.platform")
-            }
-        }
-        maven("https://maven.aliyun.com/repository/central")
-        maven("https://maven.aliyun.com/repository/gradle-plugin")
+        // Plugin marker artifact（如 KSP）只在官方 Maven Central / Gradle Portal 有，
+        // 阿里云镜像不全且 404 会让 Gradle 不 fallback。故 plugin 解析官方仓库优先。
+        gradlePluginPortal()
+        mavenCentral()
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -29,13 +14,24 @@ pluginManagement {
                 includeGroup("com.google.gms")
                 includeGroup("com.google.firebase")
                 includeGroup("com.google.ar")
-                includeGroup("com.google.android.gms")
-                // AGP 8.7+ 传递依赖，仅托管在 Google Maven
                 includeGroup("com.google.testing.platform")
             }
         }
-        mavenCentral()
-        gradlePluginPortal()
+        maven("https://maven.aliyun.com/repository/google") {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("androidx.*")
+                includeGroupByRegex("com\\.google\\.android\\..*")
+                includeGroup("com.google.android")
+                includeGroup("com.google.mlkit")
+                includeGroup("com.google.gms")
+                includeGroup("com.google.firebase")
+                includeGroup("com.google.ar")
+                includeGroup("com.google.testing.platform")
+            }
+        }
+        maven("https://maven.aliyun.com/repository/central")
+        maven("https://maven.aliyun.com/repository/gradle-plugin")
     }
 }
 
