@@ -23,4 +23,7 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
     - name: Build with Gradle
+      env:
+        # CI 直连官方仓库，绕开阿里云镜像的间歇性 502 和不全的 artifact
+        USE_CHINA_MIRROR: "false"
       run: ./gradlew build
