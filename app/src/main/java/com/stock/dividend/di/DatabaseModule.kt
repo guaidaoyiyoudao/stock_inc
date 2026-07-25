@@ -13,6 +13,7 @@ import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.dao.StockTagDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.repository.BackupRepository
 import dagger.Module
@@ -34,7 +35,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "stock_dividend.db"
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11, AppDatabase.MIGRATION_11_12, AppDatabase.MIGRATION_12_13)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11, AppDatabase.MIGRATION_11_12, AppDatabase.MIGRATION_12_13, AppDatabase.MIGRATION_13_14)
             .build()
     }
 
@@ -72,6 +73,9 @@ object DatabaseModule {
     fun provideSearchCacheDao(db: AppDatabase): SearchCacheDao = db.searchCacheDao()
 
     @Provides
+    fun provideStockTagDao(db: AppDatabase): StockTagDao = db.stockTagDao()
+
+    @Provides
     @Singleton
     fun provideBackupRepository(
         db: AppDatabase,
@@ -82,12 +86,14 @@ object DatabaseModule {
         transactionDao: TransactionDao,
         achievementDao: AchievementDao,
         livingExpenseItemDao: LivingExpenseItemDao,
-        notificationRuleDao: NotificationRuleDao
+        notificationRuleDao: NotificationRuleDao,
+        stockTagDao: StockTagDao
     ): BackupRepository {
         return BackupRepository(
             db, stockDao, dividendDao, fireGoalDao,
             dividendIncomeRecordDao, transactionDao,
-            achievementDao, livingExpenseItemDao, notificationRuleDao
+            achievementDao, livingExpenseItemDao, notificationRuleDao,
+            stockTagDao
         )
     }
 }

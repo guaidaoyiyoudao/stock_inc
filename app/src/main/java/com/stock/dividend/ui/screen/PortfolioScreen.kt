@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -78,14 +79,12 @@ import com.stock.dividend.ui.component.DividendPriceScale
 import com.stock.dividend.ui.component.DividendSummaryCard
 import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.ui.component.FireProgressCard
-import com.stock.dividend.ui.component.IndustryAllocationPieChart
 import com.stock.dividend.ui.component.StockCard
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.ui.theme.FinanceGreen
 import com.stock.dividend.ui.theme.FinanceRed
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.viewmodel.IndustryGroup
 import com.stock.dividend.viewmodel.PortfolioItem
 import com.stock.dividend.viewmodel.PortfolioUiState
 import com.stock.dividend.viewmodel.PortfolioViewModel
@@ -138,7 +137,6 @@ fun PortfolioScreen(
         return
     }
 
-    var industryExpanded by remember { mutableStateOf(true) }
     var holdingsExpanded by remember { mutableStateOf(true) }
     LazyColumn(
         contentPadding = PaddingValues(
@@ -178,80 +176,31 @@ fun PortfolioScreen(
                     onImportFromScreenshot = onImportFromScreenshot
                 )
             }
-            // 行业配置区块
-            if (uiState.industryGroups.isNotEmpty()) {
-                item {
-                    val arrowRotation by animateFloatAsState(
-                        targetValue = if (industryExpanded) 0f else -90f,
-                        label = "industryArrow"
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(MaterialTheme.shapes.small)
-                            .clickable { industryExpanded = !industryExpanded }
-                            .padding(top = 4.dp, bottom = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = if (industryExpanded) "收起行业配置" else "展开行业配置",
-                            modifier = Modifier
-                                .size(24.dp)
-                                .rotate(arrowRotation),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "行业配置",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (uiState.isRefreshingIndustry) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            TextButton(onClick = { viewModel.refreshIndustries() }) {
-                                Text("刷新行业", style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
-                    }
-                }
-                if (industryExpanded) {
-                    item {
-                        Text(
-                            text = "长按卡片可编辑目标权重",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(bottom = 2.dp)
+            // 顶部筛选条：行业 + 标签（组内 OR、跨组 AND）
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (uiState.availableIndustries.isNotEmpty()) {
+                        FilterChipsRow(
+                            options = uiState.availableIndustries,
+                            selected = uiState.selectedIndustries,
+                            onToggle = viewModel::toggleIndustryFilter,
+                            onClear = viewModel::clearIndustryFilter
                         )
                     }
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = MaterialTheme.shapes.medium,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                                IndustryAllocationPieChart(groups = uiState.industryGroups)
-                            }
-                        }
-                    }
-                    items(items = uiState.industryGroups, key = { it.name }) { group ->
-                        IndustryAllocationCard(
-                            group = group,
-                            onEditIndustry = {
-                                viewModel.showEditIndustryDialog(group.name, group.targetWeight)
-                            }
+                    if (uiState.availableTags.isNotEmpty()) {
+                        FilterChipsRow(
+                            options = uiState.availableTags,
+                            selected = uiState.selectedTags,
+                            onToggle = viewModel::toggleTagFilter,
+                            onClear = viewModel::clearTagFilter
                         )
                     }
                 }
             }
+            // 行业配置区块已移除（行业目标数据层仍保留以备复用）
             // 个股持仓区块
             item {
                 val arrowRotation by animateFloatAsState(
@@ -296,7 +245,7 @@ fun PortfolioScreen(
                 }
             }
             if (holdingsExpanded) {
-                items(items = uiState.items, key = { it.code }) { item ->
+                items(items = uiState.filteredItems, key = { it.code }) { item ->
                     SwipeToDismissHoldingItem(
                         item = item,
                         onClick = { onStockClick(item.code) },
@@ -325,7 +274,7 @@ fun PortfolioScreen(
                         )
                     }
                 }
-                items(items = uiState.watchlist, key = { it.code }) { stock ->
+                items(items = uiState.filteredWatchlist, key = { it.code }) { stock ->
                     SwipeToDismissWatchItem(
                         stock = stock,
                         forecastIncome = uiState.stockForecasts[stock.code]?.forecastIncome,
@@ -357,17 +306,6 @@ fun PortfolioScreen(
             error = uiState.editingTotalAssetsError,
             onInputChange = viewModel::onTotalAssetsInputChanged,
             onConfirm = viewModel::confirmEditTotalAssets,
-            onDismiss = viewModel::dismissDialog
-        )
-    }
-
-    uiState.editingIndustry?.let { industry ->
-        EditIndustryDialog(
-            industry = industry,
-            weightInput = uiState.editingIndustryWeightInput,
-            error = uiState.editingIndustryWeightError,
-            onInputChange = viewModel::onIndustryWeightInputChanged,
-            onConfirm = viewModel::confirmEditIndustry,
             onDismiss = viewModel::dismissDialog
         )
     }
@@ -994,117 +932,39 @@ private fun WatchActionButton(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * 单维度的筛选 Chip 横滚条。
+ * - 首 chip 为「全部」，selected 为空时高亮（与其它 chip 互斥）。
+ * - 选具体 chip 自动取消「全部」；点「全部」清空整组。
+ */
 @Composable
-private fun IndustryAllocationCard(
-    group: IndustryGroup,
-    onEditIndustry: () -> Unit,
+private fun FilterChipsRow(
+    options: List<String>,
+    selected: Set<String>,
+    onToggle: (String) -> Unit,
+    onClear: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val haptics = LocalHapticFeedback.current
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = {},
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onEditIndustry()
-                }
-            ),
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    val isAll = selected.isEmpty()
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 2.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = group.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "${group.stocks.size} 只 · ${portfolioFormatMoney(group.holdingsMarketValue)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    val actual = group.actualWeight
-                    Text(
-                        text = if (actual != null) "实际 ${portfolioFormatPercent(actual)}" else "实际 —",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "目标 ${portfolioFormatPercent(group.targetWeight)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            group.targetValue?.let { tv ->
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "目标金额 ${portfolioFormatMoney(tv)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // 行业内个股目标占比和软提示
-            if (group.stockTargetSum > 0.0 && !group.stockTargetSum.isApproximately(100.0)) {
-                Spacer(modifier = Modifier.height(6.dp))
-                StatusPill(
-                    text = "个股目标合计 ${portfolioFormatPercent(group.stockTargetSum)}，未达 100%",
-                    tone = if (group.stockTargetSum < 100.0) FinanceStatusTone.Warning else FinanceStatusTone.Neutral
-                )
-            }
+        item {
+            androidx.compose.material3.FilterChip(
+                selected = isAll,
+                onClick = onClear,
+                label = { Text("全部", style = MaterialTheme.typography.labelMedium) }
+            )
+        }
+        items(items = options, key = { it }) { opt ->
+            androidx.compose.material3.FilterChip(
+                selected = opt in selected,
+                onClick = { onToggle(opt) },
+                label = { Text(opt, style = MaterialTheme.typography.labelMedium) }
+            )
         }
     }
 }
 
-@Composable
-private fun EditIndustryDialog(
-    industry: String,
-    weightInput: String,
-    error: String?,
-    onInputChange: (String) -> Unit,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("设置「$industry」目标占比") },
-        text = {
-            Column {
-                Text(
-                    text = "目标占比代表希望该行业占组合总资产的百分比（行业目标合计建议接近 100%）。行业内的个股目标在个股卡片设置（占该行业的%）。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = weightInput,
-                    onValueChange = onInputChange,
-                    label = { Text("行业目标占比 (%)") },
-                    singleLine = true,
-                    isError = error != null,
-                    supportingText = { Text(error ?: "范围 0 - 100") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text("保存") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
-}

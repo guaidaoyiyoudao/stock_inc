@@ -14,6 +14,7 @@ import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.dao.StockTagDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
@@ -25,6 +26,7 @@ import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.PriceCacheEntity
 import com.stock.dividend.data.local.entity.SearchCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.StockTagEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 
 @Database(
@@ -39,9 +41,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         NotificationRuleEntity::class,
         IndustryTargetEntity::class,
         PriceCacheEntity::class,
-        SearchCacheEntity::class
+        SearchCacheEntity::class,
+        StockTagEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -56,6 +59,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun industryTargetDao(): IndustryTargetDao
     abstract fun priceCacheDao(): PriceCacheDao
     abstract fun searchCacheDao(): SearchCacheDao
+    abstract fun stockTagDao(): StockTagDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -221,6 +225,29 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_search_cache_queryKey` " +
                             "ON `search_cache`(`queryKey`)"
+                )
+            }
+        }
+
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 多对多股票标签表（每只股可贴多个标签，标签可被多只股共享）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `stock_tags` (" +
+                            "`stockCode` TEXT NOT NULL, " +
+                            "`tag` TEXT NOT NULL, " +
+                            "`createdAt` INTEGER NOT NULL, " +
+                            "PRIMARY KEY(`stockCode`, `tag`), " +
+                            "FOREIGN KEY(`stockCode`) REFERENCES `stocks`(`code`) " +
+                            "ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_stock_tags_stockCode` " +
+                            "ON `stock_tags`(`stockCode`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_stock_tags_tag` " +
+                            "ON `stock_tags`(`tag`)"
                 )
             }
         }

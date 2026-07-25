@@ -33,6 +33,8 @@ class EditHoldingViewModelTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { stockRepository.observeStock("sz.000001") } returns stockFlow
+        every { stockRepository.observeTagsForStock("sz.000001") } returns MutableStateFlow(emptyList())
+        every { stockRepository.observeAllTags() } returns MutableStateFlow(emptyList())
         coEvery { transactionRepository.getByStock("sz.000001") } answers { transactions.toList() }
         coEvery { stockRepository.updateShares("sz.000001", any()) } returns Unit
         coEvery { stockRepository.updateCostPerShare("sz.000001", any()) } returns Unit

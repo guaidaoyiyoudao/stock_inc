@@ -55,6 +55,8 @@ class PortfolioViewModelTest {
         every { prefs.getLong("last_portfolio_refresh_ms", 0L) } returns 0L
         every { prefs.contains("portfolio_total_assets") } returns false
         every { stockRepository.observeAllStocks() } returns stocksFlow
+        every { stockRepository.observeAllStockTags() } returns MutableStateFlow(emptyList())
+        every { stockRepository.observeAllTags() } returns MutableStateFlow(emptyList())
         every { stockRepository.observeIndustryTargets() } returns MutableStateFlow(emptyList())
         every { dividendDao.observeByStock(any()) } returns MutableStateFlow(emptyList())
         every { livingExpenseRepository.observeExpenses() } returns livingExpensesFlow

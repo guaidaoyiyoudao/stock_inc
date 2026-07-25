@@ -7,6 +7,7 @@ import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.StockTagEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 
 data class BackupMetadata(
@@ -25,5 +26,6 @@ data class BackupContainer(
     val transactions: List<TransactionEntity>,
     val achievements: List<AchievementEntity>,
     val livingExpenseItems: List<LivingExpenseItemEntity>,
-    val notificationRules: List<NotificationRuleEntity>
+    val notificationRules: List<NotificationRuleEntity>,
+    val stockTags: List<StockTagEntity> = emptyList()
 )

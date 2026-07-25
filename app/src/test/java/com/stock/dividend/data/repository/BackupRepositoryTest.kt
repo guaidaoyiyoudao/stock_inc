@@ -11,6 +11,7 @@ import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.StockTagEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import org.junit.Test
 
@@ -124,6 +125,10 @@ class BackupRepositoryTest {
                     createdAt = 1000L,
                     updatedAt = 2000L
                 )
+            ),
+            stockTags = listOf(
+                StockTagEntity(stockCode = "sh.600036", tag = "高息", createdAt = 5000L),
+                StockTagEntity(stockCode = "sz.000001", tag = "白马", createdAt = 6000L)
             )
         )
 
@@ -169,6 +174,10 @@ class BackupRepositoryTest {
         assertThat(restored.notificationRules).hasSize(1)
         assertThat(restored.notificationRules[0].thresholdPercent).isEqualTo(5.0)
         assertThat(restored.notificationRules[0].enabled).isTrue()
+
+        assertThat(restored.stockTags).hasSize(2)
+        assertThat(restored.stockTags.map { it.stockCode to it.tag })
+            .containsExactly("sh.600036" to "高息", "sz.000001" to "白马")
     }
 
     @Test

@@ -16,6 +16,7 @@ import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.dao.StockTagDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -35,7 +36,8 @@ class BackupRepository @Inject constructor(
     private val transactionDao: TransactionDao,
     private val achievementDao: AchievementDao,
     private val livingExpenseItemDao: LivingExpenseItemDao,
-    private val notificationRuleDao: NotificationRuleDao
+    private val notificationRuleDao: NotificationRuleDao,
+    private val stockTagDao: StockTagDao
 ) {
     private val gson = GsonBuilder().setPrettyPrinting().create()
 
@@ -50,6 +52,7 @@ class BackupRepository @Inject constructor(
                 val achievements = async { achievementDao.getAll() }
                 val expenses = async { livingExpenseItemDao.getAllOnce() }
                 val rules = async { notificationRuleDao.getAll() }
+                val stockTags = async { stockTagDao.getAll() }
 
                 BackupContainer(
                     metadata = BackupMetadata(
@@ -75,7 +78,8 @@ class BackupRepository @Inject constructor(
                     transactions = transactions.await(),
                     achievements = achievements.await(),
                     livingExpenseItems = expenses.await(),
-                    notificationRules = rules.await()
+                    notificationRules = rules.await(),
+                    stockTags = stockTags.await()
                 )
             }
 
@@ -104,6 +108,7 @@ class BackupRepository @Inject constructor(
 
             db.withTransaction {
                 // Delete children first (foreign key safety)
+                stockTagDao.deleteAll()
                 dividendIncomeRecordDao.deleteAll()
                 dividendDao.deleteAll()
                 transactionDao.deleteAll()
@@ -122,6 +127,8 @@ class BackupRepository @Inject constructor(
                 dividendDao.insertAll(container.dividends)
                 dividendIncomeRecordDao.insertAll(container.dividendIncomeRecords)
                 transactionDao.insertAll(container.transactions)
+                // stock_tags 必须在 stocks 之后（FK），IGNORE 防御重复主键
+                stockTagDao.insertAll(container.stockTags)
             }
 
             Result.success(Unit)

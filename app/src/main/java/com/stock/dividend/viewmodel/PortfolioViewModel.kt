@@ -55,7 +55,9 @@ data class PortfolioItem(
     /** 个股目标：占其所属行业的 %（两层配比模型，行业主个股次）。 */
     val targetWeight: Double,
     val targetValue: Double? = null,
-    val targetDiff: Double? = null
+    val targetDiff: Double? = null,
+    /** 该股票的所有标签，由 PortfolioViewModel 从 stock_tags 表注入。 */
+    val tags: List<String> = emptyList()
 )
 
 /**
@@ -118,7 +120,18 @@ data class PortfolioUiState(
     val editingIndustryWeightInput: String = "",
     val editingIndustryWeightError: String? = null,
     val deletedStock: StockEntity? = null,
-    val deletedTransactions: List<TransactionEntity> = emptyList()
+    val deletedTransactions: List<TransactionEntity> = emptyList(),
+    // ── 筛选 ──────────────────────────────────────────────────────
+    /** 候选行业（来自所有持仓+自选，去重排序，含「未分类」若有空 industry）。 */
+    val availableIndustries: List<String> = emptyList(),
+    /** 全局已存在的所有标签。 */
+    val availableTags: List<String> = emptyList(),
+    val selectedIndustries: Set<String> = emptySet(),
+    val selectedTags: Set<String> = emptySet(),
+    /** 筛选后的持仓股（直接渲染）。 */
+    val filteredItems: List<PortfolioItem> = emptyList(),
+    /** 筛选后的自选股（直接渲染）。 */
+    val filteredWatchlist: List<StockEntity> = emptyList()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -206,6 +219,15 @@ class PortfolioViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
+    /** 全量 (code → tags) 映射，订阅 stock_tags 表。 */
+    private val tagsByCodeFlow = stockRepository.observeAllStockTags()
+        .map { list -> list.groupBy { it.stockCode }.mapValues { it.value.map { e -> e.tag } } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    /** 所有出现过的标签（去重排序）。 */
+    private val allTagsFlow = stockRepository.observeAllTags()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         currentTotalAssets = readTotalAssetsFromPrefs()
         _uiState.update { it.copy(totalAssets = currentTotalAssets) }
@@ -243,7 +265,7 @@ class PortfolioViewModel @Inject constructor(
                 }
                 .collect { prices ->
                     // 关键：无论 prices 是否为空（网络失败），都必须结束 loading，
-                    // 否则 TopAppBar 刷新按钮会因 enabled=!isRefreshing 被永久禁用，卡死。
+                    // 否则悬浮刷新按钮会因 enabled=!isRefreshing 被永久禁用，卡死。
                     val effectivePrices = if (prices.isNotEmpty()) {
                         lastPricesSnapshot = prices
                         persistRefreshTimestamp()
@@ -302,8 +324,14 @@ class PortfolioViewModel @Inject constructor(
                     if (codes.isNotEmpty()) stockRepository.getCachedPrices(codes) else emptyMap()
                 } else emptyMap()
                 _uiState.update { state ->
+                    val newWatchlist = stocks.filter { it.shares <= 0 }
+                    val tagsByCode = state.items.associate { it.code to it.tags }
+                    val (fi, fw) = applyPortfolioFilter(
+                        state.items, newWatchlist, tagsByCode,
+                        state.selectedIndustries, state.selectedTags
+                    )
                     state.copy(
-                        watchlist = stocks.filter { it.shares <= 0 },
+                        watchlist = newWatchlist,
                         stockForecasts = forecasts.mapValues { (code, forecast) ->
                             val previous = state.stockForecasts[code]
                             val cachedPrice = cachedPrices[code]
@@ -315,7 +343,32 @@ class PortfolioViewModel @Inject constructor(
                         },
                         forecastTotal = forecastTotal,
                         livingExpenseTargetAmount = livingExpenseTarget,
-                        fireProgress = progress
+                        fireProgress = progress,
+                        filteredItems = fi,
+                        filteredWatchlist = fw
+                    )
+                }
+            }
+        }
+
+        // Collector 5: 标签变化 → 重算候选标签 + 把 tags 注入 items + 重算筛选
+        viewModelScope.launch {
+            combine(allStocksFlow, tagsByCodeFlow, allTagsFlow) { stocks, tagsByCode, allTags ->
+                Triple(stocks, tagsByCode, allTags)
+            }.collect { (stocks, tagsByCode, allTags) ->
+                val industries = stocks.map { it.industry.ifEmpty { "未分类" } }.distinct().sorted()
+                _uiState.update { state ->
+                    val itemsWithTags = state.items.map { it.copy(tags = tagsByCode[it.code].orEmpty()) }
+                    val (fi, fw) = applyPortfolioFilter(
+                        itemsWithTags, state.watchlist, tagsByCode,
+                        state.selectedIndustries, state.selectedTags
+                    )
+                    state.copy(
+                        availableIndustries = industries,
+                        availableTags = allTags,
+                        items = itemsWithTags,
+                        filteredItems = fi,
+                        filteredWatchlist = fw
                     )
                 }
             }
@@ -464,6 +517,42 @@ class PortfolioViewModel @Inject constructor(
         }
     }
 
+    // ---------- 筛选事件 ----------
+
+    fun toggleIndustryFilter(industry: String) {
+        _uiState.update { state ->
+            val newSel = if (industry in state.selectedIndustries) {
+                state.selectedIndustries - industry
+            } else state.selectedIndustries + industry
+            reapplyFilter(state.copy(selectedIndustries = newSel))
+        }
+    }
+
+    fun clearIndustryFilter() {
+        _uiState.update { reapplyFilter(it.copy(selectedIndustries = emptySet())) }
+    }
+
+    fun toggleTagFilter(tag: String) {
+        _uiState.update { state ->
+            val newSel = if (tag in state.selectedTags) state.selectedTags - tag
+            else state.selectedTags + tag
+            reapplyFilter(state.copy(selectedTags = newSel))
+        }
+    }
+
+    fun clearTagFilter() {
+        _uiState.update { reapplyFilter(it.copy(selectedTags = emptySet())) }
+    }
+
+    private fun reapplyFilter(state: PortfolioUiState): PortfolioUiState {
+        val tagsByCode = state.items.associate { it.code to it.tags }
+        val (fi, fw) = applyPortfolioFilter(
+            state.items, state.watchlist, tagsByCode,
+            state.selectedIndustries, state.selectedTags
+        )
+        return state.copy(filteredItems = fi, filteredWatchlist = fw)
+    }
+
     fun onWeightInputChanged(input: String) {
         _uiState.update { it.copy(editingWeightInput = input, editingWeightError = null) }
     }
@@ -534,8 +623,17 @@ class PortfolioViewModel @Inject constructor(
 
     private fun publish(result: RecomputeResult) {
         _uiState.update {
+            // 用当前 items 的 tags 兜底（recompute 不知道 tags；Collector 5 会随后用 tagsByCodeFlow 覆盖）
+            val tagsByCode = it.items.associate { it.code to it.tags }
+            val itemsWithTags = result.items.map { newItem ->
+                newItem.copy(tags = tagsByCode[newItem.code].orEmpty())
+            }
+            val (fi, fw) = applyPortfolioFilter(
+                itemsWithTags, it.watchlist, tagsByCode,
+                it.selectedIndustries, it.selectedTags
+            )
             it.copy(
-                items = result.items,
+                items = itemsWithTags,
                 industryGroups = result.industryGroups,
                 industryTargetSum = result.industryTargetSum,
                 holdingsMarketValue = result.holdingsMarketValue,
@@ -544,7 +642,9 @@ class PortfolioViewModel @Inject constructor(
                 totalPnlRate = result.totalPnlRate,
                 targetWeightSum = result.targetWeightSum,
                 isLoading = result.isLoading,
-                error = null
+                error = null,
+                filteredItems = fi,
+                filteredWatchlist = fw
             )
         }
     }
@@ -703,4 +803,30 @@ class PortfolioViewModel @Inject constructor(
         private const val TTL_TRADING_MS = 5 * 60 * 1000L
         private const val TTL_NON_TRADING_MS = 60 * 60 * 1000L
     }
+}
+
+/**
+ * 持仓/自选股筛选纯函数。
+ * - 行业组内 OR、标签组内 OR、跨组 AND
+ * - industry="" 归入「未分类」桶
+ * - 任一组的 selected 集合为空 = 该组不参与筛选（即放行全部）
+ */
+fun applyPortfolioFilter(
+    items: List<PortfolioItem>,
+    watchlist: List<StockEntity>,
+    tagsByCode: Map<String, List<String>>,
+    selectedIndustries: Set<String>,
+    selectedTags: Set<String>
+): Pair<List<PortfolioItem>, List<StockEntity>> {
+    fun matchIndustry(industry: String): Boolean {
+        if (selectedIndustries.isEmpty()) return true
+        return industry.ifEmpty { "未分类" } in selectedIndustries
+    }
+    fun matchTags(code: String): Boolean {
+        if (selectedTags.isEmpty()) return true
+        return tagsByCode[code].orEmpty().any { it in selectedTags }
+    }
+    val fi = items.filter { matchIndustry(it.industry) && matchTags(it.code) }
+    val fw = watchlist.filter { matchIndustry(it.industry) && matchTags(it.code) }
+    return fi to fw
 }

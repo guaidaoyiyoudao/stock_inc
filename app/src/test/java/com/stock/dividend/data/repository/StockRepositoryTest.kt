@@ -6,6 +6,7 @@ import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.dao.StockTagDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.PriceCacheEntity
@@ -46,10 +47,11 @@ class StockRepositoryTest {
     private val industryTargetDao: IndustryTargetDao = mockk(relaxed = true)
     private val priceCacheDao: PriceCacheDao = mockk(relaxed = true)
     private val searchCacheDao: SearchCacheDao = mockk(relaxed = true)
+    private val stockTagDao: StockTagDao = mockk(relaxed = true)
     private val appDatabase: AppDatabase = mockk(relaxed = true)
     private val repository = StockRepository(
         api, quoteApi, dao, transactionDao, industryTargetDao,
-        priceCacheDao, searchCacheDao, appDatabase
+        priceCacheDao, searchCacheDao, stockTagDao, appDatabase
     )
 
     @org.junit.Before
@@ -647,6 +649,17 @@ class StockRepositoryTest {
 
         repository.updateIndustryTarget("银行", 150.0)
         coVerify { industryTargetDao.upsert(IndustryTargetEntity("银行", 100.0)) }
+    }
+
+    @Test
+    fun `setStockTags clears then inserts normalized distinct tags in a transaction`() = runTest {
+        repository.setStockTags("sh.600036", listOf(" 高息 ", "白马", "高息", ""))
+
+        coVerify { stockTagDao.clearForStock("sh.600036") }
+        coVerify { stockTagDao.insert(match { it.stockCode == "sh.600036" && it.tag == "高息" }) }
+        coVerify { stockTagDao.insert(match { it.stockCode == "sh.600036" && it.tag == "白马" }) }
+        // 空/去重后只剩 2 个 insert
+        coVerify(exactly = 2) { stockTagDao.insert(any()) }
     }
 
     // ── 缓存集成：fetchQuotes 写 price_cache ────────────────────────

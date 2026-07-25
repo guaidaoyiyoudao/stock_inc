@@ -32,7 +32,13 @@ data class EditHoldingUiState(
     val editSharesInput: String = "",
     val editPriceInput: String = "",
     val editDateInput: String = "",
-    val editInputError: String? = null
+    val editInputError: String? = null,
+    // ── 标签 ──────────────────────────────────────────
+    val tags: List<String> = emptyList(),
+    val allTags: List<String> = emptyList(),
+    val showAddTagDialog: Boolean = false,
+    val addTagInput: String = "",
+    val addTagError: String? = null
 )
 
 @HiltViewModel
@@ -64,15 +70,75 @@ class EditHoldingViewModel @Inject constructor(
                 }
             }
         }
+        // 订阅当前股票标签 + 全局已有标签（用于输入建议）
+        viewModelScope.launch {
+            stockRepository.observeTagsForStock(stockCode).collect { tags ->
+                _uiState.value = _uiState.value.copy(tags = tags)
+            }
+        }
+        viewModelScope.launch {
+            stockRepository.observeAllTags().collect { all ->
+                _uiState.value = _uiState.value.copy(allTags = all)
+            }
+        }
     }
 
     fun onYieldPeriodChanged(period: String) {
         _uiState.value = _uiState.value.copy(yieldPeriod = period)
     }
 
+    fun showAddTagDialog() {
+        _uiState.value = _uiState.value.copy(
+            showAddTagDialog = true,
+            addTagInput = "",
+            addTagError = null
+        )
+    }
+
+    fun onAddTagInputChanged(input: String) {
+        _uiState.value = _uiState.value.copy(addTagInput = input, addTagError = null)
+    }
+
+    fun dismissAddTagDialog() {
+        _uiState.value = _uiState.value.copy(
+            showAddTagDialog = false,
+            addTagInput = "",
+            addTagError = null
+        )
+    }
+
+    /** 确认添加标签：去空白、校验长度、去重；命中已有同名标签直接选中。 */
+    fun confirmAddTag() {
+        val raw = _uiState.value.addTagInput.trim()
+        if (raw.isEmpty()) {
+            _uiState.value = _uiState.value.copy(addTagError = "标签不能为空")
+            return
+        }
+        if (raw.length > 20) {
+            _uiState.value = _uiState.value.copy(addTagError = "标签最长 20 个字符")
+            return
+        }
+        val current = _uiState.value.tags
+        if (raw in current) {
+            _uiState.value = _uiState.value.copy(showAddTagDialog = false, addTagInput = "")
+            return
+        }
+        _uiState.value = _uiState.value.copy(
+            tags = current + raw,
+            showAddTagDialog = false,
+            addTagInput = "",
+            addTagError = null
+        )
+    }
+
+    fun removeTag(tag: String) {
+        _uiState.value = _uiState.value.copy(tags = _uiState.value.tags - tag)
+    }
+
     fun saveHolding() {
         viewModelScope.launch {
             stockRepository.updateYieldPeriod(stockCode, _uiState.value.yieldPeriod)
+            stockRepository.setStockTags(stockCode, _uiState.value.tags)
         }
     }
 
@@ -104,7 +170,10 @@ class EditHoldingViewModel @Inject constructor(
             showAddSellDialog = false,
             showEditTransactionDialog = false,
             editingTransaction = null,
-            editInputError = null
+            editInputError = null,
+            showAddTagDialog = false,
+            addTagInput = "",
+            addTagError = null
         )
     }
 

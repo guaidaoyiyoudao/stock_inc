@@ -5,17 +5,20 @@ import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.dao.StockTagDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.PriceCacheEntity
 import com.stock.dividend.data.local.entity.SearchCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.StockTagEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -49,6 +52,7 @@ class StockRepository @Inject constructor(
     private val industryTargetDao: IndustryTargetDao,
     private val priceCacheDao: PriceCacheDao,
     private val searchCacheDao: SearchCacheDao,
+    private val stockTagDao: StockTagDao,
     private val appDatabase: AppDatabase
 ) {
     suspend fun searchStocks(query: String): Result<List<StockSearchResult>> {
@@ -295,6 +299,32 @@ class StockRepository @Inject constructor(
 
     suspend fun deleteIndustryTarget(industry: String) {
         industryTargetDao.deleteByIndustry(industry)
+    }
+
+    // ---------- 股票标签 ----------
+
+    /** 全量订阅所有 (code, tag)，ViewModel 据此算 tagsByCode 映射。 */
+    fun observeAllStockTags(): Flow<List<StockTagEntity>> = stockTagDao.observeAll()
+
+    /** 全局所有出现过的标签（去重排序），供 EditHolding 输入建议。 */
+    fun observeAllTags(): Flow<List<String>> = stockTagDao.observeAllTags()
+
+    /** 某只股票当前的所有标签（Flow，编辑页订阅用）。 */
+    fun observeTagsForStock(code: String): Flow<List<String>> =
+        stockTagDao.observeByStock(code).map { list -> list.map { it.tag } }
+
+    /**
+     * 全量覆盖某只股票的标签集合：事务内先 clear，再批量 insert。
+     * 标签去空白并去重；空标签自动忽略。
+     */
+    suspend fun setStockTags(code: String, tags: List<String>) {
+        val normalized = tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        appDatabase.withTransaction {
+            stockTagDao.clearForStock(code)
+            normalized.forEach { tag ->
+                stockTagDao.insert(StockTagEntity(stockCode = code, tag = tag))
+            }
+        }
     }
 
     /**
