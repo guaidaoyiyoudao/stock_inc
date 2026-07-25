@@ -8,7 +8,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateOf
 
 /**
- * 当前激活 Tab 注册的刷新入口，供全局 TopAppBar 刷新按钮读取。
+ * 当前激活 Tab 注册的刷新入口，供悬浮刷新按钮读取。
  *
  * - 可刷新的 Tab（持仓 / 自选 / 日历）进入时通过 [registerTabRefresh] 把自己的
  *   刷新回调与 loading 状态写入由 MainScaffold 提供的 [MutableState]。
