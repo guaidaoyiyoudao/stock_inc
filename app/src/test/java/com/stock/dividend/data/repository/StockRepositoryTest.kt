@@ -3,9 +3,13 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.dao.IndustryTargetDao
+import com.stock.dividend.data.local.dao.PriceCacheDao
+import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
+import com.stock.dividend.data.local.entity.PriceCacheEntity
+import com.stock.dividend.data.local.entity.SearchCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
@@ -40,8 +44,13 @@ class StockRepositoryTest {
     private val dao: StockDao = mockk(relaxed = true)
     private val transactionDao: TransactionDao = mockk(relaxed = true)
     private val industryTargetDao: IndustryTargetDao = mockk(relaxed = true)
+    private val priceCacheDao: PriceCacheDao = mockk(relaxed = true)
+    private val searchCacheDao: SearchCacheDao = mockk(relaxed = true)
     private val appDatabase: AppDatabase = mockk(relaxed = true)
-    private val repository = StockRepository(api, quoteApi, dao, transactionDao, industryTargetDao, appDatabase)
+    private val repository = StockRepository(
+        api, quoteApi, dao, transactionDao, industryTargetDao,
+        priceCacheDao, searchCacheDao, appDatabase
+    )
 
     @org.junit.Before
     fun setUp() {
@@ -51,6 +60,10 @@ class StockRepositoryTest {
         coEvery { appDatabase.withTransaction(capture(blockSlot)) } coAnswers {
             blockSlot.captured.invoke()
         }
+        // 默认搜索缓存未命中，让现有 searchStocks 测试走原网络流程；个别缓存测试单独覆盖。
+        coEvery { searchCacheDao.getByQuery(any()) } returns emptyList()
+        // priceCacheDao.getByCodes 默认返回空（getCachedPrices 无缓存）
+        coEvery { priceCacheDao.getByCodes(any()) } returns emptyList()
     }
 
     @After
@@ -634,6 +647,98 @@ class StockRepositoryTest {
 
         repository.updateIndustryTarget("银行", 150.0)
         coVerify { industryTargetDao.upsert(IndustryTargetEntity("银行", 100.0)) }
+    }
+
+    // ── 缓存集成：fetchQuotes 写 price_cache ────────────────────────
+
+    @Test
+    fun `fetchQuotes writes fetched prices to price_cache`() = runTest {
+        val stocks = listOf(
+            StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1", costPerShare = 1500.0)
+        )
+        coEvery { quoteApi.getQuotes(secids = "1.600519") } returns QuoteResponse(
+            data = QuoteData(diff = listOf(QuoteItem(price = 160000.0, code = "600519", market = 1)))
+        )
+
+        repository.fetchQuotes(stocks)
+
+        val cacheSlot = slot<List<PriceCacheEntity>>()
+        coVerify { priceCacheDao.upsertAll(capture(cacheSlot)) }
+        assertThat(cacheSlot.captured.map { it.code to it.price })
+            .containsExactly("sh.600519" to 1600.0)
+    }
+
+    @Test
+    fun `fetchQuotes does not write cache on network failure`() = runTest {
+        val stocks = listOf(
+            StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1")
+        )
+        coEvery { quoteApi.getQuotes(secids = any()) } throws java.io.IOException("down")
+
+        repository.fetchQuotes(stocks)
+
+        coVerify(exactly = 0) { priceCacheDao.upsertAll(any()) }
+    }
+
+    // ── getCachedPrices ─────────────────────────────────────────────
+
+    @Test
+    fun `getCachedPrices returns map from cache entities`() = runTest {
+        coEvery { priceCacheDao.getByCodes(listOf("sh.600519", "sz.000001")) } returns listOf(
+            PriceCacheEntity("sh.600519", 1600.0, 0L),
+            PriceCacheEntity("sz.000001", 12.0, 0L)
+        )
+
+        val result = repository.getCachedPrices(listOf("sh.600519", "sz.000001"))
+
+        assertThat(result["sh.600519"]).isEqualTo(1600.0)
+        assertThat(result["sz.000001"]).isEqualTo(12.0)
+    }
+
+    @Test
+    fun `getCachedPrices returns empty for empty input`() = runTest {
+        assertThat(repository.getCachedPrices(emptyList())).isEmpty()
+        coVerify(exactly = 0) { priceCacheDao.getByCodes(any()) }
+    }
+
+    // ── searchStocks 缓存优先 ───────────────────────────────────────
+
+    @Test
+    fun `searchStocks returns cached results without network on cache hit`() = runTest {
+        coEvery { searchCacheDao.getByQuery("平安银行") } returns listOf(
+            SearchCacheEntity("sz.000001", "平安银行", "平安银行", "0", 0L)
+        )
+        coEvery { priceCacheDao.getByCodes(listOf("sz.000001")) } returns listOf(
+            PriceCacheEntity("sz.000001", 12.0, 0L)
+        )
+
+        val result = repository.searchStocks("平安银行")
+
+        assertThat(result.isSuccess).isTrue()
+        val items = result.getOrThrow()
+        assertThat(items).hasSize(1)
+        assertThat(items.first().code).isEqualTo("sz.000001")
+        assertThat(items.first().currentPrice).isEqualTo(12.0)
+        // 缓存命中：不应请求搜索 API
+        coVerify(exactly = 0) { api.searchStocks(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `searchStocks writes search cache on network success`() = runTest {
+        coEvery { searchCacheDao.getByQuery(any()) } returns emptyList()
+        coEvery { api.searchStocks(input = "贵州茅台") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("600519", "贵州茅台", "1"))
+            )
+        )
+        coEvery { quoteApi.getQuotes(any(), any(), any()) } returns QuoteResponse(data = null)
+
+        repository.searchStocks("贵州茅台")
+
+        val cacheSlot = slot<List<SearchCacheEntity>>()
+        coVerify { searchCacheDao.upsertAll(capture(cacheSlot)) }
+        assertThat(cacheSlot.captured.first().queryKey).isEqualTo("贵州茅台")
+        assertThat(cacheSlot.captured.first().code).isEqualTo("sh.600519")
     }
 
     private fun stockItem(code: String, name: String, mktNum: String) = StockSearchResponse.StockItem(

@@ -3,7 +3,16 @@ package com.stock.dividend.viewmodel
 import android.content.Context
 import android.content.SharedPreferences
 import com.google.common.truth.Truth.assertThat
+import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.local.dao.TransactionDao
+import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_MONTHLY
+import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_YEARLY
+import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.data.notification.NotificationCheckCoordinator
+import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.StockRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -25,6 +34,10 @@ class PortfolioViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val stockRepository: StockRepository = mockk()
+    private val dividendDao: DividendDao = mockk()
+    private val livingExpenseRepository: LivingExpenseRepository = mockk()
+    private val transactionDao: TransactionDao = mockk()
+    private val notificationCheckCoordinator: NotificationCheckCoordinator = mockk(relaxed = true)
     private val context: Context = mockk(relaxed = true)
     private val prefs: SharedPreferences = mockk(relaxed = true)
     private val prefsEditor: SharedPreferences.Editor = mockk(relaxed = true) {
@@ -32,6 +45,7 @@ class PortfolioViewModelTest {
     }
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
+    private val livingExpensesFlow = MutableStateFlow<List<LivingExpenseItemEntity>>(emptyList())
 
     @Before
     fun setUp() {
@@ -42,8 +56,12 @@ class PortfolioViewModelTest {
         every { prefs.contains("portfolio_total_assets") } returns false
         every { stockRepository.observeAllStocks() } returns stocksFlow
         every { stockRepository.observeIndustryTargets() } returns MutableStateFlow(emptyList())
+        every { dividendDao.observeByStock(any()) } returns MutableStateFlow(emptyList())
+        every { livingExpenseRepository.observeExpenses() } returns livingExpensesFlow
         coEvery { stockRepository.getIndustryTargets() } returns emptyList()
         coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
+        coEvery { stockRepository.getCachedPrices(any()) } returns emptyMap()
+        coEvery { transactionDao.getByStock(any()) } returns emptyList()
     }
 
     @After
@@ -58,6 +76,49 @@ class PortfolioViewModelTest {
 
         assertThat(viewModel.uiState.value.items).isEmpty()
         assertThat(viewModel.uiState.value.holdingsMarketValue).isEqualTo(0.0)
+    }
+
+    /**
+     * 回归：刷新失败（fetchQuotes 返回空 map，模拟网络异常被 StockRepository 吞掉）
+     * 时 isLoading 必须复位为 false，否则 TopAppBar 刷新按钮会因 enabled=!isRefreshing
+     * 被永久禁用，呈现"一直转圈卡死"。
+     */
+    @Test
+    fun `refresh failure resets isLoading so button is not stuck`() = runTest {
+        stocksFlow.value = listOf(
+            stock("sz.000001", shares = 100, costPerShare = 10.0)
+        )
+        // 模拟 fetchQuotes 抛异常 → StockRepository 内部 catch 返回 emptyMap()
+        coEvery { stockRepository.fetchQuotes(any()) } throws java.io.IOException("network down")
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 即便刷新失败，isLoading 也应为 false，允许用户再次点击重试
+        assertThat(viewModel.uiState.value.isLoading).isFalse()
+    }
+
+    /**
+     * 冷启动兜底：网络拉价失败时，UI 用 price_cache 里的缓存价回填，
+     * 现价/市值不显示"—"，而是显示上次缓存值。
+     */
+    @Test
+    fun `cold start uses cached prices when network fetch fails`() = runTest {
+        stocksFlow.value = listOf(
+            stock("sz.000001", shares = 100, costPerShare = 10.0)
+        )
+        coEvery { stockRepository.getCachedPrices(any()) } returns mapOf("sz.000001" to 12.0)
+        // 网络拉价失败
+        coEvery { stockRepository.fetchQuotes(any()) } throws java.io.IOException("down")
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val item = viewModel.uiState.value.items.first { it.code == "sz.000001" }
+        // 缓存价 12.0 被回填，现价不为 null
+        assertThat(item.currentPrice).isWithin(0.01).of(12.0)
+        // 市值 = 12.0 * 100 = 1200
+        assertThat(item.marketValue).isWithin(0.01).of(1200.0)
     }
 
     @Test
@@ -272,14 +333,138 @@ class PortfolioViewModelTest {
         assertThat(viewModel.uiState.value.editingIndustry).isNull()
     }
 
-    private fun createViewModel() = PortfolioViewModel(stockRepository, context)
+    // --- 合并自选 tab 后新增的用例：股息预测 / FIRE / 撤销删除 / 自选股 ---
+
+    @Test
+    fun `shares-zero watch stocks appear in watchlist not items`() = runTest {
+        stocksFlow.value = listOf(
+            stock("sz.000001", shares = 100, costPerShare = 10.0),
+            stock("sh.600519", shares = 0, costPerShare = 0.0)   // 纯自选
+        )
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sz.000001" to 12.0)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // items 只含持仓股
+        assertThat(viewModel.uiState.value.items.map { it.code }).containsExactly("sz.000001")
+        // 自选股进 watchlist
+        assertThat(viewModel.uiState.value.watchlist.map { it.code }).containsExactly("sh.600519")
+    }
+
+    @Test
+    fun `forecastTotal sums forecast income for shares-greater-than-zero holdings`() = runTest {
+        val holding = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
+        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(
+            listOf(
+                DividendEntity(
+                    id = "sz.000001_2025",
+                    stockCode = "sz.000001",
+                    reportDate = "2025-12-31",
+                    cashPerShare = 10.0
+                )
+            )
+        )
+        stocksFlow.value = listOf(holding)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // forecastIncome = shares(100) * avgCashPerShare(10.0) = 1000
+        assertThat(viewModel.uiState.value.forecastTotal).isWithin(0.01).of(1000.0)
+        val forecast = viewModel.uiState.value.stockForecasts["sz.000001"]
+        assertThat(forecast).isNotNull()
+        assertThat(forecast!!.forecastIncome).isWithin(0.01).of(1000.0)
+        assertThat(forecast.latestYearlyDividend).isWithin(0.01).of(10.0)
+    }
+
+    @Test
+    fun `fire progress uses annualized living expenses as denominator`() = runTest {
+        val holding = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
+        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(
+            listOf(
+                DividendEntity(
+                    id = "sz.000001_2025",
+                    stockCode = "sz.000001",
+                    reportDate = "2025-12-31",
+                    cashPerShare = 10.0
+                )
+            )
+        )
+        // 月支出 300（年化 3600）+ 年支出 400 = 年化 4000
+        livingExpensesFlow.value = listOf(
+            LivingExpenseItemEntity(1, "房租", 300.0, EXPENSE_PERIOD_MONTHLY, 0),
+            LivingExpenseItemEntity(2, "保险", 400.0, EXPENSE_PERIOD_YEARLY, 1)
+        )
+        stocksFlow.value = listOf(holding)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 预测 1000 / 年化支出 4000 = 25%
+        assertThat(viewModel.uiState.value.livingExpenseTargetAmount).isEqualTo(4000.0)
+        assertThat(viewModel.uiState.value.fireProgress).isWithin(0.0001f).of(25.0f)
+    }
+
+    @Test
+    fun `deleteStock backs up transactions and supports undo`() = runTest {
+        coEvery { stockRepository.removeStock(any()) } returns Unit
+        coEvery { stockRepository.restoreStock(any()) } returns Unit
+        coEvery { transactionDao.getByStock("sz.000001") } returns emptyList()
+        coEvery { transactionDao.insert(any<TransactionEntity>()) } returns 1L
+
+        stocksFlow.value = listOf(stock("sz.000001", shares = 100, costPerShare = 10.0))
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.deleteStock("sz.000001")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 删除后待撤销状态被记录
+        assertThat(viewModel.uiState.value.deletedStock).isNotNull()
+        assertThat(viewModel.uiState.value.deletedStock!!.code).isEqualTo("sz.000001")
+        coVerify { stockRepository.removeStock("sz.000001") }
+
+        viewModel.undoDelete()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 撤销恢复股票，清空待删状态
+        assertThat(viewModel.uiState.value.deletedStock).isNull()
+        coVerify { stockRepository.restoreStock(any()) }
+    }
+
+    @Test
+    fun `clearDeleted drops the pending deletion state`() = runTest {
+        coEvery { stockRepository.removeStock(any()) } returns Unit
+        coEvery { transactionDao.getByStock(any()) } returns emptyList()
+        stocksFlow.value = listOf(stock("sz.000001", shares = 100, costPerShare = 10.0))
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.deleteStock("sz.000001")
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertThat(viewModel.uiState.value.deletedStock).isNotNull()
+
+        viewModel.clearDeleted()
+        assertThat(viewModel.uiState.value.deletedStock).isNull()
+    }
+
+    private fun createViewModel() = PortfolioViewModel(
+        stockRepository,
+        dividendDao,
+        livingExpenseRepository,
+        transactionDao,
+        notificationCheckCoordinator,
+        context
+    )
 
     private fun stock(
         code: String,
         shares: Int,
         costPerShare: Double,
         targetWeight: Double = 0.0,
-        industry: String = ""
+        industry: String = "",
+        yieldPeriod: String = "3"
     ) = StockEntity(
         code = code,
         name = if (code.startsWith("sh")) "茅台" else "平安银行",
@@ -287,6 +472,7 @@ class PortfolioViewModelTest {
         shares = shares,
         costPerShare = costPerShare,
         targetWeight = targetWeight,
-        industry = industry
+        industry = industry,
+        yieldPeriod = yieldPeriod
     )
 }

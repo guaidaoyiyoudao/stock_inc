@@ -7,13 +7,13 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -32,7 +32,6 @@ internal data class BottomNavItem(
 
 internal val bottomNavItems = listOf(
     BottomNavItem("portfolio", "持仓", Icons.Filled.AccountBalance),
-    BottomNavItem("watchlist", "自选", Icons.Filled.Star),
     BottomNavItem("income", "股息收入", Icons.AutoMirrored.Filled.TrendingUp),
     BottomNavItem("calendar", "日历", Icons.Filled.DateRange),
     BottomNavItem("achievements", "成就", Icons.Filled.EmojiEvents),
@@ -50,18 +49,44 @@ fun MainScaffold(rootNavController: NavHostController) {
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "股息追踪",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                actions = {}
-            )
-        },
+    // 全局刷新：当前 Tab 通过 registerTabRefresh 写入；TopAppBar 读取此状态
+    val refreshHandleState = remember { mutableStateOf<RefreshHandle?>(null) }
+    val refreshHandle by refreshHandleState
+
+    CompositionLocalProvider(LocalTabRefreshRegistrar provides refreshHandleState) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            "股息追踪",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    },
+                    actions = {
+                        // 仅在当前 Tab 注册了刷新回调时显示
+                        val handle = refreshHandle
+                        if (handle != null) {
+                            IconButton(
+                                onClick = handle.refresh,
+                                enabled = !handle.isRefreshing
+                            ) {
+                                if (handle.isRefreshing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Filled.Refresh,
+                                        contentDescription = "刷新"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                )
+            },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar(
@@ -108,15 +133,11 @@ fun MainScaffold(rootNavController: NavHostController) {
         ) {
             composable("portfolio") {
                 PortfolioScreen(
-                    onStockClick = { code -> tabNavController.navigate("stockDetail/$code") },
-                    onImportFromScreenshot = { tabNavController.navigate("portfolioImport") }
-                )
-            }
-            composable("watchlist") {
-                WatchlistScreen(
                     snackbarHostState = snackbarHostState,
                     onAddStockClick = { tabNavController.navigate("addStock") },
                     onStockClick = { code -> tabNavController.navigate("stockDetail/$code") },
+                    onEditStock = { code -> tabNavController.navigate("editHolding/$code") },
+                    onImportFromScreenshot = { tabNavController.navigate("portfolioImport") },
                     onFireCardClick = { rootNavController.navigate(Routes.EXPENSE_COVERAGE) }
                 )
             }
@@ -176,5 +197,6 @@ fun MainScaffold(rootNavController: NavHostController) {
                 StockNotificationSettingsScreen(onBack = { tabNavController.popBackStack() })
             }
         }
+    }
     }
 }

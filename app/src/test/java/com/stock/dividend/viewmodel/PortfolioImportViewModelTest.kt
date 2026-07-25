@@ -6,6 +6,7 @@ import android.net.Uri
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.repository.ImportRow
 import com.stock.dividend.data.repository.ImportSummary
+import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.scan.OcrElement
 import com.stock.dividend.data.scan.TextRecognitionService
@@ -31,6 +32,7 @@ class PortfolioImportViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val stockRepository: StockRepository = mockk()
+    private val dividendRepository: DividendRepository = mockk(relaxed = true)
     private val textRecognitionService: TextRecognitionService = mockk()
     private val context: Context = mockk(relaxed = true)
     private val fakeBitmap: Bitmap = mockk(relaxed = true)
@@ -223,5 +225,5 @@ class PortfolioImportViewModelTest {
     }
 
     private fun createViewModel() =
-        PortfolioImportViewModel(stockRepository, textRecognitionService, context)
+        PortfolioImportViewModel(stockRepository, dividendRepository, textRecognitionService, context)
 }

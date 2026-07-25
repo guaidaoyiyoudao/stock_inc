@@ -20,10 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Event
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,6 +65,12 @@ fun DividendCalendarScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // 全局刷新注册
+    registerTabRefresh(
+        refresh = { viewModel.refreshDividends() },
+        isRefreshing = state.isRefreshing
+    )
+
     Scaffold { padding ->
         DividendCalendarContent(
             state = state,
@@ -76,7 +80,6 @@ fun DividendCalendarScreen(
             onDateSelected = viewModel::onDateSelected,
             onVisibleMonthChanged = viewModel::onVisibleMonthChanged,
             onGoToToday = viewModel::goToToday,
-            onRefresh = viewModel::refreshDividends,
             modifier = Modifier.padding(padding)
         )
     }
@@ -92,7 +95,6 @@ private fun DividendCalendarContent(
     onDateSelected: (String) -> Unit,
     onVisibleMonthChanged: (String) -> Unit,
     onGoToToday: () -> Unit,
-    onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -106,10 +108,7 @@ private fun DividendCalendarContent(
         verticalArrangement = Arrangement.spacedBy(AppCardDefaults.SectionSpacing)
     ) {
         item {
-            CalendarSummaryCard(
-                state = state,
-                onRefresh = onRefresh
-            )
+            CalendarSummaryCard(state = state)
         }
 
         item {
@@ -166,8 +165,7 @@ private fun DividendCalendarContent(
 
 @Composable
 private fun CalendarSummaryCard(
-    state: DividendCalendarUiState,
-    onRefresh: () -> Unit
+    state: DividendCalendarUiState
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -179,33 +177,11 @@ private fun CalendarSummaryCard(
             modifier = Modifier.padding(AppCardDefaults.SummaryPadding),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "分红日历",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                IconButton(
-                    onClick = onRefresh,
-                    enabled = !state.isRefreshing
-                ) {
-                    if (state.isRefreshing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Filled.Refresh,
-                            contentDescription = "刷新分红数据"
-                        )
-                    }
-                }
-            }
+            Text(
+                text = "分红日历",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween

@@ -11,6 +11,8 @@ import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.NotificationRuleDao
+import com.stock.dividend.data.local.dao.PriceCacheDao
+import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.AchievementEntity
@@ -20,6 +22,8 @@ import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
+import com.stock.dividend.data.local.entity.PriceCacheEntity
+import com.stock.dividend.data.local.entity.SearchCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 
@@ -33,9 +37,11 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         AchievementEntity::class,
         LivingExpenseItemEntity::class,
         NotificationRuleEntity::class,
-        IndustryTargetEntity::class
+        IndustryTargetEntity::class,
+        PriceCacheEntity::class,
+        SearchCacheEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -48,6 +54,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun livingExpenseItemDao(): LivingExpenseItemDao
     abstract fun notificationRuleDao(): NotificationRuleDao
     abstract fun industryTargetDao(): IndustryTargetDao
+    abstract fun priceCacheDao(): PriceCacheDao
+    abstract fun searchCacheDao(): SearchCacheDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -188,6 +196,31 @@ abstract class AppDatabase : RoomDatabase() {
                             "industry TEXT NOT NULL PRIMARY KEY, " +
                             "targetWeight REAL NOT NULL DEFAULT 0.0" +
                             ")"
+                )
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 实时价格缓存（永久缓存 + 后台刷新）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `price_cache` (" +
+                            "`code` TEXT NOT NULL PRIMARY KEY, " +
+                            "`price` REAL NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL)"
+                )
+                // 搜索结果缓存
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `search_cache` (" +
+                            "`code` TEXT NOT NULL PRIMARY KEY, " +
+                            "`queryKey` TEXT NOT NULL, " +
+                            "`name` TEXT NOT NULL, " +
+                            "`marketCode` TEXT NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_search_cache_queryKey` " +
+                            "ON `search_cache`(`queryKey`)"
                 )
             }
         }

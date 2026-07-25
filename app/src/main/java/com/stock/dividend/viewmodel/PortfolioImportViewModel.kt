@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ImportRow
 import com.stock.dividend.data.repository.ImportSummary
 import com.stock.dividend.data.repository.StockRepository
@@ -47,6 +48,7 @@ data class PortfolioImportUiState(
 @HiltViewModel
 class PortfolioImportViewModel @Inject constructor(
     private val stockRepository: StockRepository,
+    private val dividendRepository: DividendRepository,
     private val textRecognitionService: TextRecognitionService,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -174,6 +176,12 @@ class PortfolioImportViewModel @Inject constructor(
                     ImportRow(row.codeOrNameInput.trim(), shares, cost)
                 }
                 val summary: ImportSummary = stockRepository.importHoldings(importRows)
+                // 补充股息数据（导入流程未含，失败不影响导入结果）
+                summary.succeeded.forEach { code ->
+                    try {
+                        dividendRepository.fetchAndCacheDividends(code, code.substringAfter("."))
+                    } catch (_: Exception) { /* 股息缺失不影响导入 */ }
+                }
                 val msg = buildSummaryMessage(summary)
                 _uiState.update {
                     it.copy(

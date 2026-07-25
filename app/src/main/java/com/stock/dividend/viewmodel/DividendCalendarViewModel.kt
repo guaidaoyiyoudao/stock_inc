@@ -173,10 +173,12 @@ class DividendCalendarViewModel @Inject constructor(
         viewModelScope.launch {
             isRefreshing.value = true
             latestStocks.forEach { stock ->
-                dividendRepository.fetchAndCacheDividends(
-                    stockCode = stock.code,
-                    securityCode = stock.code.substringAfter(".")
-                )
+                try {
+                    dividendRepository.fetchAndCacheDividends(
+                        stockCode = stock.code,
+                        securityCode = stock.code.substringAfter(".")
+                    )
+                } catch (_: Exception) { /* 单股失败不中断其他股的刷新 */ }
             }
             isRefreshing.value = false
         }

@@ -5,20 +5,31 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.local.dao.TransactionDao
+import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_MONTHLY
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.data.notification.NotificationCheckCoordinator
+import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
@@ -62,9 +73,30 @@ data class IndustryGroup(
     val stockTargetSum: Double               // 行业内个股目标占比之和（应≈100，软提示）
 )
 
+/**
+ * 自选/持仓股的股息预测数据（用于 shares>0 的持仓股和 shares=0 的纯自选股）。
+ * 合并自选 tab 后统一由此 ViewModel 提供。
+ */
+@Stable
+data class StockForecast(
+    val shares: Int,
+    val avgCashPerShare: Double,
+    val forecastIncome: Double,
+    val actualYears: Int,
+    val currentPrice: Double? = null,
+    val marketValue: Double? = null,
+    val latestYearlyDividend: Double? = null
+)
+
 @Stable
 data class PortfolioUiState(
     val items: List<PortfolioItem> = emptyList(),
+    /** shares=0 的纯自选股（合并自选 tab 后仍展示，但与持仓股区分样式）。 */
+    val watchlist: List<StockEntity> = emptyList(),
+    val stockForecasts: Map<String, StockForecast> = emptyMap(),
+    val forecastTotal: Double = 0.0,
+    val livingExpenseTargetAmount: Double? = null,
+    val fireProgress: Float? = null,
     val industryGroups: List<IndustryGroup> = emptyList(),
     val industryTargetSum: Double = 0.0,     // 行业目标合计（软提示）
     val totalAssets: Double = 0.0,
@@ -74,6 +106,7 @@ data class PortfolioUiState(
     val totalPnlRate: Double = 0.0,
     val targetWeightSum: Double = 0.0,
     val isLoading: Boolean = false,
+    val isRefreshingIndustry: Boolean = false,
     val error: String? = null,
     val editingCode: String? = null,
     val editingWeightInput: String = "",
@@ -83,13 +116,19 @@ data class PortfolioUiState(
     val editingTotalAssetsError: String? = null,
     val editingIndustry: String? = null,
     val editingIndustryWeightInput: String = "",
-    val editingIndustryWeightError: String? = null
+    val editingIndustryWeightError: String? = null,
+    val deletedStock: StockEntity? = null,
+    val deletedTransactions: List<TransactionEntity> = emptyList()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class PortfolioViewModel @Inject constructor(
     private val stockRepository: StockRepository,
+    private val dividendDao: DividendDao,
+    private val livingExpenseRepository: LivingExpenseRepository,
+    private val transactionDao: TransactionDao,
+    private val notificationCheckCoordinator: NotificationCheckCoordinator,
     @ApplicationContext context: Context
 ) : ViewModel() {
 
@@ -113,8 +152,59 @@ class PortfolioViewModel @Inject constructor(
     @Volatile
     private var currentTotalAssets: Double = 0.0
 
-    private val holdingsFlow = stockRepository.observeAllStocks()
+    /** 全部股票（含 shares=0 的纯自选股），合并自选 tab 后两者共用同一数据源。 */
+    private val allStocksFlow = stockRepository.observeAllStocks()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val holdingsFlow = allStocksFlow
         .map { stocks -> stocks.filter { it.shares > 0 } }
+
+    /** 年化生活支出（月支出 × 12，年支出不变）；用于 FIRE 进度。 */
+    private val livingExpenseTargetFlow = livingExpenseRepository.observeExpenses()
+        .map { expenses ->
+            expenses.sumOf { expense ->
+                when (expense.period) {
+                    EXPENSE_PERIOD_MONTHLY -> expense.amount * 12
+                    else -> expense.amount
+                }
+            }.takeIf { it > 0.0 }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /**
+     * 每股的股息预测。forecast 只对 shares>0 的持仓股计算（ForecastCalculator 按 shares 折算收入）。
+     * latestYearlyDividend 对所有股都可计算（自选股也要在卡片上画「股息率→价位」横轴），
+     * 因此这里对所有股订阅 dividend，但仅当 shares>0 才计入 forecastTotal。
+     */
+    private val forecastMapFlow = allStocksFlow.flatMapLatest { stocks ->
+        if (stocks.isEmpty()) {
+            flowOf(emptyMap())
+        } else {
+            val forecastFlows = stocks.map { stock ->
+                dividendDao.observeByStock(stock.code).map { dividends ->
+                    val years = stock.yieldPeriod.toIntOrNull() ?: 3
+                    val result = ForecastCalculator.calculateForecastIncome(
+                        dividends, stock.shares, years
+                    )
+                    stock.code to result?.let {
+                        StockForecast(
+                            shares = stock.shares,
+                            avgCashPerShare = it.avgCashPerShare,
+                            // shares=0 的自选股 forecastIncome 恒为 0（shares * avg = 0），不计入合计
+                            forecastIncome = stock.shares * it.avgCashPerShare,
+                            actualYears = it.actualYears,
+                            latestYearlyDividend = ForecastCalculator.latestYearlyCashPerShare(dividends)
+                        )
+                    }
+                }
+            }
+            combine(forecastFlows) { results ->
+                results
+                    .filter { it.second != null }
+                    .associate { it.first to it.second!! }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     init {
         currentTotalAssets = readTotalAssetsFromPrefs()
@@ -124,6 +214,12 @@ class PortfolioViewModel @Inject constructor(
         viewModelScope.launch {
             holdingsFlow.collect { stocks ->
                 lastStocksSnapshot = stocks
+                // 冷启动 lastPricesSnapshot 为空时，先用 price_cache 兜底，避免 UI 一片"—"；
+                // 已有网络价时跳过（Collector 2 后台刷新会覆盖缓存）。
+                if (lastPricesSnapshot.isEmpty() && stocks.isNotEmpty()) {
+                    val cached = stockRepository.getCachedPrices(stocks.map { it.code })
+                    if (cached.isNotEmpty()) lastPricesSnapshot = cached
+                }
                 publish(recompute(stocks, lastPricesSnapshot))
             }
         }
@@ -134,15 +230,47 @@ class PortfolioViewModel @Inject constructor(
                 .flatMapLatest { stocks ->
                     if (stocks.isEmpty()) flowOf(emptyMap()) else {
                         _refreshTrigger.onStart { emit(Unit) }.conflate()
-                            .map { stockRepository.fetchQuotes(stocks) }
+                            .map {
+                                _uiState.update { it.copy(isLoading = true) }
+                                try {
+                                    stockRepository.fetchQuotes(stocks)
+                                } catch (_: Exception) {
+                                    // fetchQuotes 自身已吞异常返回空 map，这里兜底网络层之外的问题
+                                    emptyMap()
+                                }
+                            }
                     }
                 }
                 .collect { prices ->
-                    if (prices.isNotEmpty()) lastPricesSnapshot = prices
-                    publish(recompute(lastStocksSnapshot, prices))
-                    if (prices.isNotEmpty()) {
+                    // 关键：无论 prices 是否为空（网络失败），都必须结束 loading，
+                    // 否则 TopAppBar 刷新按钮会因 enabled=!isRefreshing 被永久禁用，卡死。
+                    val effectivePrices = if (prices.isNotEmpty()) {
+                        lastPricesSnapshot = prices
                         persistRefreshTimestamp()
+                        prices
+                    } else {
+                        // 网络失败时保留缓存价（lastPricesSnapshot 含 Collector 1 填充的兜底），
+                        // 而非用空价重算导致 UI 显示"—"。
+                        lastPricesSnapshot
                     }
+                    publish(recompute(lastStocksSnapshot, effectivePrices))
+                    // 把最新价同步进 forecast 卡片（现价/市值），并触发通知检查
+                    val holdings = lastStocksSnapshot
+                    if (holdings.isNotEmpty() && prices.isNotEmpty()) {
+                        _uiState.update { state ->
+                            state.copy(
+                                stockForecasts = state.stockForecasts.mapValues { (code, f) ->
+                                    val p = prices[code]
+                                    f.copy(
+                                        currentPrice = p,
+                                        marketValue = if (p != null && f.shares > 0) p * f.shares else null
+                                    )
+                                }
+                            )
+                        }
+                        notificationCheckCoordinator.checkWithPrices(holdings, prices)
+                    }
+                    _uiState.update { it.copy(isLoading = false) }
                 }
         }
 
@@ -152,15 +280,128 @@ class PortfolioViewModel @Inject constructor(
                 publish(recompute(lastStocksSnapshot, lastPricesSnapshot))
             }
         }
+
+        // Collector 4: 自选股（含 shares=0）+ 股息预测 + 生活支出 → 合并进 UI 状态
+        viewModelScope.launch {
+            combine(
+                allStocksFlow,
+                forecastMapFlow,
+                livingExpenseTargetFlow
+            ) { stocks, forecasts, livingExpenseTarget ->
+                Triple(stocks, forecasts, livingExpenseTarget)
+            }.collect { (stocks, forecasts, livingExpenseTarget) ->
+                val forecastTotal = forecasts.values
+                    .filter { it.shares > 0 }
+                    .sumOf { it.forecastIncome }
+                val progress = if (livingExpenseTarget != null && livingExpenseTarget > 0) {
+                    (forecastTotal / livingExpenseTarget * 100).toFloat().coerceAtMost(100f)
+                } else null
+                // 冷启动 stockForecasts 为空时，用 price_cache 兜底现价/市值，避免 UI 显示"—"
+                val cachedPrices = if (stocks.isNotEmpty()) {
+                    val codes = stocks.map { it.code }
+                    if (codes.isNotEmpty()) stockRepository.getCachedPrices(codes) else emptyMap()
+                } else emptyMap()
+                _uiState.update { state ->
+                    state.copy(
+                        watchlist = stocks.filter { it.shares <= 0 },
+                        stockForecasts = forecasts.mapValues { (code, forecast) ->
+                            val previous = state.stockForecasts[code]
+                            val cachedPrice = cachedPrices[code]
+                            forecast.copy(
+                                currentPrice = previous?.currentPrice ?: cachedPrice,
+                                marketValue = previous?.marketValue
+                                    ?: cachedPrice?.let { if (forecast.shares > 0) it * forecast.shares else null }
+                            )
+                        },
+                        forecastTotal = forecastTotal,
+                        livingExpenseTargetAmount = livingExpenseTarget,
+                        fireProgress = progress
+                    )
+                }
+            }
+        }
     }
 
     fun refreshQuotes() {
         _refreshTrigger.tryEmit(Unit)
     }
 
+    /**
+     * 从自选/持仓中删除一只股票（连带其交易记录，FK CASCADE）。
+     * 交易记录先备份到 [PortfolioUiState.deletedTransactions]，可通过 [undoDelete] 恢复。
+     */
+    fun deleteStock(stock: StockEntity) {
+        viewModelScope.launch {
+            val transactions = transactionDao.getByStock(stock.code)
+            stockRepository.removeStock(stock.code)
+            _uiState.update {
+                it.copy(
+                    deletedStock = stock,
+                    deletedTransactions = transactions
+                )
+            }
+        }
+    }
+
+    /**
+     * 按 code 删除（持仓卡片用）：从内存快照查 StockEntity 后委托 [deleteStock]，
+     * 以保留撤销时恢复交易记录的能力。快照里找不到时退化为无撤销删除。
+     */
+    fun deleteStock(code: String) {
+        val stock = lastStocksSnapshot.firstOrNull { it.code == code }
+        if (stock != null) {
+            deleteStock(stock)
+        } else {
+            viewModelScope.launch { stockRepository.removeStock(code) }
+        }
+    }
+
+    fun undoDelete() {
+        val deleted = _uiState.value.deletedStock ?: return
+        viewModelScope.launch {
+            stockRepository.restoreStock(deleted)
+            _uiState.value.deletedTransactions.forEach { transaction ->
+                transactionDao.insert(transaction)
+            }
+            _uiState.update {
+                it.copy(
+                    deletedStock = null,
+                    deletedTransactions = emptyList()
+                )
+            }
+            refreshQuotes()
+        }
+    }
+
+    fun clearDeleted() {
+        _uiState.update {
+            it.copy(
+                deletedStock = null,
+                deletedTransactions = emptyList()
+            )
+        }
+    }
+
     fun onResume() {
         if (shouldAutoRefresh()) {
             refreshQuotes()
+        }
+    }
+
+    /**
+     * 批量回填所有持仓的行业信息（东财 f127）。用于老数据补全或行业名变更后刷新。
+     * 单股失败不影响其他股；完成后 holdingsFlow 会自动重算。
+     */
+    fun refreshIndustries() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshingIndustry = true) }
+            val stocks = lastStocksSnapshot.ifEmpty {
+                stockRepository.observeAllStocks().first()
+            }
+            stocks.forEach { stock ->
+                try { stockRepository.fetchAndCacheIndustry(stock.code) } catch (_: Exception) { /* 单股失败跳过 */ }
+            }
+            _uiState.update { it.copy(isRefreshingIndustry = false) }
         }
     }
 
@@ -379,7 +620,10 @@ class PortfolioViewModel @Inject constructor(
             totalPnl = totalPnl,
             totalPnlRate = totalPnlRate,
             targetWeightSum = targetWeightSum,
-            isLoading = prices.isEmpty()
+            // loading 状态完全由 Collector 2 显式管理（进入 fetch 前 true、结束/失败后 false）。
+            // 此处置 false，避免 Collector 1/3 在 lastPricesSnapshot 为空时把 isLoading 误设回 true，
+            // 与 Collector 2 的显式复位相互打架。
+            isLoading = false
         )
     }
 

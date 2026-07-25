@@ -34,8 +34,12 @@ fun StockCard(
     forecastIncome: String? = null,
     marketValue: String? = null,
     lastUpdated: Long? = null,
+    currentPrice: Double? = null,
+    latestYearlyDividend: Double? = null,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 纯自选股（shares=0）：用更柔和的背景色 + 「自选」标签与持仓股区分。 */
+    isWatchOnly: Boolean = false
 ) {
     Card(
         modifier = modifier
@@ -43,16 +47,28 @@ fun StockCard(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (isWatchOnly) {
+                MaterialTheme.colorScheme.surfaceVariant
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
         )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Column {
+            // 股息率→价位 横轴，仅在有最近一年年股息与当前价时渲染
+            DividendPriceScale(
+                currentPrice = currentPrice,
+                latestYearlyDividend = latestYearlyDividend,
+                modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp)
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
@@ -94,6 +110,23 @@ fun StockCard(
                                     text = "$shares 股",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        } else if (isWatchOnly) {
+                            // 纯自选股：显示「自选」标签，与有持仓的股票区分
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        MaterialTheme.colorScheme.tertiaryContainer,
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "自选",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
@@ -140,6 +173,7 @@ fun StockCard(
                     }
                 }
             }
+        }
         }
     }
 }

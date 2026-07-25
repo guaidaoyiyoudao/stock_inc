@@ -28,3 +28,11 @@ Thumbs.db
 # Keystore
 *.keystore
 *.jks
+
+# Tooling / scratch (non-code, local only)
+.hermes/
+config/
+
+# External research / analysis artifacts
+招商银行_600036_格施风析分析.html
+还是叫吴富贵吧_小红书/

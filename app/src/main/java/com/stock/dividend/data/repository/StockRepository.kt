@@ -2,9 +2,13 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.dao.IndustryTargetDao
+import com.stock.dividend.data.local.dao.PriceCacheDao
+import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
+import com.stock.dividend.data.local.entity.PriceCacheEntity
+import com.stock.dividend.data.local.entity.SearchCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
@@ -43,10 +47,29 @@ class StockRepository @Inject constructor(
     private val stockDao: StockDao,
     private val transactionDao: TransactionDao,
     private val industryTargetDao: IndustryTargetDao,
+    private val priceCacheDao: PriceCacheDao,
+    private val searchCacheDao: SearchCacheDao,
     private val appDatabase: AppDatabase
 ) {
     suspend fun searchStocks(query: String): Result<List<StockSearchResult>> {
         return try {
+            // 缓存优先：同一关键词命中则直接返回缓存（不发任何网络请求），用 price_cache 补价
+            val queryKey = query.trim().lowercase()
+            val cached = searchCacheDao.getByQuery(queryKey)
+            if (cached.isNotEmpty()) {
+                val codes = cached.map { it.code }
+                val priceMap = getCachedPrices(codes)
+                val results = cached.map { entity ->
+                    StockSearchResult(
+                        code = entity.code,
+                        name = entity.name,
+                        marketCode = entity.marketCode,
+                        currentPrice = priceMap[entity.code]
+                    )
+                }
+                return Result.success(results)
+            }
+
             val response = api.searchStocks(input = query)
             val items = response.quotationCodeTable?.Data
                 ?.filter { it.Classify == "AStock" }
@@ -58,6 +81,22 @@ class StockRepository @Inject constructor(
                     )
                 } ?: emptyList()
 
+            // 写入搜索缓存（以小写 queryKey 为复用键），失败不阻塞主流程
+            if (items.isNotEmpty()) {
+                try {
+                    val now = System.currentTimeMillis()
+                    searchCacheDao.upsertAll(items.map {
+                        SearchCacheEntity(
+                            code = it.code,
+                            queryKey = queryKey,
+                            name = it.name,
+                            marketCode = it.marketCode,
+                            updatedAt = now
+                        )
+                    })
+                } catch (_: Exception) { /* 缓存写入失败不影响搜索 */ }
+            }
+
             // Batch fetch prices for search results
             val pricedItems = if (items.isNotEmpty()) {
                 try {
@@ -66,10 +105,13 @@ class StockRepository @Inject constructor(
                     val priceMap = quoteResponse.data?.diff?.associate {
                         "${it.market}.${it.code}" to (it.price?.div(100.0))
                     } ?: emptyMap()
-                    items.map { item ->
+                    val priced = items.map { item ->
                         val key = "${item.marketCode}.${item.code.substringAfter(".")}"
                         item.copy(currentPrice = priceMap[key])
                     }
+                    // 同步把搜到的现价写入 price_cache（key 统一用 sh./sz. 格式）
+                    cachePrices(priced.associate { it.code to it.currentPrice })
+                    priced
                 } catch (_: Exception) {
                     items // Return without prices if quote fetch fails
                 }
@@ -178,10 +220,40 @@ class StockRepository @Inject constructor(
                     priceMap[appCode] = price / 100.0
                 }
             }
+            // 拉到新价后写入 price_cache（后台刷新覆盖，缓存作冷启动兜底）
+            cachePrices(priceMap)
             priceMap
         } catch (e: Exception) {
             emptyMap()
         }
+    }
+
+    /**
+     * 读取 [codes] 的缓存价（冷启动兜底用）。仅返回有缓存的项。
+     * key 格式与 [fetchQuotes] 一致：`sh.600036` / `sz.000001`。
+     */
+    suspend fun getCachedPrices(codes: List<String>): Map<String, Double> {
+        if (codes.isEmpty()) return emptyMap()
+        return try {
+            priceCacheDao.getByCodes(codes).associate { it.code to it.price }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    /**
+     * 把现价写入 price_cache（REPLACE 更新）。null 值跳过。
+     * 供 [fetchQuotes] / [searchStocks] 在拉到新价后调用。
+     */
+    private suspend fun cachePrices(prices: Map<String, Double?>) {
+        val valid = prices.filterValues { it != null && it > 0 }.mapValues { it.value!! }
+        if (valid.isEmpty()) return
+        try {
+            val now = System.currentTimeMillis()
+            priceCacheDao.upsertAll(valid.map { (code, price) ->
+                PriceCacheEntity(code = code, price = price, updatedAt = now)
+            })
+        } catch (_: Exception) { /* 缓存写入失败不影响主流程 */ }
     }
 
     private fun formatStockCode(marketCode: String, code: String): String {
