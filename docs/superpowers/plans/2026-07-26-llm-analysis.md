@@ -528,13 +528,14 @@ git commit -m "feat(llm): LlmConfig / 预设 / 结果数据类"
 
 ---
 
-## Task 6: LlmConfigRepository（SharedPreferences，TDD）
+## Task 6: LlmConfigRepository（SharedPreferences）
 
 **Files:**
 - Create: `app/src/main/java/com/stock/dividend/data/repository/LlmConfigRepository.kt`
-- Test: `app/src/test/java/com/stock/dividend/data/repository/LlmConfigRepositoryTest.kt`
 
-- [ ] **Step 1: 写失败测试**
+> **不写单测：** 项目未配置 Robolectric（全仓库纯 JUnit4 + MockK）。为 3-key SharedPreferences 包装类引入 Robolectric 低 ROI；逻辑极薄（读写 3 string + listener Flow），靠 T13 设置 UI + T14 手动验证覆盖。**已在实现中顺带定义 `LlmConfigSource` 接口 + `@Binds` 绑定**（供 T10 测试用 fake 绕开 SP），T10 不再改本文件。
+
+- [ ] **Step 1: ~~写失败测试~~（已废弃：本任务不写单测，下方测试代码仅作历史参考）**
 
 `LlmConfigRepositoryTest.kt`：
 ```kotlin
@@ -1251,14 +1252,7 @@ Expected: FAIL（`LlmAnalysisRepository` 未定义）
 
 - [ ] **Step 3: 写实现**
 
-先加配置源接口。编辑 `LlmConfigRepository.kt`，在文件顶部加：
-```kotlin
-/** 只读 LLM 配置源（便于单测解耦 SharedPreferences）。 */
-interface LlmConfigSource {
-    fun observeConfig(): Flow<LlmConfig>
-}
-```
-改 `class LlmConfigRepository ... : LlmConfigSource`，并给 `observeConfig()` 加 `override`。
+> `LlmConfigSource` 接口 + `LlmConfigRepository implements LlmConfigSource` + `@Binds` 绑定已在 Task 6 完成，本任务**不再改** `LlmConfigRepository.kt`，直接依赖 `LlmConfigSource`。
 
 `LlmAnalysisRepository.kt`：
 ```kotlin
