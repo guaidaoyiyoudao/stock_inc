@@ -256,13 +256,14 @@ class PortfolioAdvisorTest {
 
     private fun stock(
         code: String,
-        priceVsLower: Double,
+        priceVsLower: Double = 0.1,
         yield: Double? = 3.0,
-        price: Double = 10.0
+        price: Double = 10.0,
+        band: BollBand? = null
     ) = EvaluatedStock(
         code = code, name = code, industry = "",
         action = HoldingAction.HOLD, priceVsLower = priceVsLower,
-        dividendYield = yield, bollBand = null, currentPrice = price,
+        dividendYield = yield, bollBand = band, currentPrice = price,
         reasons = emptyList()
     )
 
@@ -297,9 +298,10 @@ class PortfolioAdvisorTest {
 
     @Test
     fun `resonant buy signal when daily lower weekly lower monthly below middle`() {
-        val stocks = listOf(stock("a", price = 8.5))  // <= lower 9
-        val daily = mapOf("a" to lowerBand)            // 8.5 <= 9 ✓
-        val monthly = mapOf("a" to midBand)            // 8.5 < 12 ✓
+        // price 8.5 <= daily.lower 9, <= weekly.lower 9, < monthly.middle 12
+        val stocks = listOf(stock("a", price = 8.5, band = lowerBand))
+        val daily = mapOf("a" to lowerBand)
+        val monthly = mapOf("a" to midBand)
         val sig = PortfolioAdvisor.evaluate(stocks, daily, monthly)
         assertThat(sig.buySignals).hasSize(1)
         assertThat(sig.buySignals.first().code).isEqualTo("a")
@@ -308,16 +310,17 @@ class PortfolioAdvisorTest {
 
     @Test
     fun `no resonant signal when monthly at or above middle`() {
-        val stocks = listOf(stock("a", price = 12.5)) // > middle 12
+        // price 8.5: daily<=9 ✓, weekly<=9 ✓, but monthly middle=8.0 → 8.5 >= 8.0 → not below middle
+        val stocks = listOf(stock("a", price = 8.5, band = lowerBand))
         val daily = mapOf("a" to lowerBand)
-        val monthly = mapOf("a" to midBand)
+        val monthly = mapOf("a" to BollBand(middle = 8.0, upper = 9.0, lower = 7.0))
         val sig = PortfolioAdvisor.evaluate(stocks, daily, monthly)
         assertThat(sig.buySignals).isEmpty()
     }
 
     @Test
     fun `missing monthly band skips resonance for that stock`() {
-        val stocks = listOf(stock("a", price = 8.5))
+        val stocks = listOf(stock("a", price = 8.5, band = lowerBand))
         val daily = mapOf("a" to lowerBand)
         val monthly = mapOf<String, BollBand?>("a" to null)
         val sig = PortfolioAdvisor.evaluate(stocks, daily, monthly)
