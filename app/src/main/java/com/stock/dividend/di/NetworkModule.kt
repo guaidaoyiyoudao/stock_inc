@@ -1,6 +1,7 @@
 package com.stock.dividend.di
 
 import com.stock.dividend.data.remote.DividendApi
+import com.stock.dividend.data.remote.LlmApi
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
 import com.stock.dividend.data.remote.TencentDividendApi
@@ -25,6 +26,11 @@ annotation class EastMoneyDividendApi
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class TencentDividendSource
+
+/** 标记 LLM 专用 client（60s 超时，LLM 响应慢）。 */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class LlmClient
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -108,5 +114,29 @@ object NetworkModule {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(QuoteApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    @LlmClient
+    fun provideLlmOkHttpClient(): OkHttpClient {
+        return OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .addInterceptor(
+                HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
+            )
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideLlmApi(@LlmClient client: OkHttpClient): LlmApi {
+        return Retrofit.Builder()
+            .baseUrl("http://localhost/")   // 占位；实际 URL 走 @Url
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(LlmApi::class.java)
     }
 }
