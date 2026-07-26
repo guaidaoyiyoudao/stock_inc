@@ -34,5 +34,12 @@ Thumbs.db
 config/
 
 # External research / analysis artifacts
-招商银行_600036_格施风析分析.html
+招商银行_*_*.html
 还是叫吴富贵吧_小红书/
+
+# Debug screenshots
+*_now.png
+*_after_*.png
+
+# ZCode local workspace
+.zcode/

@@ -13,16 +13,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.stock.dividend.data.repository.BollBand
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -36,11 +47,21 @@ fun StockCard(
     lastUpdated: Long? = null,
     currentPrice: Double? = null,
     latestYearlyDividend: Double? = null,
+    /** 周线 BOLL 带（切到 BOLL 视图时渲染；null 表示未加载/无数据）。 */
+    bollBand: BollBand? = null,
+    /** 切到 BOLL 视图时回调，ViewModel 据此按需懒加载。 */
+    onLoadBoll: () -> Unit = {},
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     /** 纯自选股（shares=0）：用更柔和的背景色 + 「自选」标签与持仓股区分。 */
     isWatchOnly: Boolean = false
 ) {
+    // 每张卡片独立切换「股息率 ↔ BOLL」，仅内存状态（不持久化，符合用户决策）。
+    var showBoll by remember(code) { mutableStateOf(false) }
+    LaunchedEffect(showBoll) {
+        if (showBoll) onLoadBoll()
+    }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -55,12 +76,38 @@ fun StockCard(
         )
     ) {
         Column {
-            // 股息率→价位 横轴，仅在有最近一年年股息与当前价时渲染
-            DividendPriceScale(
-                currentPrice = currentPrice,
-                latestYearlyDividend = latestYearlyDividend,
-                modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp)
-            )
+            // 坐标轴切换按钮：右上角浮在横轴上方。showBoll=false 显示股息率横轴（TrendingUp 图标），
+            // showBoll=true 显示 BOLL 横轴（ShowChart 图标）。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 6.dp, end = 4.dp, top = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = { showBoll = !showBoll }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = if (showBoll) Icons.Default.ShowChart else Icons.Default.TrendingUp,
+                        contentDescription = if (showBoll) "切换到股息率横轴" else "切换到 BOLL 横轴",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // 坐标轴主体：按切换状态渲染股息率横轴或 BOLL 横轴。
+            if (showBoll) {
+                BollPriceScale(
+                    currentPrice = currentPrice,
+                    band = bollBand,
+                    modifier = Modifier.padding(start = 10.dp, end = 10.dp)
+                )
+            } else {
+                DividendPriceScale(
+                    currentPrice = currentPrice,
+                    latestYearlyDividend = latestYearlyDividend,
+                    modifier = Modifier.padding(start = 10.dp, end = 10.dp)
+                )
+            }
 
             Row(
                 modifier = Modifier

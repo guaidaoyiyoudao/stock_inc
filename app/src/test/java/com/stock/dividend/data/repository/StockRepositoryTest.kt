@@ -48,10 +48,11 @@ class StockRepositoryTest {
     private val priceCacheDao: PriceCacheDao = mockk(relaxed = true)
     private val searchCacheDao: SearchCacheDao = mockk(relaxed = true)
     private val stockTagDao: StockTagDao = mockk(relaxed = true)
+    private val klineRepository: KlineRepository = mockk(relaxed = true)
     private val appDatabase: AppDatabase = mockk(relaxed = true)
     private val repository = StockRepository(
         api, quoteApi, dao, transactionDao, industryTargetDao,
-        priceCacheDao, searchCacheDao, stockTagDao, appDatabase
+        priceCacheDao, searchCacheDao, stockTagDao, klineRepository, appDatabase
     )
 
     @org.junit.Before
@@ -649,6 +650,36 @@ class StockRepositoryTest {
 
         repository.updateIndustryTarget("银行", 150.0)
         coVerify { industryTargetDao.upsert(IndustryTargetEntity("银行", 100.0)) }
+    }
+
+    // ── fetchBoll ────────────────────────────────────────────────────
+
+    @Test
+    fun `fetchBoll delegates to klineRepository and BollCalculator`() = runTest {
+        // 20 根收盘价 1..20，均值 10.5
+        coEvery { klineRepository.fetchWeeklyCloses("sh.600036") } returns (1..20).map { it.toDouble() }
+
+        val band = repository.fetchBoll("sh.600036")
+
+        assertThat(band).isNotNull()
+        band!!
+        assertThat(band.middle).isWithin(1e-9).of(10.5)
+        assertThat(band.upper).isGreaterThan(band.middle)
+        assertThat(band.lower).isLessThan(band.middle)
+    }
+
+    @Test
+    fun `fetchBoll returns null when closes insufficient`() = runTest {
+        coEvery { klineRepository.fetchWeeklyCloses("sh.600036") } returns (1..5).map { it.toDouble() }
+
+        assertThat(repository.fetchBoll("sh.600036")).isNull()
+    }
+
+    @Test
+    fun `fetchBoll returns null when klineRepository throws`() = runTest {
+        coEvery { klineRepository.fetchWeeklyCloses("sh.600036") } throws java.io.IOException("down")
+
+        assertThat(repository.fetchBoll("sh.600036")).isNull()
     }
 
     @Test

@@ -53,6 +53,7 @@ class StockRepository @Inject constructor(
     private val priceCacheDao: PriceCacheDao,
     private val searchCacheDao: SearchCacheDao,
     private val stockTagDao: StockTagDao,
+    private val klineRepository: KlineRepository,
     private val appDatabase: AppDatabase
 ) {
     suspend fun searchStocks(query: String): Result<List<StockSearchResult>> {
@@ -281,6 +282,21 @@ class StockRepository @Inject constructor(
         if (industry.isNotEmpty()) {
             stockDao.updateIndustry(code, industry)
         }
+    }
+
+    // ---------- BOLL 带（周线）----------
+
+    /**
+     * 拉取 [stockCode] 的周线收盘价并计算 BOLL 带（MA20 ± 2σ）。
+     * 网络失败或收盘价不足 20 根返回 null（调用方据此显示占位）。
+     */
+    suspend fun fetchBoll(stockCode: String): BollBand? {
+        val closes = try {
+            klineRepository.fetchWeeklyCloses(stockCode)
+        } catch (_: Exception) {
+            return null
+        }
+        return BollCalculator.calculate(closes)
     }
 
     // ---------- 行业目标配比 ----------
