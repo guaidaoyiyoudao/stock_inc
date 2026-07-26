@@ -11,12 +11,20 @@ import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_MONTHLY
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.notification.NotificationCheckCoordinator
+import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.data.repository.DividendThresholds
 import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.HoldingAction
+import com.stock.dividend.data.repository.HoldingRecommendation
+import com.stock.dividend.data.repository.HoldingRecommender
 import com.stock.dividend.data.repository.LivingExpenseRepository
+import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -32,6 +41,8 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalTime
@@ -90,12 +101,28 @@ data class StockForecast(
     val latestYearlyDividend: Double? = null
 )
 
+/** 一只股票的评估结果（结果页直接渲染）。 */
+@Stable
+data class EvaluatedStock(
+    val code: String,
+    val name: String,
+    val industry: String,
+    val action: HoldingAction,
+    val priceVsLower: Double,
+    val dividendYield: Double?,
+    val bollBand: BollBand?,
+    val currentPrice: Double?,
+    val reasons: List<String>
+)
+
 @Stable
 data class PortfolioUiState(
     val items: List<PortfolioItem> = emptyList(),
     /** shares=0 的纯自选股（合并自选 tab 后仍展示，但与持仓股区分样式）。 */
     val watchlist: List<StockEntity> = emptyList(),
     val stockForecasts: Map<String, StockForecast> = emptyMap(),
+    /** 周线 BOLL 带（按 code 缓存）。null 值表示已尝试但无数据（防重试）；缺 key 表示尚未加载。 */
+    val stockBands: Map<String, BollBand?> = emptyMap(),
     val forecastTotal: Double = 0.0,
     val livingExpenseTargetAmount: Double? = null,
     val fireProgress: Float? = null,
@@ -131,7 +158,12 @@ data class PortfolioUiState(
     /** 筛选后的持仓股（直接渲染）。 */
     val filteredItems: List<PortfolioItem> = emptyList(),
     /** 筛选后的自选股（直接渲染）。 */
-    val filteredWatchlist: List<StockEntity> = emptyList()
+    val filteredWatchlist: List<StockEntity> = emptyList(),
+    // ── 一键评估 ────────────────────────────────────────────────────
+    /** 评估进行中。 */
+    val isEvaluating: Boolean = false,
+    /** 评估结果；null = 未评估过，空列表 = 评估过但当前筛选下无股票。 */
+    val evaluation: List<EvaluatedStock>? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -142,6 +174,7 @@ class PortfolioViewModel @Inject constructor(
     private val livingExpenseRepository: LivingExpenseRepository,
     private val transactionDao: TransactionDao,
     private val notificationCheckCoordinator: NotificationCheckCoordinator,
+    private val notificationRuleRepository: NotificationRuleRepository,
     @ApplicationContext context: Context
 ) : ViewModel() {
 
@@ -152,6 +185,16 @@ class PortfolioViewModel @Inject constructor(
     val uiState: StateFlow<PortfolioUiState> = _uiState.asStateFlow()
 
     private val _refreshTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /**
+     * 周线 BOLL 带缓存（按 code）。key 存在即表示已尝试加载：
+     *  - value 非 null → 有有效 BOLL 数据；
+     *  - value 为 null → 已尝试但数据不足/失败，避免切到 BOLL 视图时反复重试。
+     */
+    private val _stockBands = MutableStateFlow<Map<String, BollBand?>>(emptyMap())
+
+    /** 用户配置的评估门槛（由设置页写入 notification_rules）。 */
+    private val _evalThresholds = MutableStateFlow(DividendThresholds())
 
     /** Latest non-empty holding snapshot, kept so price refresh can recompute without re-reading the DAO. */
     @Volatile
@@ -373,10 +416,122 @@ class PortfolioViewModel @Inject constructor(
                 }
             }
         }
+
+        // Collector 6: 周线 BOLL 带变化 → 同步进 UI state（卡片据此渲染或占位）
+        viewModelScope.launch {
+            _stockBands.collect { bands ->
+                _uiState.update { it.copy(stockBands = bands) }
+            }
+        }
+
+        // Collector 7: 评估门槛（用户在设置里改的 min/boost）变化 → 缓存到 _evalThresholds
+        viewModelScope.launch {
+            notificationRuleRepository.observeEvalThresholds()
+                .distinctUntilChanged()
+                .collect { thresholds ->
+                    _evalThresholds.value = thresholds
+                }
+        }
     }
 
     fun refreshQuotes() {
         _refreshTrigger.tryEmit(Unit)
+    }
+
+    /**
+     * 按需懒加载 [stockCode] 的周线 BOLL 带。卡片切到 BOLL 视图时调用。
+     * 已缓存（key 存在，含 null）则跳过，避免重复网络请求；同时把结果（含 null）写入
+     * [_stockBands]，UI 据此显示数据或「加载中/无数据」占位。
+     */
+    fun loadBoll(stockCode: String) {
+        if (_stockBands.value.containsKey(stockCode)) return
+        // 先占位标记为「加载中」(临时 null 与「无数据 null 同值，但 contains 阻断并发重复请求)
+        _stockBands.update { it + (stockCode to null) }
+        viewModelScope.launch {
+            val band = try {
+                stockRepository.fetchBoll(stockCode)
+            } catch (_: Exception) {
+                null
+            }
+            _stockBands.update { it + (stockCode to band) }
+        }
+    }
+
+    /**
+     * 一键评估当前筛选后可见的持仓股。对每只：
+     *  1. 确保 boll 已加载（复用 [_stockBands] 缓存，缺则触发 fetchBoll）；
+     *  2. 取 stockForecasts 的现价/股息；
+     *  3. 调 [HoldingRecommender.recommend] 得建议；
+     *  4. 按 action 优先级（BUY→HOLD→SELL→INSUFFICIENT_DATA）排序。
+     *
+     * 并发用 [Semaphore] 限流到 4，避免一次性几十个 Tencent 请求被拒。
+     */
+    fun evaluateVisibleHoldings() {
+        viewModelScope.launch {
+            val visible = _uiState.value.filteredItems
+            if (visible.isEmpty()) {
+                _uiState.update { it.copy(isEvaluating = false, evaluation = emptyList()) }
+                return@launch
+            }
+            _uiState.update { it.copy(isEvaluating = true) }
+            val thresholds = _evalThresholds.value
+            val semaphore = Semaphore(4)
+
+            val results = visible.map { item ->
+                async {
+                    semaphore.withPermit {
+                        val band = ensureBollLoaded(item.code)
+                        val forecast = _uiState.value.stockForecasts[item.code]
+                        val price = forecast?.currentPrice ?: item.currentPrice ?: 0.0
+                        val recommendation = HoldingRecommender.recommend(
+                            price = price,
+                            band = band,
+                            latestYearlyDividend = forecast?.latestYearlyDividend,
+                            thresholds = thresholds
+                        )
+                        EvaluatedStock(
+                            code = item.code,
+                            name = item.name,
+                            industry = item.industry,
+                            action = recommendation.action,
+                            priceVsLower = recommendation.priceVsLower,
+                            dividendYield = recommendation.dividendYield,
+                            bollBand = band,
+                            currentPrice = price.takeIf { it > 0.0 },
+                            reasons = recommendation.reasons
+                        )
+                    }
+                }
+            }.awaitAll()
+
+            val sorted = results.sortedWith(
+                compareBy<EvaluatedStock> { it.action.priority() }
+                    .thenBy { it.priceVsLower }
+            )
+            _uiState.update { it.copy(isEvaluating = false, evaluation = sorted) }
+        }
+    }
+
+    /** 清除评估结果（结果页"清除结果"按钮用）。 */
+    fun clearEvaluation() {
+        _uiState.update { it.copy(evaluation = null, isEvaluating = false) }
+    }
+
+    /**
+     * 确保 [code] 的 boll 已加载（[_stockBands] 有 key 即返回，含 null）；
+     * 否则触发 fetchBoll 并等待结果。
+     */
+    private suspend fun ensureBollLoaded(code: String): BollBand? {
+        _stockBands.value[code]?.let { return it }
+        // 占位防并发重复请求
+        _stockBands.update { it + (code to null) }
+        val band = try {
+            stockRepository.fetchBoll(code)
+        } catch (_: Exception) {
+            null
+        }
+        _stockBands.update { it + (code to band) }
+        return band
     }
 
     /**
@@ -532,6 +687,15 @@ class PortfolioViewModel @Inject constructor(
         _uiState.update { reapplyFilter(it.copy(selectedIndustries = emptySet())) }
     }
 
+    /**
+     * 单选语义的行业筛选：传入 null 清空，否则只保留该行业。
+     * 供下拉框使用，复用现有 selectedIndustries（空或单元素）。
+     */
+    fun setIndustryFilter(industry: String?) {
+        val newSel = if (industry.isNullOrBlank()) emptySet() else setOf(industry)
+        _uiState.update { reapplyFilter(it.copy(selectedIndustries = newSel)) }
+    }
+
     fun toggleTagFilter(tag: String) {
         _uiState.update { state ->
             val newSel = if (tag in state.selectedTags) state.selectedTags - tag
@@ -542,6 +706,15 @@ class PortfolioViewModel @Inject constructor(
 
     fun clearTagFilter() {
         _uiState.update { reapplyFilter(it.copy(selectedTags = emptySet())) }
+    }
+
+    /**
+     * 单选语义的标签筛选：传入 null 清空，否则只保留该标签。
+     * 供下拉框使用，复用现有 selectedTags（空或单元素）。
+     */
+    fun setTagFilter(tag: String?) {
+        val newSel = if (tag.isNullOrBlank()) emptySet() else setOf(tag)
+        _uiState.update { reapplyFilter(it.copy(selectedTags = newSel)) }
     }
 
     private fun reapplyFilter(state: PortfolioUiState): PortfolioUiState {
@@ -829,4 +1002,12 @@ fun applyPortfolioFilter(
     val fi = items.filter { matchIndustry(it.industry) && matchTags(it.code) }
     val fw = watchlist.filter { matchIndustry(it.industry) && matchTags(it.code) }
     return fi to fw
+}
+
+/** 评估排序优先级：BUY < HOLD < SELL < INSUFFICIENT_DATA。 */
+private fun HoldingAction.priority(): Int = when (this) {
+    HoldingAction.BUY -> 0
+    HoldingAction.HOLD -> 1
+    HoldingAction.SELL -> 2
+    HoldingAction.INSUFFICIENT_DATA -> 3
 }

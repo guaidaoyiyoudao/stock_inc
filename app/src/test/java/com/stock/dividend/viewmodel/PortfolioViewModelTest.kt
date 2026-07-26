@@ -12,7 +12,11 @@ import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.notification.NotificationCheckCoordinator
+import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.data.repository.DividendThresholds
+import com.stock.dividend.data.repository.HoldingAction
 import com.stock.dividend.data.repository.LivingExpenseRepository
+import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -38,6 +42,7 @@ class PortfolioViewModelTest {
     private val livingExpenseRepository: LivingExpenseRepository = mockk()
     private val transactionDao: TransactionDao = mockk()
     private val notificationCheckCoordinator: NotificationCheckCoordinator = mockk(relaxed = true)
+    private val notificationRuleRepository: NotificationRuleRepository = mockk()
     private val context: Context = mockk(relaxed = true)
     private val prefs: SharedPreferences = mockk(relaxed = true)
     private val prefsEditor: SharedPreferences.Editor = mockk(relaxed = true) {
@@ -54,6 +59,8 @@ class PortfolioViewModelTest {
         every { prefs.edit() } returns prefsEditor
         every { prefs.getLong("last_portfolio_refresh_ms", 0L) } returns 0L
         every { prefs.contains("portfolio_total_assets") } returns false
+        every { notificationRuleRepository.observeEvalThresholds() } returns
+            MutableStateFlow(DividendThresholds())
         every { stockRepository.observeAllStocks() } returns stocksFlow
         every { stockRepository.observeAllStockTags() } returns MutableStateFlow(emptyList())
         every { stockRepository.observeAllTags() } returns MutableStateFlow(emptyList())
@@ -63,6 +70,7 @@ class PortfolioViewModelTest {
         coEvery { stockRepository.getIndustryTargets() } returns emptyList()
         coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
         coEvery { stockRepository.getCachedPrices(any()) } returns emptyMap()
+        coEvery { stockRepository.fetchBoll(any()) } returns null
         coEvery { transactionDao.getByStock(any()) } returns emptyList()
     }
 
@@ -451,12 +459,137 @@ class PortfolioViewModelTest {
         assertThat(viewModel.uiState.value.deletedStock).isNull()
     }
 
+    // ── loadBoll：按需懒加载周线 BOLL 带 ──────────────────────────────
+
+    @Test
+    fun `loadBoll fetches band and exposes it via uiState`() = runTest {
+        val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        coEvery { stockRepository.fetchBoll("sh.600036") } returns band
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.loadBoll("sh.600036")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.stockBands["sh.600036"]).isEqualTo(band)
+    }
+
+    @Test
+    fun `loadBoll caches result and does not refetch on repeat call`() = runTest {
+        val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        coEvery { stockRepository.fetchBoll("sh.600036") } returns band
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.loadBoll("sh.600036")
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.loadBoll("sh.600036") // 重复调用，应命中缓存不重发请求
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { stockRepository.fetchBoll("sh.600036") }
+    }
+
+    @Test
+    fun `loadBoll caches null on failure to prevent retry storm`() = runTest {
+        coEvery { stockRepository.fetchBoll("sh.600036") } throws java.io.IOException("down")
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.loadBoll("sh.600036")
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.loadBoll("sh.600036") // 失败后再次调用，应被缓存(null)拦截
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 失败也算「已尝试」，写入 null；重复调用不应再次发请求
+        assertThat(viewModel.uiState.value.stockBands["sh.600036"]).isNull()
+        coVerify(exactly = 1) { stockRepository.fetchBoll("sh.600036") }
+    }
+
+    // ── evaluateVisibleHoldings：一键评估筛选后的持仓 ─────────────────
+
+    @Test
+    fun `evaluateVisibleHoldings sets isEvaluating then produces sorted results`() = runTest {
+        val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        stocksFlow.value = listOf(
+            stock("sh.600036", shares = 100, costPerShare = 10.0, industry = "银行"),
+            stock("sz.000001", shares = 200, costPerShare = 5.0, industry = "银行")
+        )
+        coEvery { stockRepository.fetchBoll("sh.600036") } returns band
+        coEvery { stockRepository.fetchBoll("sz.000001") } returns null // 数据不足
+        // 给 sh.600036 一个现价 + 股息
+        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(
+            listOf(dividend("sh.600036", 0.50))
+        )
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sh.600036" to 8.8)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.evaluateVisibleHoldings()
+        // 评估中应置 isEvaluating=true（在协程 launch 后、awaitAll 完成前）
+        // advanceUntilIdle 后应完成
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertThat(state.isEvaluating).isFalse()
+        assertThat(state.evaluation).isNotNull()
+        val eval = state.evaluation!!
+        // sh.600036: price 8.8 < lower 9 → BUY；sz.000001: band null → INSUFFICIENT_DATA
+        assertThat(eval.map { it.code to it.action }).containsExactly(
+            "sh.600036" to HoldingAction.BUY,
+            "sz.000001" to HoldingAction.INSUFFICIENT_DATA
+        )
+        // 排序：BUY 在 INSUFFICIENT_DATA 之前
+        assertThat(eval.first().action).isEqualTo(HoldingAction.BUY)
+    }
+
+    @Test
+    fun `evaluateVisibleHoldings skips when no visible items`() = runTest {
+        stocksFlow.value = emptyList()
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.evaluateVisibleHoldings()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val eval = viewModel.uiState.value.evaluation
+        assertThat(eval).isNotNull()
+        assertThat(eval).isEmpty()
+    }
+
+    @Test
+    fun `evaluateVisibleHoldings respects custom thresholds`() = runTest {
+        val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        stocksFlow.value = listOf(stock("sh.600036", shares = 100, costPerShare = 10.0))
+        coEvery { stockRepository.fetchBoll("sh.600036") } returns band
+        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(
+            listOf(dividend("sh.600036", 0.22)) // yield ~2.5% at price 8.8
+        )
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sh.600036" to 8.8)
+        // 严格门槛：min=3 → 2.5% 应降级 HOLD
+        every { notificationRuleRepository.observeEvalThresholds() } returns
+            MutableStateFlow(DividendThresholds(minYieldPercent = 3.0, boostYieldPercent = 6.0))
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.evaluateVisibleHoldings()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val eval = viewModel.uiState.value.evaluation!!
+        assertThat(eval.first().action).isEqualTo(HoldingAction.HOLD)
+    }
+
     private fun createViewModel() = PortfolioViewModel(
         stockRepository,
         dividendDao,
         livingExpenseRepository,
         transactionDao,
         notificationCheckCoordinator,
+        notificationRuleRepository,
         context
     )
 
@@ -476,5 +609,12 @@ class PortfolioViewModelTest {
         targetWeight = targetWeight,
         industry = industry,
         yieldPeriod = yieldPeriod
+    )
+
+    private fun dividend(stockCode: String, cashPerShare: Double) = DividendEntity(
+        id = "${stockCode}_2025",
+        stockCode = stockCode,
+        reportDate = "2025-12-31",
+        cashPerShare = cashPerShare
     )
 }
