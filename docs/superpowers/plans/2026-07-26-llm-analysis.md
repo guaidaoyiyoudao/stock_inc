@@ -798,9 +798,16 @@ class LlmPromptBuilderTest {
         buySignals = emptyList()
     )
 
+    private fun prompt(
+        stocks: List<EvaluatedStock>,
+        signals: PortfolioSignals = noSignals,
+        daily: Map<String, BollBand?> = emptyMap(),
+        monthly: Map<String, BollBand?> = emptyMap(),
+    ) = LlmPromptBuilder.build(stocks, daily, monthly, signals, DividendThresholds())
+
     @Test
     fun `system prompt states JSON schema and constraints`() {
-        val p = LlmPromptBuilder.build(listOf(stock("600036")), noSignals, DividendThresholds())
+        val p = prompt(listOf(stock("600036")))
         assertThat(p.system).contains("overview")
         assertThat(p.system).contains("stockComments")
         assertThat(p.system).contains("risks")
@@ -809,7 +816,7 @@ class LlmPromptBuilderTest {
 
     @Test
     fun `user message includes each stock code action and metrics`() {
-        val p = LlmPromptBuilder.build(listOf(stock("600036")), noSignals, DividendThresholds())
+        val p = prompt(listOf(stock("600036")))
         assertThat(p.user).contains("600036")
         assertThat(p.user).contains("买")
         assertThat(p.user).contains("4.2")
@@ -821,7 +828,7 @@ class LlmPromptBuilderTest {
             positionControl = PositionControlSignal(true, 0.6, 1.5, 15),
             buySignals = emptyList()
         )
-        val p = LlmPromptBuilder.build(listOf(stock("600036")), sig, DividendThresholds())
+        val p = prompt(listOf(stock("600036")), sig)
         assertThat(p.user).contains("15")
         assertThat(p.user).contains("控仓")
     }
@@ -834,21 +841,39 @@ class LlmPromptBuilderTest {
                 MultiTimeframeBuySignal("600036", true, true, true, true)
             )
         )
-        val p = LlmPromptBuilder.build(listOf(stock("600036")), sig, DividendThresholds())
+        val p = prompt(listOf(stock("600036")), sig)
         assertThat(p.user).contains("600036")
         assertThat(p.user).contains("共振")
     }
 
     @Test
     fun `user message excludes cost basis`() {
-        val p = LlmPromptBuilder.build(listOf(stock("600036")), noSignals, DividendThresholds())
+        val p = prompt(listOf(stock("600036")))
         assertThat(p.user).doesNotContain("成本")
         assertThat(p.user).doesNotContain("cost")
     }
 
     @Test
+    fun `three-period positions appear when bands present`() {
+        // price 9.5；日 band(9..11)→距下轨 25%；周 priceVsLower=0.1→10%；月 band middle=12→<中轨
+        val daily = mapOf("600036" to BollBand(middle = 10.0, upper = 11.0, lower = 9.0))
+        val monthly = mapOf("600036" to BollBand(middle = 12.0, upper = 14.0, lower = 10.0))
+        val s = stock("600036").copy(currentPrice = 9.5, bollBand = BollBand(10.0, 11.0, 9.0))
+        val p = prompt(listOf(s), daily = daily, monthly = monthly)
+        assertThat(p.user).contains("日距下轨")
+        assertThat(p.user).contains("周距下轨")
+        assertThat(p.user).contains("月距下轨")
+    }
+
+    @Test
+    fun `missing bands show dash for that period`() {
+        val p = prompt(listOf(stock("600036")))  // 空 daily/monthly map
+        assertThat(p.user).contains("日距下轨 —")
+    }
+
+    @Test
     fun `empty stocks still produces valid prompt`() {
-        val p = LlmPromptBuilder.build(emptyList(), noSignals, DividendThresholds())
+        val p = prompt(emptyList())
         assertThat(p.system).isNotEmpty()
         assertThat(p.user).isNotEmpty()
     }
@@ -876,9 +901,11 @@ object LlmPromptBuilder {
 
     fun build(
         evaluatedStocks: List<EvaluatedStock>,
+        dailyBands: Map<String, BollBand?>,
+        monthlyBands: Map<String, BollBand?>,
         signals: PortfolioSignals,
         thresholds: DividendThresholds,
-    ): LlmPrompt = LlmPrompt(SYSTEM, buildUser(evaluatedStocks, signals, thresholds))
+    ): LlmPrompt = LlmPrompt(SYSTEM, buildUser(evaluatedStocks, dailyBands, monthlyBands, signals, thresholds))
 
     private const val SYSTEM = """
 你是一位稳健、客观的中文分红股投资分析助手。
@@ -890,7 +917,7 @@ object LlmPromptBuilder {
 - action=买：价格处于周线 BOLL 下轨附近（偏低），且股息率达门槛
 - action=卖：价格处于周线 BOLL 上轨附近（偏高）
 - action=持有：价格在中轨附近或股息率不足以触发买
-- 距下轨%：0=在下轨（便宜），100=在上轨（贵）
+- 距下轨%：0=在下轨（便宜），100=在上轨（贵）；每只股给出 日/周/月 三周期的距下轨%，据此判断多周期共振
 - 股息率%：年现金分红 / 现价
 - 仓位控制信号：多数股票抵达上轨 + 整体股息偏低 → 建议控仓、现金 ≥ 目标%
 - 三周期共振买点：日下轨 + 周下轨 + 月中轨以下 同时成立
@@ -909,6 +936,8 @@ object LlmPromptBuilder {
 
     private fun buildUser(
         stocks: List<EvaluatedStock>,
+        dailyBands: Map<String, BollBand?>,
+        monthlyBands: Map<String, BollBand?>,
         signals: PortfolioSignals,
         thresholds: DividendThresholds,
     ): String {
@@ -923,8 +952,11 @@ object LlmPromptBuilder {
                 HoldingAction.HOLD -> "持有"
                 HoldingAction.INSUFFICIENT_DATA -> "数据不足"
             }
-            sb.append("- ${s.code} ${s.name} [${s.industry}]：$actionZh，距下轨 ${(s.priceVsLower * 100).toInt()}%")
-            sb.append("，股息率 ${s.dividendYield?.let { "${"%.1".format(it)}%" } ?: "—"}\n")
+            val daily = ratioVsLower(s.currentPrice, dailyBands[s.code])
+            val weekly = if (s.priceVsLower.isFinite()) "${(s.priceVsLower * 100).toInt()}%" else "—"
+            val monthly = ratioVsLower(s.currentPrice, monthlyBands[s.code])
+            sb.append("- ${s.code} ${s.name} [${s.industry}]：$actionZh，股息率 ${s.dividendYield?.let { "${"%.1".format(it)}%" } ?: "—"}")
+            sb.append(" | 日距下轨 $daily / 周距下轨 $weekly / 月距下轨 $monthly\n")
         }
         sb.append("【策略信号】\n")
         val pc = signals.positionControl
@@ -940,13 +972,20 @@ object LlmPromptBuilder {
         }
         return sb.toString()
     }
+
+    /** (price - lower) / (upper - lower) → "X%"，clamp 0..100；band/price 无效返回 "—"。 */
+    private fun ratioVsLower(price: Double?, band: BollBand?): String {
+        if (price == null || price <= 0.0 || band == null || band.upper <= band.lower) return "—"
+        val r = ((price - band.lower) / (band.upper - band.lower) * 100).toInt().coerceIn(0, 100)
+        return "$r%"
+    }
 }
 ```
 
 - [ ] **Step 4: Run tests to verify pass**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.LlmPromptBuilderTest"`
-Expected: PASS（6 tests）
+Expected: PASS（8 tests）
 
 - [ ] **Step 5: Commit**
 
@@ -1143,14 +1182,14 @@ class LlmAnalysisRepositoryTest {
     @Test
     fun `returns NotConfigured when key missing`() = runTest {
         val r = repo(LlmConfig("https://x/", "", "m"), api { _, _, _ -> resp(""""x"""") })
-            .analyze(listOf(stock), signals, DividendThresholds())
+            .analyze(listOf(stock), emptyMap(), emptyMap(), signals, DividendThresholds())
         assertThat(r).isInstanceOf(LlmAnalysisResult.NotConfigured::class.java)
     }
 
     @Test
     fun `returns NotConfigured when stocks empty`() = runTest {
         val r = repo(LlmConfig("https://x/", "k", "m"), api { _, _, _ -> resp(""""x"""") })
-            .analyze(emptyList(), signals, DividendThresholds())
+            .analyze(emptyList(), emptyMap(), emptyMap(), signals, DividendThresholds())
         assertThat(r).isInstanceOf(LlmAnalysisResult.NotConfigured::class.java)
     }
 
@@ -1158,7 +1197,7 @@ class LlmAnalysisRepositoryTest {
     fun `returns Success on valid response`() = runTest {
         val api = api { _, _, _ -> resp("""{"overview":"ok","stockComments":{},"risks":[]}""") }
         val r = repo(LlmConfig("https://api.deepseek.com/v1/", "k", "deepseek-chat"), api)
-            .analyze(listOf(stock), signals, DividendThresholds())
+            .analyze(listOf(stock), emptyMap(), emptyMap(), signals, DividendThresholds())
         assertThat(r).isInstanceOf(LlmAnalysisResult.Success::class.java)
         assertThat((r as LlmAnalysisResult.Success).analysis.overview).isEqualTo("ok")
     }
@@ -1166,14 +1205,14 @@ class LlmAnalysisRepositoryTest {
     @Test
     fun `http 401 maps to API key error`() = runTest {
         val api = api { _, _, _ -> throw httpErr(401) }
-        val r = repo(LlmConfig("https://x/", "k", "m"), api).analyze(listOf(stock), signals, DividendThresholds())
+        val r = repo(LlmConfig("https://x/", "k", "m"), api).analyze(listOf(stock), emptyMap(), emptyMap(), signals, DividendThresholds())
         assertThat((r as LlmAnalysisResult.Error).message).isEqualTo("API key 无效")
     }
 
     @Test
     fun `io exception maps to network error`() = runTest {
         val api = api { _, _, _ -> throw java.io.IOException("timeout") }
-        val r = repo(LlmConfig("https://x/", "k", "m"), api).analyze(listOf(stock), signals, DividendThresholds())
+        val r = repo(LlmConfig("https://x/", "k", "m"), api).analyze(listOf(stock), emptyMap(), emptyMap(), signals, DividendThresholds())
         assertThat((r as LlmAnalysisResult.Error).message).contains("网络")
     }
 
@@ -1225,6 +1264,8 @@ class LlmAnalysisRepository @Inject constructor(
 ) {
     suspend fun analyze(
         evaluatedStocks: List<EvaluatedStock>,
+        dailyBands: Map<String, BollBand?>,
+        monthlyBands: Map<String, BollBand?>,
         signals: PortfolioSignals,
         thresholds: DividendThresholds,
     ): LlmAnalysisResult {
@@ -1232,7 +1273,7 @@ class LlmAnalysisRepository @Inject constructor(
         val config = configSource.observeConfig().first()
         if (!config.isComplete) return LlmAnalysisResult.NotConfigured
 
-        val prompt = LlmPromptBuilder.build(evaluatedStocks, signals, thresholds)
+        val prompt = LlmPromptBuilder.build(evaluatedStocks, dailyBands, monthlyBands, signals, thresholds)
         val url = config.baseUrl.trimEnd('/') + "/chat/completions"
         val request = LlmChatRequest(
             model = config.model,
@@ -1285,6 +1326,10 @@ git commit -m "feat(llm): LlmAnalysisRepository 编排 + 测试"
 ```kotlin
     /** 组合策略信号（评估后产出）。 */
     val portfolioSignals: PortfolioSignals? = null,
+    /** 日线 BOLL（评估期产出，供 prompt 三周期位置用）。 */
+    val dailyBands: Map<String, BollBand?> = emptyMap(),
+    /** 月线 BOLL（评估期产出，供 prompt 三周期位置用）。 */
+    val monthlyBands: Map<String, BollBand?> = emptyMap(),
     /** LLM 解读状态。 */
     val llmAnalysis: LlmAnalysisState = LlmAnalysisState.Idle
 ```
@@ -1315,12 +1360,14 @@ import com.stock.dividend.data.repository.PortfolioSignals
             if (visible.isEmpty()) {
                 _uiState.update {
                     it.copy(isEvaluating = false, evaluation = emptyList(),
-                        portfolioSignals = null, llmAnalysis = LlmAnalysisState.Idle)
+                        portfolioSignals = null, dailyBands = emptyMap(), monthlyBands = emptyMap(),
+                        llmAnalysis = LlmAnalysisState.Idle)
                 }
                 return@launch
             }
             _uiState.update {
-                it.copy(isEvaluating = true, llmAnalysis = LlmAnalysisState.Idle, portfolioSignals = null)
+                it.copy(isEvaluating = true, llmAnalysis = LlmAnalysisState.Idle,
+                    portfolioSignals = null, dailyBands = emptyMap(), monthlyBands = emptyMap())
             }
             val thresholds = _evalThresholds.value
             val semaphore = Semaphore(3)  // 每只股 3 次 BOLL 请求，降到 3 并发防限流
@@ -1358,7 +1405,8 @@ import com.stock.dividend.data.repository.PortfolioSignals
             val monthlyBands = rows.associate { it.stock.code to it.monthly }
             val signals = PortfolioAdvisor.evaluate(sorted, dailyBands, monthlyBands)
             _uiState.update {
-                it.copy(isEvaluating = false, evaluation = sorted, portfolioSignals = signals)
+                it.copy(isEvaluating = false, evaluation = sorted,
+                    portfolioSignals = signals, dailyBands = dailyBands, monthlyBands = monthlyBands)
             }
         }
     }
@@ -1375,7 +1423,8 @@ import com.stock.dividend.data.repository.PortfolioSignals
     fun clearEvaluation() {
         _uiState.update {
             it.copy(evaluation = null, isEvaluating = false,
-                portfolioSignals = null, llmAnalysis = LlmAnalysisState.Idle)
+                portfolioSignals = null, dailyBands = emptyMap(), monthlyBands = emptyMap(),
+                llmAnalysis = LlmAnalysisState.Idle)
         }
     }
 ```
@@ -1390,9 +1439,11 @@ import com.stock.dividend.data.repository.PortfolioSignals
         val evaluation = current.evaluation
         val signals = current.portfolioSignals
         if (evaluation.isNullOrEmpty() || signals == null) return  // 按钮已禁用，防御
+        val dailyBands = current.dailyBands
+        val monthlyBands = current.monthlyBands
         viewModelScope.launch {
             _uiState.update { it.copy(llmAnalysis = LlmAnalysisState.Loading) }
-            val result = llmAnalysisRepository.analyze(evaluation, signals, _evalThresholds.value)
+            val result = llmAnalysisRepository.analyze(evaluation, dailyBands, monthlyBands, signals, _evalThresholds.value)
             val state = when (result) {
                 is LlmAnalysisResult.Success -> LlmAnalysisState.Success(result.analysis)
                 LlmAnalysisResult.NotConfigured -> LlmAnalysisState.NotConfigured
@@ -1694,6 +1745,6 @@ git commit -m "chore(llm): 手动验证修复"
 
 - **Spec 覆盖**：多周期 BOLL（T1-3）、PortfolioAdvisor 仓位+共振（T4）、LLM 配置/预设/状态（T5）、配置仓储（T6）、网络层 DTO+Api+DI（T7）、prompt（T8）、parser（T9）、编排（T10）、VM 集成（T11）、UI 信号+AI（T12）、设置（T13）、验证（T14）——spec §3-§9 全覆盖。
 - **占位符**：T10 测试中标注的 `TestConfigSource` / SAM→object 改写已给出完整代码，无 TBD。
-- **类型一致**：`PortfolioAdvisor.evaluate(stocks, dailyBands, monthlyBands)` 在 T4/T11 一致；`LlmAnalysisRepository.analyze(evaluation, signals, thresholds)` 在 T10/T11 一致；`fetchBoll(code, period)` 在 T3/T11 一致；`LlmConfigSource` 接口在 T6/T10 一致。
+- **类型一致**：`PortfolioAdvisor.evaluate(stocks, dailyBands, monthlyBands)` 在 T4/T11 一致；`LlmAnalysisRepository.analyze(evaluation, dailyBands, monthlyBands, signals, thresholds)` 在 T10/T11 一致；`LlmPromptBuilder.build(stocks, dailyBands, monthlyBands, signals, thresholds)` 在 T8/T10 一致；`fetchBoll(code, period)` 在 T3/T11 一致；`LlmConfigSource` 接口在 T6/T10 一致。
 - **已知偏离 spec**：T11 把日/月 BOLL 作为评估期局部 map（不入 UiState），比 spec §4.1 的 `_stockBandsByPeriod` 更简单且不违反非目标（不缓存多周期）。
 ```

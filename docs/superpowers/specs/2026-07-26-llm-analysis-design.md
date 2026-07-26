@@ -194,11 +194,11 @@ object PortfolioAdvisor {
     fun evaluate(
         evaluatedStocks: List<EvaluatedStock>,
         dailyBands: Map<String, BollBand?>,
-        weeklyBands: Map<String, BollBand?>,
         monthlyBands: Map<String, BollBand?>,
         config: PortfolioAdvisorConfig = PortfolioAdvisorConfig(),
     ): PortfolioSignals
 }
+// 周线 band 复用 EvaluatedStock.bollBand（评估时已写入），避免重复传参。
 ```
 
 **仓位控制判定**：
@@ -225,6 +225,8 @@ object LlmPromptBuilder {
     data class LlmPrompt(val system: String, val user: String)
     fun build(
         evaluatedStocks: List<EvaluatedStock>,
+        dailyBands: Map<String, BollBand?>,
+        monthlyBands: Map<String, BollBand?>,
         signals: PortfolioSignals,
         thresholds: DividendThresholds,
     ): LlmPrompt
@@ -242,7 +244,7 @@ object LlmPromptBuilder {
 - action=买：价格处于周线 BOLL 下轨附近（偏低），且股息率达门槛
 - action=卖：价格处于周线 BOLL 上轨附近（偏高）
 - action=持有：价格在中轨附近或股息率不足以触发买
-- 距下轨%：0=在下轨（便宜），100=在上轨（贵）
+- 距下轨%：0=在下轨（便宜），100=在上轨（贵）；每只股给出 日/周/月 **三个周期**的距下轨%，供你判断多周期共振
 - 股息率%：年现金分红 / 现价
 - 仓位控制信号：多数股票抵达上轨 + 整体股息偏低 → 建议控仓、现金 ≥ 15%
 - 三周期共振买点：日下轨 + 周下轨 + 月中轨以下 同时成立
@@ -263,7 +265,7 @@ object LlmPromptBuilder {
 6. 风险要点具体，不泛泛而谈；不复述规则逻辑。
 ```
 
-**user message**：序列化每只股的 `code/name/industry/action/距下轨%/股息率%/reasons` + `signals`（仓位信号数值 + 共振买点 code 列表）+ `thresholds`。**不喂**成本价、持仓金额、账户信息。
+**user message**：序列化每只股的 `code/name/industry/action/股息率%/reasons` + **三周期位置**（`日距下轨% / 周距下轨% / 月距下轨%`，由 `dailyBands`/`monthlyBands` + `EvaluatedStock.currentPrice`/`priceVsLower` 算出，band 缺失显示 `—`）+ `signals`（仓位信号数值 + 共振买点 code 列表）+ `thresholds`。**不喂**成本价、持仓金额、账户信息。
 
 ### 4.6 响应解析（纯函数）
 
@@ -285,6 +287,8 @@ class LlmAnalysisRepository(
 ) {
     suspend fun analyze(
         evaluatedStocks: List<EvaluatedStock>,
+        dailyBands: Map<String, BollBand?>,
+        monthlyBands: Map<String, BollBand?>,
         signals: PortfolioSignals,
         thresholds: DividendThresholds,
     ): LlmAnalysisResult
@@ -297,10 +301,10 @@ class LlmAnalysisRepository(
 ### 4.8 ViewModel 集成
 
 `PortfolioViewModel` 扩展：
-- `PortfolioUiState` 加 `llmAnalysis: LlmAnalysisState = Idle`、`portfolioSignals: PortfolioSignals? = null`。
+- `PortfolioUiState` 加 `llmAnalysis: LlmAnalysisState = Idle`、`portfolioSignals: PortfolioSignals? = null`、`dailyBands: Map<String, BollBand?> = emptyMap()`、`monthlyBands: Map<String, BollBand?> = emptyMap()`（日/月 band 评估期产出，供 prompt 用三周期位置）。
 - 注入 `LlmAnalysisRepository`。
-- **`evaluateVisibleHoldings()` 扩展**：评估时除周线 BOLL 外，并发拉**日 / 月 BOLL**（`Semaphore` 降到 **3** 并发，因每只股从 1 请求变 3 请求），评估完调 `PortfolioAdvisor.evaluate` → 写入 `portfolioSignals`。
-- `fun analyzeWithLlm()`：取 `evaluation` + `portfolioSignals`；**为 null 或空时不调用 repository**（按钮禁用，防御性早返回），否则调 `repository.analyze`，`result` → `LlmAnalysisState`。
+- **`evaluateVisibleHoldings()` 扩展**：评估时除周线 BOLL 外，并发拉**日 / 月 BOLL**（`Semaphore` 降到 **3** 并发，因每只股从 1 请求变 3 请求）；评估完调 `PortfolioAdvisor.evaluate(sorted, dailyBands, monthlyBands)` → 一并写入 `portfolioSignals`、`dailyBands`、`monthlyBands`。
+- `fun analyzeWithLlm()`：取 `evaluation` + `portfolioSignals` + `dailyBands` + `monthlyBands`；**为 null 或空时不调用 repository**（按钮禁用，防御性早返回），否则调 `repository.analyze(evaluation, dailyBands, monthlyBands, signals, thresholds)`，`result` → `LlmAnalysisState`。
 - `fun clearLlmAnalysis()`。
 - `evaluateVisibleHoldings()` / `clearEvaluation()` 触发时清空 `llmAnalysis` 与 `portfolioSignals`。
 
@@ -328,14 +332,14 @@ class LlmAnalysisRepository(
 一键评估（evaluateVisibleHoldings）
   → 对每只股并发(Semaphore=3) 拉 日/周/月 BOLL
   → HoldingRecommender.recommend(周线)  → EvaluatedStock 列表（现有）
-  → PortfolioAdvisor.evaluate(日/周/月 bands)  → PortfolioSignals（新）
-  → uiState.evaluation + uiState.portfolioSignals
+  → PortfolioAdvisor.evaluate(dailyBands, monthlyBands)  → PortfolioSignals（新）
+  → uiState.evaluation + uiState.portfolioSignals + uiState.dailyBands + uiState.monthlyBands
 
 点"AI 解读"
   → analyzeWithLlm()
-  → LlmAnalysisRepository.analyze(evaluation, signals, thresholds)
+  → LlmAnalysisRepository.analyze(evaluation, dailyBands, monthlyBands, signals, thresholds)
       → 读 LlmConfig → !isComplete? → NotConfigured
-      → LlmPromptBuilder.build(evaluation, signals, thresholds)
+      → LlmPromptBuilder.build(evaluation, dailyBands, monthlyBands, signals, thresholds)
       → LlmApi.chatCompletions(@Url, body)
       → LlmAnalysisParser.parse()
   → 映射 LlmAnalysisState → 渲染
