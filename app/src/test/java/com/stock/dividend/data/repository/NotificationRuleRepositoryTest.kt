@@ -2,12 +2,16 @@ package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.NotificationRuleDao
+import com.stock.dividend.data.local.entity.EVAL_BOOST_YIELD
+import com.stock.dividend.data.local.entity.EVAL_MIN_YIELD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -100,6 +104,68 @@ class NotificationRuleRepositoryTest {
         val result = repository.getEnabledStockRules(listOf("sz.000001"))
 
         assertThat(result["sz.000001"]).containsExactly(priceRule, yieldRule).inOrder()
+    }
+
+    // ── 评估门槛 (eval thresholds) ─────────────────────────────────
+
+    @Test
+    fun `observeEvalThresholds returns defaults when no rows exist`() = runTest {
+        coEvery { dao.observeGlobalRule(EVAL_MIN_YIELD) } returns flowOf(null)
+        coEvery { dao.observeGlobalRule(EVAL_BOOST_YIELD) } returns flowOf(null)
+
+        val thresholds = repository.observeEvalThresholds().first()
+
+        assertThat(thresholds.minYieldPercent).isEqualTo(DividendThresholds.DEFAULT_MIN_YIELD)
+        assertThat(thresholds.boostYieldPercent).isEqualTo(DividendThresholds.DEFAULT_BOOST_YIELD)
+    }
+
+    @Test
+    fun `observeEvalThresholds reads persisted rows`() = runTest {
+        coEvery { dao.observeGlobalRule(EVAL_MIN_YIELD) } returns flowOf(
+            rule(id = "eval-min", type = EVAL_MIN_YIELD, stockCode = null, threshold = 3.0)
+        )
+        coEvery { dao.observeGlobalRule(EVAL_BOOST_YIELD) } returns flowOf(
+            rule(id = "eval-boost", type = EVAL_BOOST_YIELD, stockCode = null, threshold = 6.5)
+        )
+
+        val thresholds = repository.observeEvalThresholds().first()
+
+        assertThat(thresholds.minYieldPercent).isEqualTo(3.0)
+        assertThat(thresholds.boostYieldPercent).isEqualTo(6.5)
+    }
+
+    @Test
+    fun `observeEvalThresholds falls back to default when only one row exists`() = runTest {
+        coEvery { dao.observeGlobalRule(EVAL_MIN_YIELD) } returns flowOf(
+            rule(id = "eval-min", type = EVAL_MIN_YIELD, stockCode = null, threshold = 4.0)
+        )
+        coEvery { dao.observeGlobalRule(EVAL_BOOST_YIELD) } returns flowOf(null)
+
+        val thresholds = repository.observeEvalThresholds().first()
+
+        assertThat(thresholds.minYieldPercent).isEqualTo(4.0)
+        assertThat(thresholds.boostYieldPercent).isEqualTo(DividendThresholds.DEFAULT_BOOST_YIELD)
+    }
+
+    @Test
+    fun `saveEvalThresholds writes both rows with stable ids`() = runTest {
+        coEvery { dao.getGlobalRule(EVAL_MIN_YIELD) } returns null
+        coEvery { dao.getGlobalRule(EVAL_BOOST_YIELD) } returns null
+
+        repository.saveEvalThresholds(minYieldPercent = 2.5, boostYieldPercent = 5.5, now = 1000L)
+
+        coVerify {
+            dao.upsert(match {
+                it.type == EVAL_MIN_YIELD && it.stockCode == null &&
+                    it.thresholdPercent == 2.5 && it.id == "global-eval-min-yield"
+            })
+        }
+        coVerify {
+            dao.upsert(match {
+                it.type == EVAL_BOOST_YIELD && it.stockCode == null &&
+                    it.thresholdPercent == 5.5 && it.id == "global-eval-boost-yield"
+            })
+        }
     }
 
     private fun rule(
