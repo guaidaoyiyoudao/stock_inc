@@ -10,23 +10,29 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,6 +49,8 @@ import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.data.repository.EvaluatedStock
+import com.stock.dividend.data.repository.LlmAnalysisState
+import com.stock.dividend.data.repository.PortfolioSignals
 import com.stock.dividend.viewmodel.PortfolioViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,8 +86,11 @@ fun PortfolioEvaluationScreen(
             else -> EvaluationContent(
                 Modifier.padding(padding),
                 evaluated = uiState.evaluation!!,
+                portfolioSignals = uiState.portfolioSignals,
+                llmAnalysis = uiState.llmAnalysis,
                 onReevaluate = viewModel::evaluateVisibleHoldings,
-                onClear = viewModel::clearEvaluation
+                onClear = viewModel::clearEvaluation,
+                onAnalyze = viewModel::analyzeWithLlm
             )
         }
     }
@@ -143,10 +154,14 @@ private fun EmptyEvaluationState(
 private fun EvaluationContent(
     modifier: Modifier,
     evaluated: List<EvaluatedStock>,
+    portfolioSignals: PortfolioSignals?,
+    llmAnalysis: LlmAnalysisState,
     onReevaluate: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onAnalyze: () -> Unit
 ) {
     val counts = evaluated.groupBy { it.action }
+    val aiComments = (llmAnalysis as? LlmAnalysisState.Success)?.analysis?.stockComments ?: emptyMap()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(
@@ -158,6 +173,16 @@ private fun EvaluationContent(
         verticalArrangement = Arrangement.spacedBy(AppCardDefaults.SectionSpacing)
     ) {
         item { EvaluationSummary(counts) }
+        portfolioSignals?.let { signals ->
+            item { PortfolioSignalsSection(signals) }
+        }
+        item {
+            LlmAnalysisSection(
+                state = llmAnalysis,
+                onAnalyze = onAnalyze,
+                onRetry = onAnalyze
+            )
+        }
         // 按 action 优先级分组渲染
         listOf(HoldingAction.BUY, HoldingAction.HOLD, HoldingAction.SELL, HoldingAction.INSUFFICIENT_DATA)
             .filter { counts[it]?.isNotEmpty() == true }
@@ -166,7 +191,7 @@ private fun EvaluationContent(
                     SectionHeader(action)
                 }
                 items(items = counts[action].orEmpty(), key = { it.code }) { stock ->
-                    EvaluationCard(stock)
+                    EvaluationCard(stock, aiComments[stock.code])
                 }
             }
         item {
@@ -234,7 +259,7 @@ private fun SectionHeader(action: HoldingAction) {
 }
 
 @Composable
-private fun EvaluationCard(stock: EvaluatedStock) {
+private fun EvaluationCard(stock: EvaluatedStock, aiComment: String? = null) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -304,6 +329,13 @@ private fun EvaluationCard(stock: EvaluatedStock) {
                     )
                 }
             }
+            if (!aiComment.isNullOrEmpty()) {
+                Text(
+                    "AI：$aiComment",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
@@ -313,6 +345,105 @@ private fun actionLabel(a: HoldingAction) = when (a) {
     HoldingAction.HOLD -> "持有"
     HoldingAction.SELL -> "卖"
     HoldingAction.INSUFFICIENT_DATA -> "数据不足"
+}
+
+@Composable
+private fun PortfolioSignalsSection(signals: PortfolioSignals) {
+    val pc = signals.positionControl
+    if (pc.triggered) {
+        Surface(
+            tonalElevation = 2.dp,
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.errorContainer,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text("⚠ 建议控制仓位", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "多数股票处于上轨（${"%.0f".format(pc.upperBandRatio * 100)}%），平均股息率 ${"%.1f".format(pc.avgDividendYield)}%。建议保留现金 ≥ ${pc.targetCashPercent}%。",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+    if (signals.buySignals.isNotEmpty()) {
+        Surface(
+            tonalElevation = 2.dp,
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text("▲ 三周期共振买点", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    signals.buySignals.joinToString("、") { it.code },
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LlmAnalysisSection(
+    state: LlmAnalysisState,
+    onAnalyze: () -> Unit,
+    onRetry: () -> Unit
+) {
+    when (state) {
+        is LlmAnalysisState.Success -> {
+            val a = state.analysis
+            ElevatedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("✨ AI 解读", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text(a.overview, style = MaterialTheme.typography.bodyMedium)
+                    if (a.risks.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        a.risks.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "仅供参考，买卖建议以规则评估为准。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        LlmAnalysisState.Loading -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("AI 分析中…")
+            }
+        }
+        is LlmAnalysisState.Error -> {
+            Column {
+                Text(state.message, color = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = onRetry) { Text("重试") }
+            }
+        }
+        LlmAnalysisState.NotConfigured -> {
+            Column {
+                OutlinedButton(onClick = onAnalyze, enabled = false) {
+                    Icon(Icons.Filled.AutoAwesome, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("AI 解读")
+                }
+                Text("需先在设置配置 LLM", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        LlmAnalysisState.Idle -> {
+            OutlinedButton(onClick = onAnalyze) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("AI 解读")
+            }
+        }
+    }
 }
 
 private fun actionTone(a: HoldingAction) = when (a) {
