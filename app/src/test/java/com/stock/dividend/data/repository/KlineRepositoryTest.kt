@@ -31,7 +31,7 @@ class KlineRepositoryTest {
 
     @Test
     fun `buildParam uses week type qfq adjust and sh tencent code`() {
-        val param = repository.buildParam("sh600036", weeks = 40)
+        val param = repository.buildParam("sh600036", KlinePeriod.WEEKLY, 40)
 
         // {code},week,{start},{end},{count},qfq
         assertThat(param).startsWith("sh600036,week,")
@@ -122,6 +122,13 @@ class KlineRepositoryTest {
         coEvery { tencentApi.getKline(any()) } throws java.io.IOException("down")
 
         assertThat(repository.fetchWeeklyCloses("sh.600036")).isEmpty()
+    }
+
+    @Test
+    fun `monthly buildParam uses month type and long lookback`() {
+        val param = repository.buildParam("sh600036", KlinePeriod.MONTHLY, 40)
+        assertThat(param).startsWith("sh600036,month,")
+        assertThat(param).endsWith(",640,qfq")
     }
 
     private fun klineResponse(rows: List<List<*>>): TencentKlineResponse = TencentKlineResponse(
