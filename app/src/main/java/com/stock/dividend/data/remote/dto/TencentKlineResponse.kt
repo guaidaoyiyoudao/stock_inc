@@ -19,7 +19,8 @@ data class TencentKlineResponse(
 ) {
     data class StockData(
         val qfqday: List<List<*>>?,
-        val qfqweek: List<List<*>>? = null
+        val qfqweek: List<List<*>>? = null,
+        val qfqmonth: List<List<*>>? = null
     )
 }
 
