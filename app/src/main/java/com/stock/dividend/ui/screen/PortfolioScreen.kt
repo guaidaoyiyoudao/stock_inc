@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.SnackbarDuration
@@ -42,20 +43,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -74,6 +82,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.ui.component.AppCardDefaults
+import com.stock.dividend.ui.component.BollPriceScale
 import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.DividendPriceScale
 import com.stock.dividend.ui.component.DividendSummaryCard
@@ -85,6 +94,7 @@ import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.ui.theme.FinanceGreen
 import com.stock.dividend.ui.theme.FinanceRed
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.viewmodel.PortfolioItem
 import com.stock.dividend.viewmodel.PortfolioUiState
 import com.stock.dividend.viewmodel.PortfolioViewModel
@@ -99,6 +109,7 @@ fun PortfolioScreen(
     onEditStock: (String) -> Unit,
     onImportFromScreenshot: () -> Unit,
     onFireCardClick: () -> Unit = {},
+    onNavigateToEvaluation: () -> Unit = {},
     viewModel: PortfolioViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -182,21 +193,29 @@ fun PortfolioScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (uiState.availableIndustries.isNotEmpty()) {
-                        FilterChipsRow(
-                            options = uiState.availableIndustries,
-                            selected = uiState.selectedIndustries,
-                            onToggle = viewModel::toggleIndustryFilter,
-                            onClear = viewModel::clearIndustryFilter
-                        )
-                    }
-                    if (uiState.availableTags.isNotEmpty()) {
-                        FilterChipsRow(
-                            options = uiState.availableTags,
-                            selected = uiState.selectedTags,
-                            onToggle = viewModel::toggleTagFilter,
-                            onClear = viewModel::clearTagFilter
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (uiState.availableIndustries.isNotEmpty()) {
+                            IndustryDropdown(
+                                options = uiState.availableIndustries,
+                                selected = uiState.selectedIndustries.firstOrNull(),
+                                onSelect = viewModel::setIndustryFilter,
+                                label = "行业",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (uiState.availableTags.isNotEmpty()) {
+                            TagDropdown(
+                                options = uiState.availableTags,
+                                selected = uiState.selectedTags.firstOrNull(),
+                                onSelect = viewModel::setTagFilter,
+                                label = "标签",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
@@ -231,6 +250,24 @@ fun PortfolioScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f)
                     )
+                    // 一键评估入口
+                    TextButton(
+                        onClick = {
+                            viewModel.evaluateVisibleHoldings()
+                            onNavigateToEvaluation()
+                        },
+                        enabled = !uiState.isEvaluating && uiState.filteredItems.isNotEmpty()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Analytics,
+                            contentDescription = null
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "一键评估",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                     // 添加股票入口（来自原自选 tab）
                     TextButton(onClick = onAddStockClick) {
                         Icon(
@@ -252,7 +289,9 @@ fun PortfolioScreen(
                         onEditWeight = { viewModel.showEditWeightDialog(item.code, item.targetWeight) },
                         onEditStock = { onEditStock(item.code) },
                         onDeleteStock = { viewModel.deleteStock(item.code) },
-                        latestYearlyDividend = uiState.stockForecasts[item.code]?.latestYearlyDividend
+                        latestYearlyDividend = uiState.stockForecasts[item.code]?.latestYearlyDividend,
+                        bollBand = uiState.stockBands[item.code],
+                        onLoadBoll = { viewModel.loadBoll(item.code) }
                     )
                 }
             }
@@ -281,6 +320,8 @@ fun PortfolioScreen(
                         marketValue = uiState.stockForecasts[stock.code]?.marketValue,
                         currentPrice = uiState.stockForecasts[stock.code]?.currentPrice,
                         latestYearlyDividend = uiState.stockForecasts[stock.code]?.latestYearlyDividend,
+                        bollBand = uiState.stockBands[stock.code],
+                        onLoadBoll = { viewModel.loadBoll(stock.code) },
                         onDismiss = { viewModel.deleteStock(stock) },
                         onClick = { onStockClick(stock.code) },
                         onEdit = { onEditStock(stock.code) }
@@ -434,9 +475,16 @@ private fun PortfolioHoldingCard(
     onClick: () -> Unit,
     onEditWeight: () -> Unit,
     latestYearlyDividend: Double?,
+    bollBand: BollBand?,
+    onLoadBoll: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
+    // 每张卡片独立切换「股息率 ↔ BOLL」，仅内存状态（不持久化）。
+    var showBoll by remember(item.code) { mutableStateOf(false) }
+    LaunchedEffect(showBoll) {
+        if (showBoll) onLoadBoll()
+    }
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -535,13 +583,38 @@ private fun PortfolioHoldingCard(
                 }
             }
 
-            // 股息率→目标价横轴（与自选股卡片一致）。
-            // 仅当现价与最新年度股息都有效时渲染（DividendPriceScale 内部已做空值/非正数短路）。
-            DividendPriceScale(
-                currentPrice = item.currentPrice,
-                latestYearlyDividend = latestYearlyDividend,
-                modifier = Modifier.padding(top = 12.dp)
-            )
+            // 坐标轴切换按钮 + 横轴主体（与自选股卡片一致）。
+            // showBoll=false → 股息率横轴；showBoll=true → 周线 BOLL 横轴（切换时按需懒加载）。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = { showBoll = !showBoll }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = if (showBoll) Icons.Default.ShowChart else Icons.Default.TrendingUp,
+                        contentDescription = if (showBoll) "切换到股息率横轴" else "切换到 BOLL 横轴",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            if (showBoll) {
+                BollPriceScale(
+                    currentPrice = item.currentPrice,
+                    band = bollBand,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            } else {
+                // 股息率→目标价横轴（与自选股卡片一致）。
+                // 仅当现价与最新年度股息都有效时渲染（DividendPriceScale 内部已做空值/非正数短路）。
+                DividendPriceScale(
+                    currentPrice = item.currentPrice,
+                    latestYearlyDividend = latestYearlyDividend,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
         }
     }
 }
@@ -703,7 +776,9 @@ private fun SwipeToDismissHoldingItem(
     onEditWeight: () -> Unit,
     onEditStock: () -> Unit,
     onDeleteStock: () -> Unit,
-    latestYearlyDividend: Double?
+    latestYearlyDividend: Double?,
+    bollBand: BollBand?,
+    onLoadBoll: () -> Unit
 ) {
     var showConfirmDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -750,7 +825,9 @@ private fun SwipeToDismissHoldingItem(
             item = item,
             onClick = onClick,
             onEditWeight = onEditWeight,
-            latestYearlyDividend = latestYearlyDividend
+            latestYearlyDividend = latestYearlyDividend,
+            bollBand = bollBand,
+            onLoadBoll = onLoadBoll
         )
     }
 
@@ -807,6 +884,8 @@ private fun SwipeToDismissWatchItem(
     marketValue: Double?,
     currentPrice: Double?,
     latestYearlyDividend: Double?,
+    bollBand: BollBand?,
+    onLoadBoll: () -> Unit,
     onDismiss: () -> Unit,
     onClick: () -> Unit,
     onEdit: () -> Unit
@@ -882,6 +961,8 @@ private fun SwipeToDismissWatchItem(
                 lastUpdated = stock.lastUpdated,
                 currentPrice = currentPrice,
                 latestYearlyDividend = latestYearlyDividend,
+                bollBand = bollBand,
+                onLoadBoll = onLoadBoll,
                 onClick = onClick,
                 isWatchOnly = true
             )
@@ -933,38 +1014,78 @@ private fun WatchActionButton(
 }
 
 /**
- * 单维度的筛选 Chip 横滚条。
- * - 首 chip 为「全部」，selected 为空时高亮（与其它 chip 互斥）。
- * - 选具体 chip 自动取消「全部」；点「全部」清空整组。
+ * 单选下拉框（行业 / 标签筛选共用）。
+ * - selected 为 null → 显示「全部」占位。
+ * - 下拉首项为「全部」，点击清空；其余项单选。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FilterChipsRow(
+private fun SingleSelectDropdown(
     options: List<String>,
-    selected: Set<String>,
-    onToggle: (String) -> Unit,
-    onClear: () -> Unit,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    label: String,
     modifier: Modifier = Modifier
 ) {
-    val isAll = selected.isEmpty()
-    LazyRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(vertical = 2.dp)
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier
     ) {
-        item {
-            androidx.compose.material3.FilterChip(
-                selected = isAll,
-                onClick = onClear,
-                label = { Text("全部", style = MaterialTheme.typography.labelMedium) }
+        OutlinedTextField(
+            value = selected ?: "全部",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            colors = OutlinedTextFieldDefaults.colors(
+                disabledTextColor = MaterialTheme.colorScheme.onSurface
+            ),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("全部") },
+                onClick = {
+                    onSelect(null)
+                    expanded = false
+                }
             )
-        }
-        items(items = options, key = { it }) { opt ->
-            androidx.compose.material3.FilterChip(
-                selected = opt in selected,
-                onClick = { onToggle(opt) },
-                label = { Text(opt, style = MaterialTheme.typography.labelMedium) }
-            )
+            options.forEach { opt ->
+                DropdownMenuItem(
+                    text = { Text(opt) },
+                    onClick = {
+                        onSelect(opt)
+                        expanded = false
+                    }
+                )
+            }
         }
     }
 }
+
+@Composable
+private fun IndustryDropdown(
+    options: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier
+) = SingleSelectDropdown(options, selected, onSelect, label, modifier)
+
+@Composable
+private fun TagDropdown(
+    options: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier
+) = SingleSelectDropdown(options, selected, onSelect, label, modifier)
 

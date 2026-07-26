@@ -29,6 +29,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.ui.navigation.Routes
 
 internal data class BottomNavItem(
@@ -131,7 +132,17 @@ fun MainScaffold(rootNavController: NavHostController) {
                     onStockClick = { code -> tabNavController.navigate("stockDetail/$code") },
                     onEditStock = { code -> tabNavController.navigate("editHolding/$code") },
                     onImportFromScreenshot = { tabNavController.navigate("portfolioImport") },
-                    onFireCardClick = { rootNavController.navigate(Routes.EXPENSE_COVERAGE) }
+                    onFireCardClick = { rootNavController.navigate(Routes.EXPENSE_COVERAGE) },
+                    onNavigateToEvaluation = { tabNavController.navigate("portfolioEvaluation") }
+                )
+            }
+            composable("portfolioEvaluation") {
+                val parentEntry = remember(it) {
+                    tabNavController.getBackStackEntry("portfolio")
+                }
+                PortfolioEvaluationScreen(
+                    onBack = { tabNavController.popBackStack() },
+                    viewModel = hiltViewModel(parentEntry)
                 )
             }
             composable("income") {
