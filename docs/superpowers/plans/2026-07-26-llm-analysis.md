@@ -146,6 +146,7 @@ class KlineRepository @Inject constructor(
         const val KLINE_COUNT = 640
         const val CLOSE_INDEX = 2
         const val BUFFER_FACTOR = 2
+        const val ADJUST_QFQ = "qfq"
     }
 }
 
@@ -158,19 +159,29 @@ private fun String.toTencentCode(): String? = when {
 private fun LocalDate.iso(): String = format(DateTimeFormatter.ISO_LOCAL_DATE)
 ```
 
-- [ ] **Step 2: 加单测验证 buildParam 周期与回看**
+- [ ] **Step 2: 更新现有 buildParam 测试 + 加月线测试**
 
-在 `KlineRepositoryTest.kt` 加：
+`KlineRepositoryTest.kt` 已存在（9 个测试，用旧 `buildParam(code, weeks=...)` 签名）。两处改动：
+
+(a) 把现有 `buildParam uses week type qfq adjust and sh tencent code` 测试里的调用改为新签名：
 ```kotlin
-@Test
-fun `monthly buildParam uses month type and long lookback`() {
-    val repo = KlineRepository(mockk())
-    val param = repo.buildParam("sh600036", KlinePeriod.MONTHLY, 40)
-    assertThat(param).contains(",month,")
-    assertThat(param).contains(",qfq")
-}
+    @Test
+    fun `buildParam uses week type qfq adjust and sh tencent code`() {
+        val param = repository.buildParam("sh600036", KlinePeriod.WEEKLY, 40)
+        // 其余断言不变：startsWith("sh600036,week,")、endsWith(",640,qfq")、6 段、parts[1]==week、parts[5]==qfq、两段 ISO 日期
+    }
 ```
-（若文件已存在则追加；若 `mockk` 未导入则加 `import io.mockk.mockk`。）
+
+(b) 追加月线测试：
+```kotlin
+    @Test
+    fun `monthly buildParam uses month type and long lookback`() {
+        val param = repository.buildParam("sh600036", KlinePeriod.MONTHLY, 40)
+        assertThat(param).startsWith("sh600036,month,")
+        assertThat(param).endsWith(",640,qfq")
+    }
+```
+（`mockk` / `assertThat` / `Test` 已在文件 import 中，无需新增。）
 
 - [ ] **Step 3: Run tests**
 
