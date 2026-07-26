@@ -91,6 +91,17 @@ fun SettingsScreen(
                 }
             }
         )
+        Text(
+            text = "评估门槛",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        EvalThresholdSettingsContent(
+            state = state,
+            onMinChange = viewModel::updateEvalMin,
+            onBoostChange = viewModel::updateEvalBoost,
+            onSave = viewModel::saveEvalThresholds
+        )
         SettingsEntryRow(
             entry = settingsEntries[1],
             onClick = onOpenDataManagement
@@ -255,6 +266,53 @@ private fun SettingsEntryRow(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = null
+            )
+        }
+    }
+}
+
+@Composable
+private fun EvalThresholdSettingsContent(
+    state: com.stock.dividend.viewmodel.NotificationSettingsUiState,
+    onMinChange: (String) -> Unit,
+    onBoostChange: (String) -> Unit,
+    onSave: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "一键评估时：股息率低于「最低」不给买；达到「加分」可把持有上调为买",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        OutlinedTextField(
+            value = state.evalMinInput,
+            onValueChange = onMinChange,
+            label = { Text("最低股息率 (%)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = state.evalBoostInput,
+            onValueChange = onBoostChange,
+            label = { Text("加分股息率 (%)") },
+            singleLine = true,
+            isError = state.evalError != null,
+            supportingText = {
+                Text(state.evalError ?: "例如：2.0 / 5.0")
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = onSave,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("保存")
+        }
+        if (state.evalSaved) {
+            Text(
+                text = "已保存",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
             )
         }
     }
