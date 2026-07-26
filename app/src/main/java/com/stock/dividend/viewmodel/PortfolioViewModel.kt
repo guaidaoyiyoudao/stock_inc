@@ -18,6 +18,12 @@ import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.HoldingAction
 import com.stock.dividend.data.repository.HoldingRecommendation
 import com.stock.dividend.data.repository.HoldingRecommender
+import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.LlmAnalysisRepository
+import com.stock.dividend.data.repository.LlmAnalysisResult
+import com.stock.dividend.data.repository.LlmAnalysisState
+import com.stock.dividend.data.repository.PortfolioAdvisor
+import com.stock.dividend.data.repository.PortfolioSignals
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
@@ -152,7 +158,15 @@ data class PortfolioUiState(
     /** 评估进行中。 */
     val isEvaluating: Boolean = false,
     /** 评估结果；null = 未评估过，空列表 = 评估过但当前筛选下无股票。 */
-    val evaluation: List<EvaluatedStock>? = null
+    val evaluation: List<EvaluatedStock>? = null,
+    /** 组合策略信号（评估后产出）。 */
+    val portfolioSignals: PortfolioSignals? = null,
+    /** 日线 BOLL（评估期产出，供 prompt 三周期位置用）。 */
+    val dailyBands: Map<String, BollBand?> = emptyMap(),
+    /** 月线 BOLL（评估期产出，供 prompt 三周期位置用）。 */
+    val monthlyBands: Map<String, BollBand?> = emptyMap(),
+    /** LLM 解读状态。 */
+    val llmAnalysis: LlmAnalysisState = LlmAnalysisState.Idle
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -164,6 +178,7 @@ class PortfolioViewModel @Inject constructor(
     private val transactionDao: TransactionDao,
     private val notificationCheckCoordinator: NotificationCheckCoordinator,
     private val notificationRuleRepository: NotificationRuleRepository,
+    private val llmAnalysisRepository: LlmAnalysisRepository,
     @ApplicationContext context: Context
 ) : ViewModel() {
 
@@ -453,58 +468,101 @@ class PortfolioViewModel @Inject constructor(
      *  3. 调 [HoldingRecommender.recommend] 得建议；
      *  4. 按 action 优先级（BUY→HOLD→SELL→INSUFFICIENT_DATA）排序。
      *
-     * 并发用 [Semaphore] 限流到 4，避免一次性几十个 Tencent 请求被拒。
+     * 并发用 [Semaphore] 限流到 3（每只股日/周/月 3 次 BOLL 请求），避免 Tencent 拒。
      */
     fun evaluateVisibleHoldings() {
         viewModelScope.launch {
             val visible = _uiState.value.filteredItems
             if (visible.isEmpty()) {
-                _uiState.update { it.copy(isEvaluating = false, evaluation = emptyList()) }
+                _uiState.update {
+                    it.copy(isEvaluating = false, evaluation = emptyList(),
+                        portfolioSignals = null, dailyBands = emptyMap(), monthlyBands = emptyMap(),
+                        llmAnalysis = LlmAnalysisState.Idle)
+                }
                 return@launch
             }
-            _uiState.update { it.copy(isEvaluating = true) }
+            _uiState.update {
+                it.copy(isEvaluating = true, llmAnalysis = LlmAnalysisState.Idle,
+                    portfolioSignals = null, dailyBands = emptyMap(), monthlyBands = emptyMap())
+            }
             val thresholds = _evalThresholds.value
-            val semaphore = Semaphore(4)
+            val semaphore = Semaphore(3)  // 每只股 3 次 BOLL 请求，降到 3 并发防限流
 
-            val results = visible.map { item ->
+            data class EvalRow(val stock: EvaluatedStock, val daily: BollBand?, val monthly: BollBand?)
+
+            val rows = visible.map { item ->
                 async {
                     semaphore.withPermit {
-                        val band = ensureBollLoaded(item.code)
+                        val weekly = ensureBollLoaded(item.code)
+                        val daily = fetchBollForPeriod(item.code, KlinePeriod.DAILY)
+                        val monthly = fetchBollForPeriod(item.code, KlinePeriod.MONTHLY)
                         val forecast = _uiState.value.stockForecasts[item.code]
                         val price = forecast?.currentPrice ?: item.currentPrice ?: 0.0
                         val recommendation = HoldingRecommender.recommend(
-                            price = price,
-                            band = band,
+                            price = price, band = weekly,
                             latestYearlyDividend = forecast?.latestYearlyDividend,
                             thresholds = thresholds
                         )
-                        EvaluatedStock(
-                            code = item.code,
-                            name = item.name,
-                            industry = item.industry,
-                            action = recommendation.action,
-                            priceVsLower = recommendation.priceVsLower,
-                            dividendYield = recommendation.dividendYield,
-                            bollBand = band,
-                            currentPrice = price.takeIf { it > 0.0 },
-                            reasons = recommendation.reasons
+                        val evaluated = EvaluatedStock(
+                            code = item.code, name = item.name, industry = item.industry,
+                            action = recommendation.action, priceVsLower = recommendation.priceVsLower,
+                            dividendYield = recommendation.dividendYield, bollBand = weekly,
+                            currentPrice = price.takeIf { it > 0.0 }, reasons = recommendation.reasons
                         )
+                        EvalRow(evaluated, daily, monthly)
                     }
                 }
             }.awaitAll()
 
-            val sorted = results.sortedWith(
-                compareBy<EvaluatedStock> { it.action.priority() }
-                    .thenBy { it.priceVsLower }
+            val sorted = rows.map { it.stock }.sortedWith(
+                compareBy<EvaluatedStock> { it.action.priority() }.thenBy { it.priceVsLower }
             )
-            _uiState.update { it.copy(isEvaluating = false, evaluation = sorted) }
+            val dailyBands = rows.associate { it.stock.code to it.daily }
+            val monthlyBands = rows.associate { it.stock.code to it.monthly }
+            val signals = PortfolioAdvisor.evaluate(sorted, dailyBands, monthlyBands)
+            _uiState.update {
+                it.copy(isEvaluating = false, evaluation = sorted,
+                    portfolioSignals = signals, dailyBands = dailyBands, monthlyBands = monthlyBands)
+            }
         }
     }
 
     /** 清除评估结果（结果页"清除结果"按钮用）。 */
     fun clearEvaluation() {
-        _uiState.update { it.copy(evaluation = null, isEvaluating = false) }
+        _uiState.update {
+            it.copy(evaluation = null, isEvaluating = false,
+                portfolioSignals = null, dailyBands = emptyMap(), monthlyBands = emptyMap(),
+                llmAnalysis = LlmAnalysisState.Idle)
+        }
     }
+
+    /** 触发 LLM 解读（结果页"AI 解读"按钮）。 */
+    fun analyzeWithLlm() {
+        val current = _uiState.value
+        val evaluation = current.evaluation
+        val signals = current.portfolioSignals
+        if (evaluation.isNullOrEmpty() || signals == null) return  // 按钮已禁用，防御
+        val dailyBands = current.dailyBands
+        val monthlyBands = current.monthlyBands
+        viewModelScope.launch {
+            _uiState.update { it.copy(llmAnalysis = LlmAnalysisState.Loading) }
+            val result = llmAnalysisRepository.analyze(evaluation, dailyBands, monthlyBands, signals, _evalThresholds.value)
+            val state = when (result) {
+                is LlmAnalysisResult.Success -> LlmAnalysisState.Success(result.analysis)
+                LlmAnalysisResult.NotConfigured -> LlmAnalysisState.NotConfigured
+                is LlmAnalysisResult.Error -> LlmAnalysisState.Error(result.message)
+            }
+            _uiState.update { it.copy(llmAnalysis = state) }
+        }
+    }
+
+    fun clearLlmAnalysis() {
+        _uiState.update { it.copy(llmAnalysis = LlmAnalysisState.Idle) }
+    }
+
+    private suspend fun fetchBollForPeriod(code: String, period: KlinePeriod): BollBand? = try {
+        stockRepository.fetchBoll(code, period)
+    } catch (_: Exception) { null }
 
     /**
      * 确保 [code] 的 boll 已加载（[_stockBands] 有 key 即返回，含 null）；

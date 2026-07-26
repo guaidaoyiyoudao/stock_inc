@@ -15,6 +15,7 @@ import com.stock.dividend.data.notification.NotificationCheckCoordinator
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.DividendThresholds
 import com.stock.dividend.data.repository.HoldingAction
+import com.stock.dividend.data.repository.LlmAnalysisRepository
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
@@ -43,6 +44,7 @@ class PortfolioViewModelTest {
     private val transactionDao: TransactionDao = mockk()
     private val notificationCheckCoordinator: NotificationCheckCoordinator = mockk(relaxed = true)
     private val notificationRuleRepository: NotificationRuleRepository = mockk()
+    private val llmAnalysisRepository: LlmAnalysisRepository = mockk()
     private val context: Context = mockk(relaxed = true)
     private val prefs: SharedPreferences = mockk(relaxed = true)
     private val prefsEditor: SharedPreferences.Editor = mockk(relaxed = true) {
@@ -71,6 +73,7 @@ class PortfolioViewModelTest {
         coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
         coEvery { stockRepository.getCachedPrices(any()) } returns emptyMap()
         coEvery { stockRepository.fetchBoll(any()) } returns null
+        coEvery { stockRepository.fetchBoll(any(), any()) } returns null
         coEvery { transactionDao.getByStock(any()) } returns emptyList()
     }
 
@@ -590,6 +593,7 @@ class PortfolioViewModelTest {
         transactionDao,
         notificationCheckCoordinator,
         notificationRuleRepository,
+        llmAnalysisRepository,
         context
     )
 
