@@ -924,7 +924,7 @@ object LlmPromptBuilder {
         thresholds: DividendThresholds,
     ): LlmPrompt = LlmPrompt(SYSTEM, buildUser(evaluatedStocks, dailyBands, monthlyBands, signals, thresholds))
 
-    private const val SYSTEM = """
+    private val SYSTEM = """
 你是一位稳健、客观的中文分红股投资分析助手。
 
 【任务】
@@ -972,7 +972,7 @@ object LlmPromptBuilder {
             val daily = ratioVsLower(s.currentPrice, dailyBands[s.code])
             val weekly = if (s.priceVsLower.isFinite()) "${(s.priceVsLower * 100).toInt()}%" else "—"
             val monthly = ratioVsLower(s.currentPrice, monthlyBands[s.code])
-            sb.append("- ${s.code} ${s.name} [${s.industry}]：$actionZh，股息率 ${s.dividendYield?.let { "${"%.1".format(it)}%" } ?: "—"}")
+            sb.append("- ${s.code} ${s.name} [${s.industry}]：$actionZh，股息率 ${s.dividendYield?.let { "${"%.1f".format(it)}%" } ?: "—"}")
             sb.append(" | 日距下轨 $daily / 周距下轨 $weekly / 月距下轨 $monthly\n")
         }
         sb.append("【策略信号】\n")
