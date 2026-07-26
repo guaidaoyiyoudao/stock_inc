@@ -42,7 +42,7 @@ import com.stock.dividend.data.repository.HoldingAction
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
-import com.stock.dividend.viewmodel.EvaluatedStock
+import com.stock.dividend.data.repository.EvaluatedStock
 import com.stock.dividend.viewmodel.PortfolioViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)

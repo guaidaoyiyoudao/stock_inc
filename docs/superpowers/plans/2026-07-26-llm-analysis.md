@@ -243,6 +243,8 @@ git commit -m "feat(stock): fetchBoll 支持 period 参数"
 - Create: `app/src/main/java/com/stock/dividend/data/repository/PortfolioAdvisor.kt`
 - Test: `app/src/test/java/com/stock/dividend/data/repository/PortfolioAdvisorTest.kt`
 
+> **前置（已完成）：** `EvaluatedStock` 从 `viewmodel` 包迁移到 `data/repository/EvaluatedStock.kt`（领域 DTO）。这样 `PortfolioAdvisor` / `LlmPromptBuilder` / `LlmAnalysisRepository`（都在 `data.repository`）与之同包，**无需 import**，避免 data 层反向依赖 viewmodel。`PortfolioViewModel` 与 `PortfolioEvaluationScreen` 改为 `import com.stock.dividend.data.repository.EvaluatedStock`。
+
 - [ ] **Step 1: 写失败测试**
 
 `PortfolioAdvisorTest.kt`：
@@ -273,7 +275,7 @@ class PortfolioAdvisorTest {
     @Test
     fun `position control triggers when majority at upper and low yield`() {
         val stocks = listOf(
-            stock("a", priceVsLower = 0.95), stock("b", priceVsLower = 0.95),
+            stock("a", priceVsLower = 0.95, yield = 1.5), stock("b", priceVsLower = 0.95, yield = 1.5),
             stock("c", priceVsLower = 0.2, yield = 1.0)
         )
         val sig = PortfolioAdvisor.evaluate(stocks, emptyMap(), emptyMap())

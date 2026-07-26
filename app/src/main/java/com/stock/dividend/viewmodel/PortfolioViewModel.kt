@@ -3,6 +3,7 @@ package com.stock.dividend.viewmodel
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.Stable
+import com.stock.dividend.data.repository.EvaluatedStock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.dao.DividendDao
@@ -101,19 +102,7 @@ data class StockForecast(
     val latestYearlyDividend: Double? = null
 )
 
-/** 一只股票的评估结果（结果页直接渲染）。 */
-@Stable
-data class EvaluatedStock(
-    val code: String,
-    val name: String,
-    val industry: String,
-    val action: HoldingAction,
-    val priceVsLower: Double,
-    val dividendYield: Double?,
-    val bollBand: BollBand?,
-    val currentPrice: Double?,
-    val reasons: List<String>
-)
+// EvaluatedStock 迁移至 data/repository/EvaluatedStock.kt（领域 DTO）
 
 @Stable
 data class PortfolioUiState(
