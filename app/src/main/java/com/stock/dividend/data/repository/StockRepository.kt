@@ -284,15 +284,15 @@ class StockRepository @Inject constructor(
         }
     }
 
-    // ---------- BOLL 带（周线）----------
+    // ---------- BOLL 带 ----------
 
     /**
-     * 拉取 [stockCode] 的周线收盘价并计算 BOLL 带（MA20 ± 2σ）。
-     * 网络失败或收盘价不足 20 根返回 null（调用方据此显示占位）。
+     * 拉取 [stockCode] 指定 [period] 的收盘价并计算 BOLL 带（MA20 ± 2σ）。
+     * 网络失败或收盘价不足 20 根返回 null。
      */
-    suspend fun fetchBoll(stockCode: String): BollBand? {
+    suspend fun fetchBoll(stockCode: String, period: KlinePeriod = KlinePeriod.WEEKLY): BollBand? {
         val closes = try {
-            klineRepository.fetchWeeklyCloses(stockCode)
+            klineRepository.fetchCloses(stockCode, period)
         } catch (_: Exception) {
             return null
         }
