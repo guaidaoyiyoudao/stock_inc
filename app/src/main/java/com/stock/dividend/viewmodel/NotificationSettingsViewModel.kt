@@ -4,11 +4,16 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.repository.DividendThresholds
+import com.stock.dividend.data.repository.LlmConfig
+import com.stock.dividend.data.repository.LlmConfigRepository
+import com.stock.dividend.data.repository.LlmProviderPreset
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -27,10 +32,32 @@ data class NotificationSettingsUiState(
 
 @HiltViewModel
 class NotificationSettingsViewModel @Inject constructor(
-    private val repository: NotificationRuleRepository
+    private val repository: NotificationRuleRepository,
+    private val llmConfigRepository: LlmConfigRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(NotificationSettingsUiState())
     val uiState: StateFlow<NotificationSettingsUiState> = _uiState.asStateFlow()
+
+    /** LLM 配置（供设置页编辑；映射自 SharedPreferences）。 */
+    val llmConfigState: StateFlow<LlmConfig> =
+        llmConfigRepository.observeConfig().stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5000), LlmConfig("", "", "")
+        )
+
+    fun saveLlmConfig(baseUrl: String, apiKey: String, model: String) {
+        viewModelScope.launch {
+            llmConfigRepository.saveConfig(LlmConfig(baseUrl.trim(), apiKey.trim(), model.trim()))
+        }
+    }
+
+    fun setLlmProvider(preset: LlmProviderPreset) {
+        if (preset == LlmProviderPreset.CUSTOM) return
+        viewModelScope.launch {
+            llmConfigRepository.saveConfig(
+                LlmProviderPreset.apply(preset, llmConfigRepository.snapshot())
+            )
+        }
+    }
 
     init {
         viewModelScope.launch {

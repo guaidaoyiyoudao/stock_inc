@@ -31,6 +31,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import com.stock.dividend.data.repository.LlmProviderPreset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -102,6 +111,7 @@ fun SettingsScreen(
             onBoostChange = viewModel::updateEvalBoost,
             onSave = viewModel::saveEvalThresholds
         )
+        LlmConfigSettingsContent(viewModel)
         SettingsEntryRow(
             entry = settingsEntries[1],
             onClick = onOpenDataManagement
@@ -314,6 +324,79 @@ private fun EvalThresholdSettingsContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary
             )
+        }
+    }
+}
+
+@Composable
+private fun LlmConfigSettingsContent(viewModel: NotificationSettingsViewModel) {
+    val config by viewModel.llmConfigState.collectAsStateWithLifecycle()
+    var apiKey by remember(config.apiKey) { mutableStateOf(config.apiKey) }
+    var baseUrl by remember(config.baseUrl) { mutableStateOf(config.baseUrl) }
+    var model by remember(config.model) { mutableStateOf(config.model) }
+    var showKey by remember { mutableStateOf(false) }
+    val selectedProvider =
+        LlmProviderPreset.entries.firstOrNull { it.baseUrl == config.baseUrl } ?: LlmProviderPreset.CUSTOM
+
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            text = "LLM 配置",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "用于一键评估的 AI 解读。Key 仅存本机。",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Spacer(Modifier.height(12.dp))
+        LlmProviderPreset.entries.forEach { p ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = selectedProvider == p,
+                    onClick = {
+                        viewModel.setLlmProvider(p)
+                        if (p != LlmProviderPreset.CUSTOM) {
+                            baseUrl = p.baseUrl
+                            model = p.defaultModel
+                        }
+                    }
+                )
+                Text(p.displayName)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = baseUrl,
+            onValueChange = { baseUrl = it },
+            label = { Text("Base URL") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it },
+            label = { Text("API Key") },
+            singleLine = true,
+            visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(onClick = { showKey = !showKey }) {
+                    Text(if (showKey) "隐藏" else "显示")
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = model,
+            onValueChange = { model = it },
+            label = { Text("Model") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = { viewModel.saveLlmConfig(baseUrl, apiKey, model) }) {
+            Text("保存")
         }
     }
 }
