@@ -657,7 +657,7 @@ class StockRepositoryTest {
     @Test
     fun `fetchBoll delegates to klineRepository and BollCalculator`() = runTest {
         // 20 根收盘价 1..20，均值 10.5
-        coEvery { klineRepository.fetchWeeklyCloses("sh.600036") } returns (1..20).map { it.toDouble() }
+        coEvery { klineRepository.fetchCloses("sh.600036", KlinePeriod.WEEKLY) } returns (1..20).map { it.toDouble() }
 
         val band = repository.fetchBoll("sh.600036")
 
@@ -670,14 +670,14 @@ class StockRepositoryTest {
 
     @Test
     fun `fetchBoll returns null when closes insufficient`() = runTest {
-        coEvery { klineRepository.fetchWeeklyCloses("sh.600036") } returns (1..5).map { it.toDouble() }
+        coEvery { klineRepository.fetchCloses("sh.600036", KlinePeriod.WEEKLY) } returns (1..5).map { it.toDouble() }
 
         assertThat(repository.fetchBoll("sh.600036")).isNull()
     }
 
     @Test
     fun `fetchBoll returns null when klineRepository throws`() = runTest {
-        coEvery { klineRepository.fetchWeeklyCloses("sh.600036") } throws java.io.IOException("down")
+        coEvery { klineRepository.fetchCloses("sh.600036", KlinePeriod.WEEKLY) } throws java.io.IOException("down")
 
         assertThat(repository.fetchBoll("sh.600036")).isNull()
     }
