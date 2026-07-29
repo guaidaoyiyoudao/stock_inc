@@ -24,17 +24,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,6 +47,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +61,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.data.repository.StockLlmAnalysisState
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.CompactTopAppBar
@@ -78,6 +87,7 @@ fun StockDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    var showBuyThresholdDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp),
@@ -216,13 +226,20 @@ fun StockDetailScreen(
 
                     item {
                         Spacer(modifier = Modifier.height(8.dp))
-                        SectionHeader(title = "分红率趋势")
+                        SectionHeader(
+                            title = "分红率趋势",
+                            actionText = "买入线",
+                            onActionClick = { showBuyThresholdDialog = true }
+                        )
                     }
 
                     item {
                         when {
                             uiState.dividendRatePoints.size >= 2 -> {
-                                DividendRateChart(points = uiState.dividendRatePoints)
+                                DividendRateChart(
+                                    points = uiState.dividendRatePoints,
+                                    buyThreshold = uiState.buyThreshold
+                                )
                             }
                             uiState.dividendRatePoints.size == 1 -> {
                                 DividendRateFallbackCard(point = uiState.dividendRatePoints.first())
@@ -231,6 +248,18 @@ fun StockDetailScreen(
                                 DividendRateFallbackCard(point = null)
                             }
                         }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SectionHeader(title = "AI 解读")
+                        Spacer(modifier = Modifier.height(4.dp))
+                        StockLlmAnalysisSection(
+                            state = uiState.llmAnalysis,
+                            hasDividends = uiState.dividends.isNotEmpty(),
+                            onAnalyze = { viewModel.analyzeWithLlm() },
+                            onRetry = { viewModel.analyzeWithLlm() }
+                        )
                     }
 
                     item {
@@ -265,7 +294,70 @@ fun StockDetailScreen(
                 }
             }
         }
+
+        if (showBuyThresholdDialog) {
+            BuyThresholdMultiplierDialog(
+                currentMultiplier = uiState.stock?.buyThresholdMultiplier
+                    ?: com.stock.dividend.data.local.entity.StockEntity.DEFAULT_BUY_THRESHOLD_MULTIPLIER,
+                onDismiss = { showBuyThresholdDialog = false },
+                onConfirm = { value ->
+                    viewModel.updateBuyThresholdMultiplier(value)
+                    showBuyThresholdDialog = false
+                }
+            )
+        }
     }
+}
+
+@Composable
+private fun BuyThresholdMultiplierDialog(
+    currentMultiplier: Double,
+    onDismiss: () -> Unit,
+    onConfirm: (Double) -> Unit
+) {
+    var input by remember { mutableStateOf("%.1f".format(currentMultiplier)) }
+    val parsed = input.toDoubleOrNull()
+    val error: String? = when {
+        parsed == null || !parsed.isFinite() -> "请输入有效数字"
+        parsed !in 0.1..20.0 -> "请输入 0.1 ~ 20.0 之间的数字"
+        else -> null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("买入线倍数") },
+        text = {
+            Column {
+                Text(
+                    text = "当前股息率达到「10年期国债收益率 × 该倍数」时提示买入。" +
+                            "例如 2.5 表示国债 2.6% 时，股息率需达到 6.5%。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it.filter { ch -> ch.isDigit() || ch == '.' } },
+                    singleLine = true,
+                    label = { Text("倍数") },
+                    isError = error != null,
+                    supportingText = { error?.let { Text(it) } },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { input.toDoubleOrNull()?.let(onConfirm) },
+                enabled = error == null
+            ) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Composable
@@ -522,6 +614,95 @@ private fun RefreshButton(
                 contentDescription = "刷新股息数据",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+/**
+ * 个股 AI 解读区块，五态渲染（Idle/Loading/NotConfigured/Success/Error）。
+ * 渲染模式对齐组合级 [PortfolioEvaluationScreen.LlmAnalysisSection]，但展示个股四字段。
+ */
+@Composable
+private fun StockLlmAnalysisSection(
+    state: StockLlmAnalysisState,
+    hasDividends: Boolean,
+    onAnalyze: () -> Unit,
+    onRetry: () -> Unit
+) {
+    when (state) {
+        is StockLlmAnalysisState.Success -> {
+            val a = state.analysis
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("✨ AI 解读", style = MaterialTheme.typography.titleSmall)
+                    if (a.valuation.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(a.valuation, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (a.dividendSustainability.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(a.dividendSustainability, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (a.action.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        StatusPill(
+                            text = a.action,
+                            tone = FinanceStatusTone.Neutral
+                        )
+                    }
+                    if (a.risks.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        a.risks.forEach {
+                            Text("• $it", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "仅供参考，不构成投资建议。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        StockLlmAnalysisState.Loading -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("AI 分析中…")
+            }
+        }
+
+        is StockLlmAnalysisState.Error -> {
+            Column {
+                Text(state.message, color = MaterialTheme.colorScheme.error)
+                Spacer(modifier = Modifier.height(4.dp))
+                TextButton(onClick = onRetry) { Text("重试") }
+            }
+        }
+
+        StockLlmAnalysisState.NotConfigured -> {
+            Column {
+                OutlinedButton(onClick = onAnalyze, enabled = false) {
+                    Icon(Icons.Filled.AutoAwesome, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("AI 解读")
+                }
+                Text(
+                    "需先在设置配置 LLM",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        StockLlmAnalysisState.Idle -> {
+            OutlinedButton(onClick = onAnalyze, enabled = hasDividends) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("AI 解读")
+            }
         }
     }
 }
