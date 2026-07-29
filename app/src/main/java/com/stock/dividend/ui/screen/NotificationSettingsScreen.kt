@@ -70,6 +70,7 @@ internal val settingsEntries = listOf(
 fun SettingsScreen(
     onOpenDataManagement: () -> Unit,
     onOpenOcrDebug: () -> Unit,
+    onOpenNotificationReliability: () -> Unit,
     viewModel: NotificationSettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -118,6 +119,13 @@ fun SettingsScreen(
         SettingsEntryRow(
             entry = settingsEntries[1],
             onClick = onOpenDataManagement
+        )
+        SettingsEntryRow(
+            entry = SettingsEntry(
+                title = "通知可靠性",
+                description = "确保股价/股息率提醒按时推送（Vivo 等需开启后台运行）"
+            ),
+            onClick = onOpenNotificationReliability
         )
         // 临时调试入口，定位 OCR 识别问题后删除
         SettingsEntryRow(

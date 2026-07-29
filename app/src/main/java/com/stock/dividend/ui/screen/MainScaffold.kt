@@ -171,7 +171,8 @@ fun MainScaffold(
             composable("settings") {
                 SettingsScreen(
                     onOpenDataManagement = { rootNavController.navigate(Routes.BACKUP_RESTORE) },
-                    onOpenOcrDebug = { tabNavController.navigate("ocrDebug") }
+                    onOpenOcrDebug = { tabNavController.navigate("ocrDebug") },
+                    onOpenNotificationReliability = { tabNavController.navigate("notificationReliability") }
                 )
             }
             composable("addStock") {
@@ -182,6 +183,9 @@ fun MainScaffold(
             }
             composable("ocrDebug") {
                 OcrDebugScreen(onBack = { tabNavController.popBackStack() })
+            }
+            composable("notificationReliability") {
+                NotificationReliabilityScreen(onBack = { tabNavController.popBackStack() })
             }
             composable(
                 route = "stockDetail/{code}",
