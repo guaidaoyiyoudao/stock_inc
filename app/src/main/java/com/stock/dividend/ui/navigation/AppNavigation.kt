@@ -17,7 +17,10 @@ object Routes {
 }
 
 @Composable
-fun AppNavigation() {
+fun AppNavigation(
+    pendingDeepLink: String?,
+    onDeepLinkConsumed: () -> Unit,
+) {
     val rootNavController = rememberNavController()
 
     NavHost(
@@ -25,7 +28,11 @@ fun AppNavigation() {
         startDestination = Routes.MAIN
     ) {
         composable(Routes.MAIN) {
-            MainScaffold(rootNavController = rootNavController)
+            MainScaffold(
+                rootNavController = rootNavController,
+                pendingDeepLink = pendingDeepLink,
+                onDeepLinkConsumed = onDeepLinkConsumed
+            )
         }
         composable(Routes.FIRE_GOAL_SETUP) {
             FireGoalSetupScreen(

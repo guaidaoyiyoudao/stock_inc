@@ -48,8 +48,22 @@ internal val bottomNavItems = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScaffold(rootNavController: NavHostController) {
+fun MainScaffold(
+    rootNavController: NavHostController,
+    pendingDeepLink: String?,
+    onDeepLinkConsumed: () -> Unit,
+) {
     val tabNavController = rememberNavController()
+
+    // deep link 消费：通知点击携带的 stockCode → 跳个股详情
+    LaunchedEffect(pendingDeepLink) {
+        val code = pendingDeepLink ?: return@LaunchedEffect
+        tabNavController.navigate("stockDetail/$code") {
+            launchSingleTop = true
+        }
+        onDeepLinkConsumed()
+    }
+
     val tabBackStackEntry by tabNavController.currentBackStackEntryAsState()
     val currentTabRoute = tabBackStackEntry?.destination?.route
 
