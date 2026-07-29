@@ -62,6 +62,13 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests {
+            // Robolectric 需要读取 manifest/resources 才能提供真实 Android 环境
+            isIncludeAndroidResources = true
+        }
+    }
+
 }
 
 dependencies {
@@ -112,6 +119,10 @@ dependencies {
     // OCR (Chinese text recognition via Play Services; model downloaded on demand to keep APK small)
     implementation(libs.mlkit.text.recognition)
 
+    // Glance (Compose for Widgets) — 桌面行情 Widget
+    implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
+
     // Charts
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)
@@ -126,6 +137,9 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.truth)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.test.runner)
     debugImplementation(libs.compose.test.manifest)
     androidTestImplementation(composeBom)
     androidTestImplementation(libs.compose.junit)

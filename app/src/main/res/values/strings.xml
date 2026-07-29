@@ -113,4 +113,7 @@
     <string name="backup_invalid_file">无效的备份文件：%1$s</string>
     <string name="backup_file_name_prefix">股息追踪_备份_</string>
 
+    <!-- Widget -->
+    <string name="widget_market_description">持仓总市值与盈亏速览</string>
+
 </resources>
