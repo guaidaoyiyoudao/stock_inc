@@ -6,17 +6,35 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.remote.LlmApi
+import com.stock.dividend.data.remote.dto.LlmChatRequest
+import com.stock.dividend.data.remote.dto.LlmMessage
+import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.data.repository.BondYieldRepository
+import com.stock.dividend.data.repository.BuyThresholdStatus
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.LlmConfig
+import com.stock.dividend.data.repository.LlmConfigSource
+import com.stock.dividend.data.repository.StockLlmAnalysisParser
+import com.stock.dividend.data.repository.StockLlmAnalysisState
+import com.stock.dividend.data.repository.StockLlmInput
+import com.stock.dividend.data.repository.StockLlmPromptBuilder
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.computeBuyThreshold
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import javax.inject.Inject
 
 @Stable
@@ -44,14 +62,19 @@ data class StockDetailUiState(
     val forecast: ForecastDetail? = null,
     val allForecasts: Map<String, ForecastDetail> = emptyMap(),
     val selectedPeriod: String = "3",
-    val visibleCount: Int = 5
+    val visibleCount: Int = 5,
+    val buyThreshold: BuyThresholdStatus? = null,
+    val llmAnalysis: StockLlmAnalysisState = StockLlmAnalysisState.Idle
 )
 
 @HiltViewModel
 class StockDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository
+    private val dividendRepository: DividendRepository,
+    private val bondYieldRepository: BondYieldRepository,
+    private val llmApi: LlmApi,
+    private val llmConfigSource: LlmConfigSource
 ) : ViewModel() {
 
     private val stockCode: String = savedStateHandle["code"] ?: ""
@@ -100,6 +123,8 @@ class StockDetailViewModel @Inject constructor(
                         forecast = allForecasts[selectedPeriod],
                         selectedPeriod = selectedPeriod
                     )
+                    // 标的或分红变化后，重新计算买入阈值（现价/国债异步拉取）
+                    refreshBuyThreshold()
                 } else {
                     _uiState.value = _uiState.value.copy(
                         dividends = dividends,
@@ -109,6 +134,52 @@ class StockDetailViewModel @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * 异步拉取现价 + 10Y 国债收益率，结合当前分红数据计算 [BuyThresholdStatus]。
+     * 任何一环失败时降级（国债用默认值，现价缺失则 reached=null）。
+     */
+    private fun refreshBuyThreshold() {
+        val stock = _uiState.value.stock ?: return
+        val dividends = _uiState.value.dividends
+        viewModelScope.launch {
+            val bondYield = runCatching { bondYieldRepository.fetch10YBondYield() }
+                .getOrDefault(BondYieldRepository.DEFAULT_YIELD)
+            val currentPrice = runCatching {
+                stockRepository.fetchQuotes(listOf(stock))[stock.code]
+            }.getOrNull()
+            val latestCash = ForecastCalculator.latestYearlyCashPerShare(dividends)
+            val status = computeBuyThreshold(
+                bondYield10Y = bondYield,
+                multiplier = stock.buyThresholdMultiplier,
+                latestYearlyCashPerShare = latestCash,
+                currentPrice = currentPrice
+            )
+            _uiState.value = _uiState.value.copy(buyThreshold = status)
+        }
+    }
+
+    /**
+     * 更新标的买入阈值倍数并重新计算阈值判定。
+     */
+    fun updateBuyThresholdMultiplier(multiplier: Double) {
+        val code = stockCode
+        viewModelScope.launch {
+            stockRepository.updateBuyThresholdMultiplier(code, multiplier)
+        }
+        // 乐观更新：先用新倍数重算一次，stockFlow 回来后会再校准
+        val state = _uiState.value
+        val status = state.buyThreshold
+        if (status != null) {
+            _uiState.value = state.copy(
+                buyThreshold = status.copy(
+                    multiplier = multiplier,
+                    targetYieldPercent = status.bondYield10Y * multiplier,
+                    reached = status.currentYieldPercent?.let { it >= status.bondYield10Y * multiplier }
+                )
+            )
         }
     }
 
@@ -160,5 +231,129 @@ class StockDetailViewModel @Inject constructor(
                 )
             }
             .sortedBy { it.period }
+    }
+
+    /**
+     * 触发个股 AI 解读：并发拉日/周/月 BOLL + 现价，组装 [StockLlmInput]，调用已配置的 LLM。
+     * 失败的周期/现价降级为 null（"—"），不阻塞分析。配置缺失返回 NotConfigured。
+     */
+    fun analyzeWithLlm() {
+        val state = _uiState.value
+        val stock = state.stock ?: return
+        if (state.dividends.isEmpty()) return
+        if (_uiState.value.llmAnalysis is StockLlmAnalysisState.Loading) return
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(llmAnalysis = StockLlmAnalysisState.Loading)
+
+            val config = llmConfigSource.observeConfig().first()
+            if (!config.isComplete) {
+                _uiState.value = _uiState.value.copy(llmAnalysis = StockLlmAnalysisState.NotConfigured)
+                return@launch
+            }
+
+            // 并发拉三周期 BOLL（单股仅 3 请求，无需 Semaphore 限流）；失败降级 null
+            val (dailyBand, weeklyBand, monthlyBand) = listOf(
+                async { runCatching { stockRepository.fetchBoll(stockCode, KlinePeriod.DAILY) }.getOrNull() },
+                async { runCatching { stockRepository.fetchBoll(stockCode, KlinePeriod.WEEKLY) }.getOrNull() },
+                async { runCatching { stockRepository.fetchBoll(stockCode, KlinePeriod.MONTHLY) }.getOrNull() }
+            ).awaitAll().let { Triple(it[0] as BollBand?, it[1] as BollBand?, it[2] as BollBand?) }
+
+            // 现价：现拉一次（buyThreshold 的字段无法可靠反推现价）；失败降级 null
+            val currentPrice = runCatching {
+                stockRepository.fetchQuotes(listOf(stock))[stock.code]
+            }.getOrNull()
+
+            val input = buildStockLlmInput(stock, state, currentPrice, dailyBand, weeklyBand, monthlyBand)
+            val prompt = StockLlmPromptBuilder.build(input)
+            val url = config.baseUrl.trimEnd('/') + "/chat/completions"
+            val request = LlmChatRequest(
+                model = config.model,
+                messages = listOf(
+                    LlmMessage("system", prompt.system),
+                    LlmMessage("user", prompt.user)
+                )
+            )
+
+            val result = try {
+                val content = llmApi.chatCompletions(url, "Bearer ${config.apiKey}", request).content
+                if (content.isNullOrBlank()) {
+                    StockLlmAnalysisState.Error("LLM 返回为空")
+                } else {
+                    StockLlmAnalysisState.Success(StockLlmAnalysisParser.parse(content))
+                }
+            } catch (e: HttpException) {
+                StockLlmAnalysisState.Error(mapLlmHttpError(e.code()))
+            } catch (_: Exception) {
+                StockLlmAnalysisState.Error("网络错误，请重试")
+            }
+            _uiState.value = _uiState.value.copy(llmAnalysis = result)
+        }
+    }
+
+    /** 清空个股 AI 解读状态，回到 Idle。 */
+    fun clearLlmAnalysis() {
+        if (_uiState.value.llmAnalysis is StockLlmAnalysisState.Idle) return
+        _uiState.value = _uiState.value.copy(llmAnalysis = StockLlmAnalysisState.Idle)
+    }
+
+    /** 组装个股 LLM 输入快照（从当前 uiState + 拉到的 BOLL/现价构建）。 */
+    private fun buildStockLlmInput(
+        stock: StockEntity,
+        state: StockDetailUiState,
+        currentPrice: Double?,
+        dailyBand: BollBand?,
+        weeklyBand: BollBand?,
+        monthlyBand: BollBand?
+    ): StockLlmInput {
+        val ratePoints = state.dividendRatePoints
+            .takeIf { it.isNotEmpty() }
+            ?.map { it.ratePercent }
+        val latestYield = state.dividends
+            .firstOrNull { it.dividendYield != null && it.dividendYield.isFinite() }
+            ?.dividendYield
+        val forecast = state.allForecasts.let { all ->
+            val y1 = all["1"] ?: all[all.keys.firstOrNull()]
+            if (y1 != null) {
+                StockLlmInput.StockLlmForecast(
+                    avgCashPerShare1Y = all["1"]?.avgCashPerShare ?: y1.avgCashPerShare,
+                    avgCashPerShare3Y = all["3"]?.avgCashPerShare ?: y1.avgCashPerShare,
+                    avgCashPerShare5Y = all["5"]?.avgCashPerShare ?: y1.avgCashPerShare,
+                    actualYears = y1.actualYears
+                )
+            } else null
+        }
+        val bt = state.buyThreshold?.let {
+            StockLlmInput.StockLlmBuyThreshold(
+                targetYieldPercent = it.targetYieldPercent,
+                currentYieldPercent = it.currentYieldPercent,
+                reached = it.reached
+            )
+        }
+        return StockLlmInput(
+            code = stock.code,
+            name = stock.name,
+            industry = stock.industry,
+            currentPrice = currentPrice,
+            dividendRatePoints = ratePoints,
+            latestDividendYield = latestYield,
+            forecast = forecast,
+            buyThreshold = bt,
+            bollDaily = dailyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) },
+            bollWeekly = weeklyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) },
+            bollMonthly = monthlyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) }
+        )
+    }
+
+    /** (price - lower) / (upper - lower) → 0..100；band/price 无效返回 50（中性）。 */
+    private fun ratioVsLowerPercent(price: Double?, band: BollBand?): Int {
+        if (price == null || price <= 0.0 || band == null || band.upper <= band.lower) return 50
+        return ((price - band.lower) / (band.upper - band.lower) * 100).toInt().coerceIn(0, 100)
+    }
+
+    private fun mapLlmHttpError(code: Int): String = when (code) {
+        401, 403 -> "API key 无效"
+        429 -> "请求过频，稍后重试"
+        else -> "分析失败，请重试"
     }
 }
