@@ -14,6 +14,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.stock.dividend.MainActivity
 import com.stock.dividend.R
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
@@ -24,7 +25,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.absoluteValue
 
-private const val DIVIDEND_ALERT_CHANNEL_ID = "dividend_alerts"
+private const val DIVIDEND_ALERT_CHANNEL_ID = NotificationChannels.LEGACY_DIVIDEND_ALERTS
+
+/** deep link：通知点击跳转个股详情用的 Intent extra key */
+const val EXTRA_STOCK_CODE = "extra_stock_code"
 
 @Singleton
 class AndroidDividendAlertNotifier @Inject constructor(
@@ -69,6 +73,7 @@ class AndroidDividendAlertNotifier @Inject constructor(
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_STOCK_CODE, stockCode)   // deep link：点击跳个股详情
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -82,11 +87,12 @@ class AndroidDividendAlertNotifier @Inject constructor(
             metricValue = metricValue,
             thresholdValue = thresholdValue
         )
-        val notification = NotificationCompat.Builder(context, DIVIDEND_ALERT_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, channelFor(ruleType))
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
             .setContentIntent(pendingIntent)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)   // 锁屏可见
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
@@ -101,12 +107,16 @@ class AndroidDividendAlertNotifier @Inject constructor(
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        val channel = NotificationChannel(
-            DIVIDEND_ALERT_CHANNEL_ID,
-            "股息率提醒",
-            NotificationManager.IMPORTANCE_DEFAULT
-        )
-        manager.createNotificationChannel(channel)
+        NotificationChannels.CHANNEL_NAMES.forEach { (id, name) ->
+            val importance = if (id == NotificationChannels.DIVIDEND_PAYOUTS) {
+                NotificationManager.IMPORTANCE_HIGH
+            } else {
+                NotificationManager.IMPORTANCE_DEFAULT
+            }
+            manager.createNotificationChannel(
+                NotificationChannel(id, name, importance)
+            )
+        }
     }
 
     private fun notificationText(
@@ -118,6 +128,8 @@ class AndroidDividendAlertNotifier @Inject constructor(
         return when (ruleType) {
             NOTIFICATION_RULE_TYPE_PRICE_ABOVE -> "股价达到目标" to
                 "%s 当前价格 %.2f 已达到 %.2f".format(Locale.US, stockName, metricValue, thresholdValue)
+            NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER -> "股价触及周BOLL上轨" to
+                "%s 当前价格 %.2f 已达周线布林带上轨 %.2f".format(Locale.US, stockName, metricValue, thresholdValue)
             NOTIFICATION_RULE_TYPE_PRICE_BELOW -> "股价跌破目标" to
                 "%s 当前价格 %.2f 已低于 %.2f".format(Locale.US, stockName, metricValue, thresholdValue)
             NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD -> "股息率跌破目标" to
