@@ -39,7 +39,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `发送后追加用户消息并复位 isSending`() = runTest {
+    fun send_appendsUserMessageAndResetsIsSending() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
@@ -58,7 +58,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `流式 Partial 累积后 Final 覆盖`() = runTest {
+    fun partial_accumulatesThenFinalOverwrites() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
@@ -77,7 +77,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `Partial 消息标记流式中，Final 后关闭流式标记`() = runTest {
+    fun final_closesStreamingFlag() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
@@ -95,7 +95,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `确认卡片出现后可确认并清空`() = runTest {
+    fun confirmationCard_canConfirmAndClear() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
@@ -118,7 +118,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `取消确认走 confirm false`() = runTest {
+    fun cancelConfirmation_setsConfirmFalse() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
@@ -139,7 +139,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `错误事件追加 SYSTEM 气泡`() = runTest {
+    fun errorEvent_appendsSystemBubble() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
@@ -155,7 +155,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `未配置 LLM 时 llmConfigured 为 false`() = runTest {
+    fun withoutLlmConfig_llmConfiguredIsFalse() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(false)
         coEvery { repository.listSessions() } returns emptyList()
@@ -167,7 +167,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `无会话时自动创建并选中`() = runTest {
+    fun withoutSession_autoCreatesAndSelects() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns emptyList()
@@ -179,7 +179,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `新建会话切换并清空消息`() = runTest {
+    fun newSession_switchesAndClearsMessages() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
@@ -194,7 +194,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `选择历史会话加载消息`() = runTest {
+    fun selectSession_loadsMessages() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns
@@ -213,7 +213,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `新会话首轮完成后触发标题生成`() = runTest {
+    fun firstRoundInNewSession_triggersTitleGeneration() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "新会话", 1000))
@@ -229,7 +229,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `已有标题的会话不触发标题生成`() = runTest {
+    fun sessionWithTitle_skipsTitleGeneration() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "持仓分析", 1000))
@@ -244,7 +244,7 @@ class AiChatViewModelTest {
     }
 
     @Test
-    fun `删除会话调用仓库并刷新列表`() = runTest {
+    fun deleteSession_callsRepoAndRefreshesList() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))

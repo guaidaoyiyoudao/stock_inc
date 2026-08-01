@@ -20,7 +20,7 @@ class OpenAiProtocolTest {
     private val gson = Gson()
 
     @Test
-    fun `buildOpenAiRequest 把 system 指令放首条消息`() {
+    fun buildOpenAiRequest_putsSystemInstructionFirst() {
         val request = buildOpenAiRequest(
             LlmRequest(
                 config = GenerateContentConfig(
@@ -38,7 +38,7 @@ class OpenAiProtocolTest {
     }
 
     @Test
-    fun `buildOpenAiRequest 把 functionCall 转 tool_calls`() {
+    fun buildOpenAiRequest_convertsFunctionCallToToolCalls() {
         val request = buildOpenAiRequest(
             LlmRequest(
                 contents = listOf(
@@ -60,7 +60,7 @@ class OpenAiProtocolTest {
     }
 
     @Test
-    fun `buildOpenAiRequest 把 functionResponse 转 tool 消息`() {
+    fun buildOpenAiRequest_convertsFunctionResponseToToolMessage() {
         val request = buildOpenAiRequest(
             LlmRequest(
                 contents = listOf(
@@ -87,7 +87,7 @@ class OpenAiProtocolTest {
     }
 
     @Test
-    fun `buildOpenAiRequest 转换 tools 声明与 JSON Schema`() {
+    fun buildOpenAiRequest_convertsToolsDeclaration() {
         val request = buildOpenAiRequest(
             LlmRequest(
                 config = GenerateContentConfig(
@@ -120,7 +120,7 @@ class OpenAiProtocolTest {
     }
 
     @Test
-    fun `toLlmResponse 映射文本与 tool_calls`() {
+    fun toLlmResponse_mapsTextAndToolCalls() {
         val response = toLlmResponse(
             OpenAiChatResponse(
                 choices = listOf(
@@ -150,7 +150,7 @@ class OpenAiProtocolTest {
     }
 
     @Test
-    fun `toLlmResponse 把 length 映射为 MAX_TOKENS`() {
+    fun toLlmResponse_mapsLengthToMaxTokens() {
         val response = toLlmResponse(
             OpenAiChatResponse(
                 choices = listOf(

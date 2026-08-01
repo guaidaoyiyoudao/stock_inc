@@ -50,7 +50,7 @@ import org.junit.Test
 class StockAgentToolsTest {
 
     @Test
-    fun `AddStockTool declaration 声明 code 必填`() {
+    fun addStockTool_declaration_requiresCode() {
         val tool = AddStockTool(mockk())
         val decl = tool.declaration()
         assertThat(decl.name).isEqualTo("add_stock")
@@ -58,7 +58,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddStockTool 未确认时返回确认占位错误且不执行仓库`() = runTest {
+    fun addStockTool_returnsConfirmationPlaceholderWhenUnconfirmed() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         val tool = AddStockTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -70,7 +70,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddStockTool 确认后执行仓库并返回 ok`() = runTest {
+    fun addStockTool_runsRepositoryWhenConfirmed() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.resolveStock("600519") } returns
             StockSearchResult(code = "sh.600519", name = "贵州茅台", marketCode = "1")
@@ -84,7 +84,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddStockTool 拒绝确认时不执行仓库`() = runTest {
+    fun addStockTool_skipsRepositoryWhenRejected() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         val tool = AddStockTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -95,7 +95,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddStockTool 未找到股票返回错误`() = runTest {
+    fun addStockTool_returnsErrorWhenStockNotFound() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.resolveStock("000000") } returns null
         val tool = AddStockTool(repo)
@@ -107,7 +107,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddStockTool 接受字符串数字参数`() = runTest {
+    fun addStockTool_acceptsStringNumberParams() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         coEvery { repo.addStock(any(), 100, 12.5, any()) } returns Result.success(Unit)
@@ -123,7 +123,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddLivingExpenseTool 校验金额并调用仓库`() = runTest {
+    fun addLivingExpenseTool_validatesAndCallsRepo() = runTest {
         val repo = mockk<LivingExpenseRepository>(relaxed = true)
         coEvery { repo.addExpense("房租", 3000.0, "MONTHLY") } returns 42L
         val tool = AddLivingExpenseTool(repo)
@@ -136,7 +136,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddLivingExpenseTool 金额非法时返回错误且不写库`() = runTest {
+    fun addLivingExpenseTool_returnsErrorOnInvalidAmount() = runTest {
         val repo = mockk<LivingExpenseRepository>(relaxed = true)
         val tool = AddLivingExpenseTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -147,7 +147,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `RemoveLivingExpenseTool 周期参数错误时不删除`() = runTest {
+    fun removeLivingExpenseTool_skipsDeleteOnBadPeriod() = runTest {
         val repo = mockk<LivingExpenseRepository>(relaxed = true)
         val tool = RemoveLivingExpenseTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -158,7 +158,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `SetFireGoalTool 目标金额非法时不写库`() = runTest {
+    fun setFireGoalTool_skipsOnInvalidAmount() = runTest {
         val repo = mockk<FireGoalRepository>(relaxed = true)
         val tool = SetFireGoalTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -169,7 +169,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetHoldingsTool 返回持仓列表与缓存价格`() = runTest {
+    fun getHoldingsTool_returnsHoldingsAndCachedPrices() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.observeAllStocksForSnapshot() } returns emptyList()
         coEvery { repo.getCachedPrices(emptyList()) } returns emptyMap()
@@ -180,7 +180,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `UpdateHoldingTool 修改持仓并返回 ok`() = runTest {
+    fun updateHoldingTool_updatesAndReturnsOk() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         val tool = UpdateHoldingTool(repo)
@@ -193,7 +193,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `UpdateHoldingTool 负数股数报错且不写库`() = runTest {
+    fun updateHoldingTool_rejectsNegativeShares() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         val tool = UpdateHoldingTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -204,7 +204,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `RemoveStockTool 删除自选`() = runTest {
+    fun removeStockTool_removesStock() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         val tool = RemoveStockTool(repo)
@@ -216,7 +216,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddTransactionTool 记录交易并重算持仓`() = runTest {
+    fun addTransactionTool_recordsAndRecomputes() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         val txRepo = mockk<TransactionRepository>(relaxed = true)
@@ -233,7 +233,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `AddTransactionTool 非法类型报错`() = runTest {
+    fun addTransactionTool_rejectsInvalidType() = runTest {
         val tool = AddTransactionTool(mockk(relaxed = true), mockk(relaxed = true))
         val context = mockk<ToolContext>(relaxed = true)
         every { context.toolConfirmation } returns ToolConfirmation(confirmed = true)
@@ -245,7 +245,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `SetStockTagsTool 覆盖标签`() = runTest {
+    fun setStockTagsTool_overwritesTags() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         val tool = SetStockTagsTool(repo)
@@ -257,7 +257,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `SetStockTagsTool 接受逗号分隔字符串`() = runTest {
+    fun setStockTagsTool_acceptsCommaSeparated() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         val tool = SetStockTagsTool(repo)
@@ -269,7 +269,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `UpdateIndustryTargetTool 权重超范围报错`() = runTest {
+    fun updateIndustryTargetTool_rejectsOutOfRangeWeight() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         val tool = UpdateIndustryTargetTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -280,7 +280,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `UpdateNotificationRuleTool boost 小于 min 报错`() = runTest {
+    fun updateNotificationRuleTool_rejectsBoostLessThanMin() = runTest {
         val repo = mockk<NotificationRuleRepository>(relaxed = true)
         val tool = UpdateNotificationRuleTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -291,7 +291,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `UpdateLivingExpenseTool 修改支出`() = runTest {
+    fun updateLivingExpenseTool_updatesExpense() = runTest {
         val repo = mockk<LivingExpenseRepository>(relaxed = true)
         val tool = UpdateLivingExpenseTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -305,7 +305,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `RemoveLivingExpenseTool 删除支出`() = runTest {
+    fun removeLivingExpenseTool_deletesExpense() = runTest {
         val repo = mockk<LivingExpenseRepository>(relaxed = true)
         val tool = RemoveLivingExpenseTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -316,7 +316,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `SetFireGoalTool 设置目标`() = runTest {
+    fun setFireGoalTool_setsGoal() = runTest {
         val repo = mockk<FireGoalRepository>(relaxed = true)
         val tool = SetFireGoalTool(repo)
         val context = mockk<ToolContext>(relaxed = true)
@@ -327,7 +327,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetStockInfoTool 未找到股票返回错误`() = runTest {
+    fun getStockInfoTool_returnsErrorWhenNotFound() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.resolveStock("000000") } returns null
         val tool = GetStockInfoTool(stockRepo, mockk(relaxed = true))
@@ -337,7 +337,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `SearchStockTool 返回搜索结果`() = runTest {
+    fun searchStockTool_returnsResults() = runTest {
         val repo = mockk<StockRepository>(relaxed = true)
         coEvery { repo.searchStocks("茅台") } returns Result.success(
             listOf(StockSearchResult("sh.600519", "贵州茅台", "1", 1500.0))
@@ -351,7 +351,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetDividendHistoryTool 未找到股票返回错误`() = runTest {
+    fun getDividendHistoryTool_returnsErrorWhenNotFound() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.resolveStock("000000") } returns null
         val tool = GetDividendHistoryTool(mockk(relaxed = true), stockRepo)
@@ -361,7 +361,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetValuationTool 分红数据不足返回错误`() = runTest {
+    fun getValuationTool_returnsErrorOnInsufficientData() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         val dividendRepo = mockk<DividendRepository>(relaxed = true)
@@ -373,7 +373,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetBuyThresholdTool 返回买入线字段`() = runTest {
+    fun getBuyThresholdTool_returnsThresholdFields() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600519" to 1500.0)
@@ -391,7 +391,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetStockEvaluationTool 无现价返回错误`() = runTest {
+    fun getStockEvaluationTool_returnsErrorWithoutPrice() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
@@ -403,7 +403,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetPortfolioSummaryTool 空组合返回零值与预测`() = runTest {
+    fun getPortfolioSummaryTool_returnsZerosForEmptyPortfolio() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
         coEvery { stockRepo.getCachedPrices(emptyList()) } returns emptyMap()
@@ -422,7 +422,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetTransactionsTool code 未找到返回错误`() = runTest {
+    fun getTransactionsTool_returnsErrorWhenCodeNotFound() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.resolveStock("000000") } returns null
         val tool = GetTransactionsTool(stockRepo, mockk(relaxed = true))
@@ -432,7 +432,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetNotificationRulesTool 空持仓返回空规则列表`() = runTest {
+    fun getNotificationRulesTool_returnsEmptyForEmptyHoldings() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
         val ruleRepo = mockk<NotificationRuleRepository>(relaxed = true)
@@ -445,7 +445,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetUserStrategiesTool 返回策略列表`() = runTest {
+    fun getUserStrategiesTool_returnsStrategies() = runTest {
         val repo = mockk<TradeStrategyRepository>(relaxed = true)
         coEvery { repo.activeStrategies() } returns emptyList()
         val tool = GetUserStrategiesTool(repo)
@@ -455,7 +455,7 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun `GetLivingExpensesTool 返回支出列表含 id`() = runTest {
+    fun getLivingExpensesTool_returnsExpensesWithId() = runTest {
         val repo = mockk<LivingExpenseRepository>(relaxed = true)
         coEvery { repo.observeExpenses() } returns flowOf(
             listOf(LivingExpenseItemEntity(id = 7L, name = "房租", amount = 3000.0, period = "MONTHLY", sortOrder = 0))
