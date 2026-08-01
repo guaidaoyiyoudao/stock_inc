@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 用户从相册选截图 → 复用 OCR → LLM 提取半结构化买卖策略 → 两步 Review → 持久化；并把策略按 stockCode 回流进个股/组合 AI 分析 prompt。
+**Goal:** 用户从相册选截图 → 复用 OCR → LLM 提取半结构化买卖策略 → 两步 Review → 持久化（全局策略，不绑定个股）；并把全部活跃策略作为「用户投资原则」回流进个股/组合 AI 分析 prompt。
 
-**Architecture:** 新增 `trade_strategies` Room 表（DB v15→16 + `MIGRATION_15_16`）；OCR 复用 `TextRecognitionService` 拿纯文本，新 `ScreenshotStrategyRepository` 编排 LLM 提取（Prompt/Parser 均为纯函数）；新 `ScreenshotImportViewModel`（两步 Review：OCR 文本可编辑 → 策略字段全可编辑 + 自选股关联）；`TradeStrategyListViewModel` 列表页（设置页入口）；回流：`StockLlmInput`/`EvaluatedStock` 加 `userStrategies`，两个 PromptBuilder 渲染「用户既有策略」段（`sourceNote` 不入 prompt）。
+**Architecture:** 新增 `trade_strategies` Room 表（DB v15→16 + `MIGRATION_15_16`，**无 stockCode**，策略全局）；OCR 复用 `TextRecognitionService` 拿纯文本，新 `ScreenshotStrategyRepository` 编排 LLM 提取（Prompt/Parser 均纯函数）；新 `ScreenshotImportViewModel`（两步 Review：OCR 文本可编辑 → 策略字段全可编辑，**不关联个股**）；`TradeStrategyListViewModel` 列表页（设置页入口）；回流：策略是全局背景而非个股属性，故**不**给 `StockLlmInput`/`EvaluatedStock` 加字段，而是作为独立参数注入两个 PromptBuilder（VM 取一次 `activeStrategies()` 全局策略传给 builder，`sourceNote` 不入 prompt）。
 
 **Tech Stack:** Kotlin 2.0.21 / Room 2.6.1 / Hilt / Compose M3 1.3.1 / Retrofit LLM / JUnit4 + MockK + Truth + Robolectric。
 
@@ -15,15 +15,15 @@
 ## 文件结构（映射 spec §10）
 
 **新增（main）：**
-- `data/local/entity/TradeStrategyEntity.kt` — Room 实体 + 方向/状态常量
-- `data/local/dao/TradeStrategyDao.kt` — DAO
+- `data/local/entity/TradeStrategyEntity.kt` — Room 实体 + 方向/状态常量（无 stockCode）
+- `data/local/dao/TradeStrategyDao.kt` — DAO（activeStrategies 全局无参）
 - `data/repository/ScreenshotStrategy.kt` — 提取结果模型 + `ScreenshotStrategyState` sealed
 - `data/repository/ScreenshotStrategyPromptBuilder.kt` — 纯函数 prompt
 - `data/repository/ScreenshotStrategyParser.kt` — 纯函数 parser
 - `data/repository/ScreenshotStrategyRepository.kt` — LLM 编排
-- `data/repository/TradeStrategyRepository.kt` — 持久化封装 + 回流查询 + risks JSON codec + matchTargetStock
+- `data/repository/TradeStrategyRepository.kt` — 持久化封装 + 回流查询 + risks JSON codec + toUserStrategyRef
 - `data/repository/UserStrategyRef.kt` — 回流纯数据
-- `viewmodel/ScreenshotImportViewModel.kt` — 导入页 VM + EditableStrategy + StockMatchResult + ImportPhase 扩展
+- `viewmodel/ScreenshotImportViewModel.kt` — 导入页 VM + EditableStrategy + ImportPhase 扩展（无 StockMatchResult，不注入 StockRepository）
 - `viewmodel/TradeStrategyListViewModel.kt` — 列表页 VM
 - `ui/screen/ScreenshotImportScreen.kt` — 导入页 UI（两步 Review）
 - `ui/screen/TradeStrategyListScreen.kt` — 列表页 UI
@@ -33,15 +33,15 @@
 - `di/DatabaseModule.kt` — 注册迁移 + DAO provider
 - `data/local/backup/BackupData.kt` — 加 tradeStrategies 字段
 - `data/repository/BackupRepository.kt` — 导出/导入加 trade_strategies
-- `data/repository/StockLlmInput.kt` — 加 userStrategies
-- `data/repository/StockLlmPromptBuilder.kt` — system 语义 + user 渲染
-- `data/repository/EvaluatedStock.kt` — 加 userStrategies
-- `data/repository/LlmPromptBuilder.kt` — 组合级每股附策略
-- `viewmodel/StockDetailViewModel.kt` — analyzeWithLlm 注入并取策略
-- `viewmodel/PortfolioViewModel.kt` — analyzeWithLlm 批量取策略
+- `data/repository/StockLlmPromptBuilder.kt` — `build` 加 `userStrategies` 参数；system 语义 + user 渲染「用户投资原则」段
+- `data/repository/LlmPromptBuilder.kt` — `build` 加 `userStrategies` 参数；组合级渲染全局「用户投资原则」段
+- `viewmodel/StockDetailViewModel.kt` — analyzeWithLlm 注入 TradeStrategyRepository 取全局策略传给 builder
+- `viewmodel/PortfolioViewModel.kt` — analyzeWithLlm 注入 TradeStrategyRepository 取一次全局策略传给 builder
 - `ui/navigation/AppNavigation.kt` — Routes + composable
 - `ui/screen/MainScaffold.kt` — 设置页入口跳转
 - `ui/screen/NotificationSettingsScreen.kt` — SettingsScreen 加策略库入口
+
+**不动：** `StockLlmInput`/`EvaluatedStock`（不加 userStrategies 字段，策略是 builder 参数而非个股属性）、`LlmApi`、`TextRecognitionService`/`BitmapLoader`、`HoldingScreenshotParser`、`JsonExtraction`、`LlmAnalysisRepository`。
 
 **测试：** 与 main 包结构对齐，放 `app/src/test/java/com/stock/dividend/...`
 
@@ -53,7 +53,7 @@
 - Create: `app/src/main/java/com/stock/dividend/data/local/entity/TradeStrategyEntity.kt`
 - Create: `app/src/main/java/com/stock/dividend/data/local/dao/TradeStrategyDao.kt`
 
-- [ ] **Step 1: 创建实体**
+- [ ] **Step 1: 创建实体（无 stockCode，策略全局）**
 
 ```kotlin
 // data/local/entity/TradeStrategyEntity.kt
@@ -72,7 +72,6 @@ const val STRATEGY_STATUS_ARCHIVED = "ARCHIVED"
 @Entity(tableName = "trade_strategies")
 data class TradeStrategyEntity(
     val id: String,
-    val stockCode: String?,
     val targetText: String,
     val direction: String,
     val reasoning: String,
@@ -86,7 +85,7 @@ data class TradeStrategyEntity(
 )
 ```
 
-- [ ] **Step 2: 创建 DAO**
+- [ ] **Step 2: 创建 DAO（activeStrategies 全局无参）**
 
 ```kotlin
 // data/local/dao/TradeStrategyDao.kt
@@ -104,14 +103,12 @@ interface TradeStrategyDao {
     @Query("SELECT * FROM trade_strategies ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<TradeStrategyEntity>>
 
-    @Query("SELECT * FROM trade_strategies WHERE stockCode = :code AND status = 'ACTIVE' ORDER BY createdAt DESC")
-    fun observeByStock(code: String): Flow<List<TradeStrategyEntity>>
-
+    /** 全部活跃且未过期的策略（回流用，全局，不过滤个股）。 */
     @Query(
-        "SELECT * FROM trade_strategies WHERE stockCode = :code AND status = 'ACTIVE' " +
+        "SELECT * FROM trade_strategies WHERE status = 'ACTIVE' " +
             "AND (validUntil IS NULL OR validUntil >= :today) ORDER BY createdAt DESC"
     )
-    suspend fun activeStrategiesFor(code: String, today: String): List<TradeStrategyEntity>
+    suspend fun activeStrategies(today: String): List<TradeStrategyEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: TradeStrategyEntity)
@@ -138,7 +135,7 @@ interface TradeStrategyDao {
 ```bash
 git add app/src/main/java/com/stock/dividend/data/local/entity/TradeStrategyEntity.kt \
         app/src/main/java/com/stock/dividend/data/local/dao/TradeStrategyDao.kt
-git commit -m "feat(stock): trade_strategies 实体与 DAO"
+git commit -m "feat(stock): trade_strategies 实体与 DAO（全局策略，无 stockCode）"
 ```
 
 ---
@@ -164,7 +161,6 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS `trade_strategies` (" +
                     "`id` TEXT NOT NULL PRIMARY KEY, " +
-                    "`stockCode` TEXT, " +
                     "`targetText` TEXT NOT NULL, " +
                     "`direction` TEXT NOT NULL, " +
                     "`reasoning` TEXT NOT NULL, " +
@@ -176,13 +172,11 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
                     "`createdAt` INTEGER NOT NULL, " +
                     "`updatedAt` INTEGER NOT NULL)"
         )
-        db.execSQL(
-            "CREATE INDEX IF NOT EXISTS `index_trade_strategies_stockCode` " +
-                    "ON `trade_strategies`(`stockCode`)"
-        )
     }
 }
 ```
+
+> 无 `stockCode` 列，无索引（策略全局，不按股查）。
 
 - [ ] **Step 2: DatabaseModule 注册迁移 + DAO provider**
 
@@ -211,24 +205,24 @@ git commit -m "feat(db): trade_strategies 迁移 v15→v16 + DAO 注册"
 
 ---
 
-## Task 3: 纯函数 — risks JSON codec + matchTargetStock（TDD）
+## Task 3: 纯函数 — risks JSON codec + toUserStrategyRef（TDD）
 
 **Files:**
-- Create: `app/src/main/java/com/stock/dividend/data/repository/TradeStrategyRepository.kt`（先只放纯函数）
-- Test: `app/src/test/java/com/stock/dividend/data/repository/TradeStrategyRepositoryTest.kt`
+- Create: `app/src/main/java/com/stock/dividend/data/repository/UserStrategyRef.kt`
+- Create: `app/src/main/java/com/stock/dividend/data/repository/TradeStrategyRepository.kt`（先只放纯函数 + 顶层 codec）
+- Test: `app/src/test/java/com/stock/dividend/data/repository/TradeStrategyRepositoryCodecTest.kt`
 
 - [ ] **Step 1: 写失败测试**
 
 ```kotlin
-// test/.../TradeStrategyRepositoryTest.kt
+// test/.../TradeStrategyRepositoryCodecTest.kt
 package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
-import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TradeStrategyEntity
 import org.junit.Test
 
-class TradeStrategyRepositoryTest {
+class TradeStrategyRepositoryCodecTest {
 
     @Test
     fun risks_roundTrip() {
@@ -254,58 +248,29 @@ class TradeStrategyRepositoryTest {
     }
 
     @Test
-    fun match_bySixDigitCode() {
-        val stocks = listOf(
-            StockEntity(code = "SH.600036", name = "招商银行", marketCode = "1"),
-            StockEntity(code = "SZ.000001", name = "平安银行", marketCode = "1")
-        )
-        val r = matchTargetStock("600036", stocks)
-        assertThat(r).isInstanceOf(StockMatchResult.Matched::class.java)
-        assertThat((r as StockMatchResult.Matched).code).isEqualTo("SH.600036")
-    }
-
-    @Test
-    fun match_byNameContains() {
-        val stocks = listOf(StockEntity(code = "SH.600036", name = "招商银行", marketCode = "1"))
-        val r = matchTargetStock("招商", stocks)
-        assertThat((r as StockMatchResult.Matched).code).isEqualTo("SH.600036")
-    }
-
-    @Test
-    fun match_none_returnsUnmatched() {
-        val stocks = listOf(StockEntity(code = "SH.600036", name = "招商银行", marketCode = "1"))
-        assertThat(matchTargetStock("999999", stocks)).isEqualTo(StockMatchResult.Unmatched)
-    }
-
-    @Test
-    fun match_emptyTarget_returnsUnmatched() {
-        val stocks = listOf(StockEntity(code = "SH.600036", name = "招商银行", marketCode = "1"))
-        assertThat(matchTargetStock("", stocks)).isEqualTo(StockMatchResult.Unmatched)
-    }
-
-    @Test
-    fun toUserStrategyRef_daysAgo() {
+    fun toUserStrategyRef_daysAgo_andNoSourceNote() {
         val now = System.currentTimeMillis()
         val threeDaysAgo = now - 3L * 24 * 3600 * 1000
         val e = TradeStrategyEntity(
-            id = "x", stockCode = "SH.600036", targetText = "招商银行",
+            id = "x", targetText = "招商银行",
             direction = "BUY", reasoning = "r", risks = "[]", validUntil = null,
             sourceNote = "研报", rawOcrText = "t", createdAt = threeDaysAgo
         )
         val ref = toUserStrategyRef(e, now)
         assertThat(ref.daysAgo).isEqualTo(3)
         assertThat(ref.direction).isEqualTo("BUY")
-        assertThat(ref.sourceNoteIncluded).isFalse()  // sourceNote 不入 ref
+        assertThat(ref.reasoning).isEqualTo("r")
+        // UserStrategyRef 无 sourceNote 字段，编译期保证来源不入 prompt
     }
 }
 ```
 
 - [ ] **Step 2: 运行测试验证失败**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.TradeStrategyRepositoryTest"`
+Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.TradeStrategyRepositoryCodecTest"`
 Expected: FAIL（符号未定义）
 
-- [ ] **Step 3: 实现 `UserStrategyRef` + sealed `StockMatchResult` + 顶层纯函数**
+- [ ] **Step 3: 实现 `UserStrategyRef` + 顶层纯函数**
 
 ```kotlin
 // data/repository/UserStrategyRef.kt
@@ -322,25 +287,11 @@ data class UserStrategyRef(
 ```
 
 ```kotlin
-// viewmodel/ScreenshotImportViewModel.kt（仅先放 sealed，VM 主体 Task 9 再补）
-// —— 注意：StockMatchResult 是 UI/VM 层概念，放 viewmodel 包
-```
-
-为避免循环依赖，`matchTargetStock` 入参是 `List<StockEntity>`、返回值需 `StockMatchResult`。把 `StockMatchResult` 定义在 `data/repository` 层更合理（匹配逻辑是领域行为）。改放 `TradeStrategyRepository.kt` 同文件：
-
-```kotlin
-// data/repository/TradeStrategyRepository.kt（本 Task 仅放纯函数 + sealed）
+// data/repository/TradeStrategyRepository.kt（本 Task 仅放纯函数 + codec；@Singleton 类 Task 7 追加）
 package com.stock.dividend.data.repository
 
-import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TradeStrategyEntity
 import org.json.JSONArray
-import org.json.JSONException
-
-sealed interface StockMatchResult {
-    data class Matched(val code: String, val name: String) : StockMatchResult
-    data object Unmatched : StockMatchResult
-}
 
 /** risks List<String> → JSON 数组字符串。 */
 fun risksToJsonString(risks: List<String>): String {
@@ -356,23 +307,6 @@ fun risksFromJson(raw: String?): List<String> = runCatching {
     (0 until arr.length()).mapNotNull { runCatching { arr.getString(it) }.getOrNull() }
 }.getOrDefault(emptyList())
 
-private val sixDigitCodeRegex = Regex("(?<!\\d)\\d{6}(?!\\d)")
-
-/**
- * 用 LLM 提取的标的文本在自选股里模糊匹配：先匹配 6 位代码，再按名称包含。
- */
-fun matchTargetStock(targetText: String, stocks: List<StockEntity>): StockMatchResult {
-    val t = targetText.trim()
-    if (t.isEmpty()) return StockMatchResult.Unmatched
-    sixDigitCodeRegex.find(t)?.value?.let { code ->
-        stocks.firstOrNull { it.code.endsWith(".$code") || it.code.endsWith(code) }
-            ?.let { return StockMatchResult.Matched(it.code, it.name) }
-    }
-    stocks.firstOrNull { it.name.contains(t) || t.contains(it.name) }
-        ?.let { return StockMatchResult.Matched(it.code, it.name) }
-    return StockMatchResult.Unmatched
-}
-
 /** 实体 → 回流引用（sourceNote 不传入，daysAgo 由 now 计算）。 */
 fun toUserStrategyRef(entity: TradeStrategyEntity, now: Long = System.currentTimeMillis()): UserStrategyRef {
     val daysAgo = ((now - entity.createdAt) / (24L * 3600 * 1000)).toInt().coerceAtLeast(0)
@@ -386,26 +320,18 @@ fun toUserStrategyRef(entity: TradeStrategyEntity, now: Long = System.currentTim
 }
 ```
 
-> 注：测试里 `ref.sourceNoteIncluded` 改为不存在 → 修测试断言为只校验 daysAgo/direction。修正测试第 9 个用例最后两行：
-
-```kotlin
-val ref = toUserStrategyRef(e, now)
-assertThat(ref.daysAgo).isEqualTo(3)
-assertThat(ref.direction).isEqualTo("BUY")
-```
-
 - [ ] **Step 4: 运行测试验证通过**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.TradeStrategyRepositoryTest"`
-Expected: PASS（9 个用例全绿）
+Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.TradeStrategyRepositoryCodecTest"`
+Expected: PASS（5 个用例全绿）
 
 - [ ] **Step 5: 提交**
 
 ```bash
 git add app/src/main/java/com/stock/dividend/data/repository/UserStrategyRef.kt \
         app/src/main/java/com/stock/dividend/data/repository/TradeStrategyRepository.kt \
-        app/src/test/java/com/stock/dividend/data/repository/TradeStrategyRepositoryTest.kt
-git commit -m "feat(stock): risks codec + matchTargetStock + toUserStrategyRef 纯函数与测试"
+        app/src/test/java/com/stock/dividend/data/repository/TradeStrategyRepositoryCodecTest.kt
+git commit -m "feat(stock): risks codec + toUserStrategyRef 纯函数与测试"
 ```
 
 ---
@@ -696,10 +622,8 @@ git commit -m "feat(llm): 截图策略 parser 纯函数与测试"
 ## Task 6: ScreenshotStrategyRepository 编排（TDD）
 
 **Files:**
-- Create: `app/src/main/java/com/stock/dividend/data/repository/ScreenshotStrategyRepository.kt`（在 Task 3 文件追加，或独立；此处独立放编排类）
+- Create: `app/src/main/java/com/stock/dividend/data/repository/ScreenshotStrategyRepository.kt`
 - Test: `app/src/test/java/com/stock/dividend/data/repository/ScreenshotStrategyRepositoryTest.kt`
-
-> 注：Task 3 已创建 `TradeStrategyRepository.kt` 放纯函数。本 Task 的编排类 `ScreenshotStrategyRepository` 与持久化类 `TradeStrategyRepository` 都需 `@Singleton class`，放同一文件易混，故编排类放独立文件 `ScreenshotStrategyRepository.kt`；持久化 `@Singleton class TradeStrategyRepository` 追加到 `TradeStrategyRepository.kt`（Task 7）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -708,7 +632,6 @@ package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.remote.LlmApi
-import com.stock.dividend.data.remote.dto.LlmChatRequest
 import com.stock.dividend.data.remote.dto.LlmChatResponse
 import io.mockk.coEvery
 import io.mockk.every
@@ -724,11 +647,6 @@ class ScreenshotStrategyRepositoryTest {
     private val llmApi = mockk<LlmApi>()
     private val configSource = mockk<LlmConfigSource>()
     private val repo = ScreenshotStrategyRepository(llmApi, configSource)
-
-    private fun cfg(complete: Boolean) = LlmConfig(
-        baseUrl = "https://api.x.com", apiKey = "k", model = "m",
-        // isComplete 由 LlmConfig 实现；mock 时直接 stub
-    )
 
     @Test
     fun notConfigured() = runTest {
@@ -779,17 +697,13 @@ class ScreenshotStrategyRepositoryTest {
         assertThat(repo.analyze("text")).isInstanceOf(ScreenshotStrategyState.Error::class.java)
     }
 
-    // 复用 LlmConfig 真实结构；这里用辅助构造（见 LlmConfig.kt 真实字段）
-    private fun completeConfig(): LlmConfig = LlmConfig(
-        baseUrl = "https://api.x.com", apiKey = "k", model = "m", providerId = ""
-    )
-    private fun incompleteConfig(): LlmConfig = LlmConfig(
-        baseUrl = "", apiKey = "", model = "", providerId = ""
-    )
+    // 按真实 LlmConfig.kt 字段构造；isComplete=true/false
+    private fun completeConfig(): LlmConfig = LlmConfig(baseUrl = "https://api.x.com", apiKey = "k", model = "m", providerId = "")
+    private fun incompleteConfig(): LlmConfig = LlmConfig(baseUrl = "", apiKey = "", model = "", providerId = "")
 }
 ```
 
-> **实现前先核对 `LlmConfig` 真实字段**（`data/repository/LlmConfig.kt`），按真实字段调整 `completeConfig()`/`incompleteConfig()` 构造，确保 `isComplete` 返回 true/false。若字段名不一致，以真实文件为准修正测试。
+> **实现前先核对 `LlmConfig.kt` 真实字段与 `isComplete` 判定**，按真实构造调整 `completeConfig()`/`incompleteConfig()`。
 
 - [ ] **Step 2: 运行验证失败**
 
@@ -855,7 +769,7 @@ class ScreenshotStrategyRepository @Inject constructor(
 - [ ] **Step 4: 运行验证通过**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.ScreenshotStrategyRepositoryTest"`
-Expected: PASS（核对真实 `LlmConfig` 后调整测试，确保 6 用例绿）
+Expected: PASS（6 用例）
 
 - [ ] **Step 5: 提交**
 
@@ -878,7 +792,6 @@ git commit -m "feat(llm): 截图策略 ScreenshotStrategyRepository 编排与测
 
 ```kotlin
 import com.stock.dividend.data.local.dao.TradeStrategyDao
-import com.stock.dividend.data.local.entity.STRATEGY_STATUS_ACTIVE
 import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -890,8 +803,9 @@ class TradeStrategyRepository @Inject constructor(
     suspend fun upsert(entity: TradeStrategyEntity) =
         runCatching { strategyDao.upsert(entity) }.getOrNull()  // 红线 #2
 
-    suspend fun activeStrategiesFor(code: String): List<TradeStrategyEntity> =
-        runCatching { strategyDao.activeStrategiesFor(code, LocalDate.now().toString()) }
+    /** 全部活跃且未过期的策略（全局回流，不过滤个股）。 */
+    suspend fun activeStrategies(): List<TradeStrategyEntity> =
+        runCatching { strategyDao.activeStrategies(LocalDate.now().toString()) }
             .getOrDefault(emptyList())
 }
 ```
@@ -905,7 +819,7 @@ Expected: BUILD SUCCESSFUL
 
 ```bash
 git add app/src/main/java/com/stock/dividend/data/repository/TradeStrategyRepository.kt
-git commit -m "feat(stock): TradeStrategyRepository 持久化封装（吞异常）"
+git commit -m "feat(stock): TradeStrategyRepository 持久化封装（全局 activeStrategies）"
 ```
 
 ---
@@ -940,7 +854,7 @@ data class BackupContainer(
 
 - [ ] **Step 3: 扩展 BackupRepositoryTest round-trip**
 
-在现有测试类加一用例：构造含 `tradeStrategies` 的 `BackupContainer`，导出再导入，断言 `tradeStrategyDao.getAllForBackup()` 与原数据一致。具体断言模仿现有 `notificationRules` round-trip 用例。
+在现有测试类加一用例：构造含 `tradeStrategies` 的 `BackupContainer`，导出再导入，断言 `tradeStrategyDao.getAllForBackup()` 与原数据一致（实体字段无 `stockCode`）。具体断言模仿现有 `notificationRules` round-trip 用例。
 
 - [ ] **Step 4: 运行测试**
 
@@ -958,80 +872,71 @@ git commit -m "feat(backup): trade_strategies 纳入备份/恢复"
 
 ---
 
-## Task 9: 回流 — StockLlmInput + StockLlmPromptBuilder（TDD）
+## Task 9: 回流 — StockLlmPromptBuilder 加参数（TDD）
+
+> 策略全局，**不**改 `StockLlmInput`（不加字段），`userStrategies` 作为 `build` 的独立参数。
 
 **Files:**
-- Modify: `app/src/main/java/com/stock/dividend/data/repository/StockLlmInput.kt`
 - Modify: `app/src/main/java/com/stock/dividend/data/repository/StockLlmPromptBuilder.kt`
 - Test: 扩展 `app/src/test/java/com/stock/dividend/data/repository/StockLlmPromptBuilderTest.kt`
 
-- [ ] **Step 1: StockLlmInput 加字段**
+- [ ] **Step 1: 写失败测试**
 
-在 `StockLlmInput` data class 末尾（`fundamentals` 之后）加：
-
-```kotlin
-/** 该股的用户既有策略（来自截图分析，回流进 prompt）；缺失为空。 */
-val userStrategies: List<UserStrategyRef> = emptyList(),
-```
-
-- [ ] **Step 2: 写失败测试**
-
-在 `StockLlmPromptBuilderTest` 加用例：
+在 `StockLlmPromptBuilderTest` 加用例（`baseInput()` 用现有测试构造 `StockLlmInput` 的辅助）：
 
 ```kotlin
 @Test
 fun userStrategies_rendered_withoutSourceNote() {
-    val input = baseInput().copy(
-        userStrategies = listOf(
-            UserStrategyRef("BUY", "ROE高", listOf("息差收窄"), "2026-09-01", 3)
-        )
-    )
-    val u = StockLlmPromptBuilder.build(input).user
-    assertThat(u).contains("用户既有策略")
+    val input = baseInput()
+    val u = StockLlmPromptBuilder.build(input, listOf(
+        UserStrategyRef("BUY", "ROE高", listOf("息差收窄"), "2026-09-01", 3)
+    )).user
+    assertThat(u).contains("用户投资原则")
     assertThat(u).contains("[买入]")
     assertThat(u).contains("ROE高")
     assertThat(u).contains("3天前")
-    // sourceNote 不存在该字段，无需断言
 }
 
 @Test
 fun userStrategies_empty_rendersDash() {
     val u = StockLlmPromptBuilder.build(baseInput()).user
-    assertThat(u).contains("用户既有策略")
+    assertThat(u).contains("用户投资原则")
 }
 
 @Test
 fun system_containsUserStrategySemantics() {
     val s = StockLlmPromptBuilder.build(baseInput()).system
-    assertThat(s).contains("用户既有策略")
+    assertThat(s).contains("用户投资原则")
 }
 ```
 
-（`baseInput()` 用现有测试里构造 `StockLlmInput` 的辅助方法；若无则就地构造一个最小合法 input。）
-
-- [ ] **Step 3: 运行验证失败**
+- [ ] **Step 2: 运行验证失败**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.StockLlmPromptBuilderTest"`
-Expected: FAIL（新用例）
+Expected: FAIL（新用例，`build` 单参重载不含策略段）
 
-- [ ] **Step 4: 实现 prompt 渲染**
+- [ ] **Step 3: 实现 prompt 加参数 + 渲染**
 
 在 `StockLlmPromptBuilder.kt`：
+- `build` 签名改为：
+  ```kotlin
+  fun build(input: StockLlmInput, userStrategies: List<UserStrategyRef> = emptyList()): LlmPrompt =
+      LlmPrompt(SYSTEM, buildUser(input, userStrategies))
+  ```
 - `SYSTEM` 的 `【数据语义】` 段末尾追加一行：
   ```
-  - 用户既有策略：用户此前从外部内容整理出的观点，属用户个人关注视角，非客观数据；解读时可对照呼应，但不要盲从或简单复述。
+  - 用户投资原则：用户此前从外部内容整理出的整体投资观点，对所有标的通用，属用户个人视角，非客观数据；解读时可对照呼应，但不要盲从或简单复述。
   ```
-- `buildUser(input)` 末尾（基本面渲染之后）追加：
+- `buildUser` 签名加 `userStrategies: List<UserStrategyRef>` 参数；末尾（基本面渲染之后）追加：
 
 ```kotlin
-// 用户既有策略（回流，不含 sourceNote）
-sb.append("【用户既有策略（来自截图分析，仅供参照）】")
-val us = input.userStrategies
-if (us.isNullOrEmpty()) {
+// 用户投资原则（全局回流，不含 sourceNote）
+sb.append("【用户投资原则（来自截图分析，全局，仅供参照）】")
+if (userStrategies.isEmpty()) {
     sb.append("—\n")
 } else {
     sb.append("\n")
-    us.forEach { ref ->
+    userStrategies.forEach { ref ->
         val dirZh = when (ref.direction) {
             "BUY" -> "买入"; "SELL" -> "卖出"; else -> "观望"
         }
@@ -1043,88 +948,100 @@ if (us.isNullOrEmpty()) {
 }
 ```
 
-- [ ] **Step 5: 运行验证通过**
+> 单参 `build(input)` 现有测试不受影响（默认空策略列表 → 渲染「—」）。
+
+- [ ] **Step 4: 运行验证通过**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.StockLlmPromptBuilderTest"`
 Expected: PASS（含新用例，原用例不回归）
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
-git add app/src/main/java/com/stock/dividend/data/repository/StockLlmInput.kt \
-        app/src/main/java/com/stock/dividend/data/repository/StockLlmPromptBuilder.kt \
+git add app/src/main/java/com/stock/dividend/data/repository/StockLlmPromptBuilder.kt \
         app/src/test/java/com/stock/dividend/data/repository/StockLlmPromptBuilderTest.kt
-git commit -m "feat(llm): 个股 AI 分析 prompt 回流用户既有策略（无 sourceNote）"
+git commit -m "feat(llm): 个股 AI 分析 build 加全局用户投资原则参数（无 sourceNote）"
 ```
 
 ---
 
-## Task 10: 回流 — 组合级 EvaluatedStock + LlmPromptBuilder（TDD）
+## Task 10: 回流 — 组合级 LlmPromptBuilder 加参数（TDD）
+
+> 策略全局，**不**改 `EvaluatedStock`（不加字段），`userStrategies` 作为 `build` 独立参数。
 
 **Files:**
-- Modify: `app/src/main/java/com/stock/dividend/data/repository/EvaluatedStock.kt`
 - Modify: `app/src/main/java/com/stock/dividend/data/repository/LlmPromptBuilder.kt`
 - Test: 扩展 `app/src/test/java/com/stock/dividend/data/repository/LlmPromptBuilderTest.kt`
 
-- [ ] **Step 1: EvaluatedStock 加字段**
-
-在 `EvaluatedStock` 末尾（`reasons` 之后）加：
-
-```kotlin
-val userStrategies: List<UserStrategyRef> = emptyList(),
-```
-
-- [ ] **Step 2: 写失败测试**
+- [ ] **Step 1: 写失败测试**
 
 ```kotlin
 @Test
-fun userStrategies_renderedPerStock_withoutSourceNote() {
+fun userStrategies_renderedGlobally_withoutSourceNote() {
     val s = EvaluatedStock(
         code = "SH.600036", name = "招商银行", industry = "银行",
         action = HoldingAction.HOLD, priceVsLower = 0.5, dividendYield = 4.0,
-        bollBand = null, currentPrice = null, reasons = emptyList(),
-        userStrategies = listOf(UserStrategyRef("BUY", "ROE高", emptyList(), null, 5))
+        bollBand = null, currentPrice = null, reasons = emptyList()
     )
-    // 调现有 build(...) 测试辅助构造其余参数（参考现有 LlmPromptBuilderTest 用例）
-    val u = LlmPromptBuilder.build(listOf(s), emptyMap(), emptyMap(), signals(), thresholds()).user
+    // 用现有测试辅助构造 signals()/thresholds()
+    val u = LlmPromptBuilder.build(
+        listOf(s), emptyMap(), emptyMap(), signals(), thresholds(),
+        listOf(UserStrategyRef("BUY", "ROE高", emptyList(), null, 5))
+    ).user
+    assertThat(u).contains("用户投资原则")
     assertThat(u).contains("[买入]")
     assertThat(u).contains("5天前")
 }
 ```
 
-（`signals()`/`thresholds()` 用现有测试辅助构造。）
-
-- [ ] **Step 3: 运行验证失败**
+- [ ] **Step 2: 运行验证失败**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.LlmPromptBuilderTest"`
 Expected: FAIL
 
-- [ ] **Step 4: 实现**
+- [ ] **Step 3: 实现**
 
-在 `LlmPromptBuilder.buildUser` 的每股循环（`stocks.forEach { s -> ... }`）末尾，在 `append("\n")` 之前追加该股策略渲染：
+在 `LlmPromptBuilder.kt`：
+- `build` 签名加参数：
+  ```kotlin
+  fun build(
+      evaluatedStocks: List<EvaluatedStock>,
+      dailyBands: Map<String, BollBand?>,
+      monthlyBands: Map<String, BollBand?>,
+      signals: PortfolioSignals,
+      thresholds: DividendThresholds,
+      userStrategies: List<UserStrategyRef> = emptyList(),
+  ): LlmPrompt = LlmPrompt(SYSTEM, buildUser(..., userStrategies))
+  ```
+- `SYSTEM` `【数据语义】` 末尾加同款「用户投资原则」语义条。
+- `buildUser` 在「策略信号」段之后追加全局渲染（一次，不按股）：
 
 ```kotlin
-if (s.userStrategies.isNotEmpty()) {
-    s.userStrategies.forEach { ref ->
+sb.append("【用户投资原则（来自截图分析，全局，仅供参照）】")
+if (userStrategies.isEmpty()) {
+    sb.append("—\n")
+} else {
+    sb.append("\n")
+    userStrategies.forEach { ref ->
         val dirZh = when (ref.direction) { "BUY"->"买入"; "SELL"->"卖出"; else->"观望" }
-        sb.append(" | 既有策略[$dirZh] ${ref.reasoning}(${ref.daysAgo}天前)")
+        sb.append("- [$dirZh] ${ref.reasoning}(${ref.daysAgo}天前)")
         if (ref.risks.isNotEmpty()) sb.append(" 风险:${ref.risks.joinToString("/")}")
+        sb.append("\n")
     }
 }
 ```
 
-- [ ] **Step 5: 运行验证通过**
+- [ ] **Step 4: 运行验证通过**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.data.repository.LlmPromptBuilderTest"`
 Expected: PASS
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
-git add app/src/main/java/com/stock/dividend/data/repository/EvaluatedStock.kt \
-        app/src/main/java/com/stock/dividend/data/repository/LlmPromptBuilder.kt \
+git add app/src/main/java/com/stock/dividend/data/repository/LlmPromptBuilder.kt \
         app/src/test/java/com/stock/dividend/data/repository/LlmPromptBuilderTest.kt
-git commit -m "feat(llm): 组合级 AI 分析 prompt 回流每股用户策略"
+git commit -m "feat(llm): 组合级 AI 分析 build 加全局用户投资原则参数"
 ```
 
 ---
@@ -1137,33 +1054,42 @@ git commit -m "feat(llm): 组合级 AI 分析 prompt 回流每股用户策略"
 - Test: 扩展 `app/src/test/java/com/stock/dividend/viewmodel/StockDetailViewModelTest.kt`
 - Test: 扩展 `app/src/test/java/com/stock/dividend/viewmodel/PortfolioViewModelTest.kt`
 
-- [ ] **Step 1: StockDetailViewModel 注入 + 取策略**
+- [ ] **Step 1: StockDetailViewModel 注入 + 取全局策略传给 builder**
 
-- 构造函数加 `private val strategyRepository: TradeStrategyRepository`（参考 `analyzeWithLlm` 现有 `StockRepository` 注入位置）。
-- 在 `buildStockLlmInput(...)` 内，组装 `StockLlmInput(...)` 时给 `userStrategies` 传值。因 `buildStockLlmInput` 是挂起外的私有函数且需调挂起 `activeStrategiesFor`，改为：在 `analyzeWithLlm()` 的 `viewModelScope.launch` 内、`buildStockLlmInput` 调用前，先 `val userStrategies = runCatching { strategyRepository.activeStrategiesFor(stock.code).map { toUserStrategyRef(it) } }.getOrDefault(emptyList())`，然后把它作为参数传入 `buildStockLlmInput`（函数签名加一个参数 `userStrategies: List<UserStrategyRef>`），赋给 `StockLlmInput.userStrategies`。
+- 构造函数加 `private val strategyRepository: TradeStrategyRepository`。
+- 在 `analyzeWithLlm()`（行 287 的 `viewModelScope.launch` 内）、`StockLlmPromptBuilder.build(input)` 调用前，取一次全局策略：
+
+```kotlin
+val userStrategies = runCatching {
+    strategyRepository.activeStrategies().map { toUserStrategyRef(it) }
+}.getOrDefault(emptyList())  // 红线 #2：失败降级空，不阻塞分析
+```
+
+- 把 `StockLlmPromptBuilder.build(input)` 改为 `StockLlmPromptBuilder.build(input, userStrategies)`。
+- import `toUserStrategyRef`、`TradeStrategyRepository`、`UserStrategyRef`。
 
 - [ ] **Step 2: 扩展 StockDetailViewModelTest**
 
-加用例：mock `strategyRepository.activeStrategiesFor(code)` 返回一条策略 → 触发 `analyzeWithLlm` → 用 MockK 的 `slot` 捕获 `StockLlmInput`（或直接验证 prompt 渲染：mock `llmApi.chatCompletions` 捕获 request body，断言 user message 含「既有策略」）。失败时仍正常出分析：mock `activeStrategiesFor` 抛异常 → 分析仍 Success。
+加用例：mock `strategyRepository.activeStrategies()` 返回一条策略 → 触发 `analyzeWithLlm` → mock `llmApi.chatCompletions` 捕获 request body，断言 user message 含「用户投资原则」与「[买入]」。失败时仍正常出分析：mock `activeStrategies` 抛异常 → 分析仍 Success（userStrategies 为空，渲染「—」）。
 
-- [ ] **Step 3: PortfolioViewModel 注入 + 批量取**
+- [ ] **Step 3: PortfolioViewModel 注入 + 取一次全局策略**
 
 - 构造函数加 `private val strategyRepository: TradeStrategyRepository`。
-- 在 `analyzeWithLlm()`（行 589 附近）内，组装 evaluation 后、调 `llmAnalysisRepository.analyze` 前，批量补充策略：
+- 在 `analyzeWithLlm()`（行 589 附近）、`llmAnalysisRepository.analyze(...)` 调用前：
 
 ```kotlin
-val withStrategies = evaluation?.map { e ->
-    val refs = runCatching {
-        strategyRepository.activeStrategiesFor(e.code).map { toUserStrategyRef(it) }
-    }.getOrDefault(emptyList())
-    e.copy(userStrategies = refs)
-}
+val userStrategies = runCatching {
+    strategyRepository.activeStrategies().map { toUserStrategyRef(it) }
+}.getOrDefault(emptyList())
 ```
-将 `withStrategies` 传入后续 analyze 与 state（若 `evaluation` 是 val 且多处引用，统一改名指向新 list）。
+
+- 把 `llmAnalysisRepository.analyze(evaluation, dailyBands, monthlyBands, signals, _evalThresholds.value)` 改为加末参 `userStrategies`。
+
+> **注意**：`LlmAnalysisRepository.analyze` 当前签名不含 `userStrategies`。需在 `LlmAnalysisRepository.analyze` 加同名末参 `userStrategies: List<UserStrategyRef> = emptyList()`，并透传给 `LlmPromptBuilder.build(..., userStrategies)`。这是 Task 10 的延伸改动，归入本 Task。
 
 - [ ] **Step 4: 扩展 PortfolioViewModelTest**
 
-加用例：mock `strategyRepository.activeStrategiesFor` 返回策略 → analyze 触发 → 捕获 prompt 含「既有策略」。
+加用例：mock `strategyRepository.activeStrategies` 返回策略 → analyze 触发 → 捕获 prompt 含「用户投资原则」。
 
 - [ ] **Step 5: 运行测试**
 
@@ -1175,26 +1101,26 @@ Expected: PASS
 ```bash
 git add app/src/main/java/com/stock/dividend/viewmodel/StockDetailViewModel.kt \
         app/src/main/java/com/stock/dividend/viewmodel/PortfolioViewModel.kt \
+        app/src/main/java/com/stock/dividend/data/repository/LlmAnalysisRepository.kt \
         app/src/test/java/com/stock/dividend/viewmodel/StockDetailViewModelTest.kt \
         app/src/test/java/com/stock/dividend/viewmodel/PortfolioViewModelTest.kt
-git commit -m "feat(vm): 个股/组合 analyzeWithLlm 回流用户策略"
+git commit -m "feat(vm): 个股/组合 analyzeWithLlm 回流全局用户投资原则"
 ```
 
 ---
 
-## Task 12: ViewModel — ScreenshotImportViewModel（两步 Review）
+## Task 12: ViewModel — ScreenshotImportViewModel（两步 Review，无关联）
 
 **Files:**
 - Create: `app/src/main/java/com/stock/dividend/viewmodel/ScreenshotImportViewModel.kt`
 - Test: `app/src/test/java/com/stock/dividend/viewmodel/ScreenshotImportViewModelTest.kt`
 
-> `StockMatchResult` 已在 Task 3 定义于 `data/repository`，VM 直接 import。
+> 策略全局，**不注入 StockRepository**，无 `StockMatchResult`/`matchResult`。
 
 - [ ] **Step 1: 定义 phase 枚举与 UiState 草稿类型**
 
-在 `ScreenshotImportViewModel.kt`：
-
 ```kotlin
+// viewmodel/ScreenshotImportViewModel.kt
 package com.stock.dividend.viewmodel
 
 import android.content.Context
@@ -1202,16 +1128,13 @@ import android.net.Uri
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.stock.dividend.data.repository.ScreenshotStrategy
-import com.stock.dividend.data.repository.ScreenshotStrategyState
-import com.stock.dividend.data.repository.ScreenshotStrategyRepository
-import com.stock.dividend.data.repository.StockMatchResult
-import com.stock.dividend.data.repository.TradeStrategyRepository
-import com.stock.dividend.data.repository.StockRepository
-import com.stock.dividend.data.repository.matchTargetStock
-import com.stock.dividend.data.repository.risksToJsonString
-import com.stock.dividend.data.local.entity.TradeStrategyEntity
 import com.stock.dividend.data.local.entity.STRATEGY_STATUS_ACTIVE
+import com.stock.dividend.data.local.entity.TradeStrategyEntity
+import com.stock.dividend.data.repository.ScreenshotStrategy
+import com.stock.dividend.data.repository.ScreenshotStrategyRepository
+import com.stock.dividend.data.repository.ScreenshotStrategyState
+import com.stock.dividend.data.repository.TradeStrategyRepository
+import com.stock.dividend.data.repository.risksToJsonString
 import com.stock.dividend.data.scan.TextRecognitionService
 import com.stock.dividend.data.scan.loadSampledBitmap
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -1219,7 +1142,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -1245,7 +1167,6 @@ data class ScreenshotImportUiState(
     val editableOcrText: String = "",
     val analysisError: String? = null,
     val editableStrategy: EditableStrategy? = null,
-    val matchResult: StockMatchResult = StockMatchResult.Unmatched,
     val sourceNote: String = "",
     val errorMessage: String? = null
 )
@@ -1255,14 +1176,13 @@ class ScreenshotImportViewModel @Inject constructor(
     private val textRecognitionService: TextRecognitionService,
     private val screenshotStrategyRepository: ScreenshotStrategyRepository,
     private val strategyRepository: TradeStrategyRepository,
-    private val stockRepository: StockRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScreenshotImportUiState())
     val uiState: StateFlow<ScreenshotImportUiState> = _uiState.asStateFlow()
 
-    // 见 Step 2-4 方法
+    // 见 Step 3 方法
 }
 ```
 
@@ -1273,22 +1193,17 @@ class ScreenshotImportViewModel @Inject constructor(
 package com.stock.dividend.viewmodel
 
 import com.google.common.truth.Truth.assertThat
-import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.ScreenshotStrategy
-import com.stock.dividend.data.repository.ScreenshotStrategyState
 import com.stock.dividend.data.repository.ScreenshotStrategyRepository
-import com.stock.dividend.data.repository.StockMatchResult
+import com.stock.dividend.data.repository.ScreenshotStrategyState
 import com.stock.dividend.data.repository.TradeStrategyRepository
-import com.stock.dividend.data.repository.TradeStrategyEntity  // 若导入名冲突调整
-import com.stock.dividend.data.repository.UserStrategyRef
-import com.stock.dividend.data.scan.TextRecognitionService
 import com.stock.dividend.data.scan.OcrElement
-import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.scan.TextRecognitionService
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -1300,6 +1215,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import java.net.URI
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -1308,16 +1224,12 @@ class ScreenshotImportViewModelTest {
     private val ocr = mockk<TextRecognitionService>()
     private val llmRepo = mockk<ScreenshotStrategyRepository>()
     private val strategyRepo = mockk<TradeStrategyRepository>(relaxed = true)
-    private val stockRepo = mockk<StockRepository>()
     private lateinit var vm: ScreenshotImportViewModel
 
     @Before
-    fun setup() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        coEvery { stockRepo.allStocksFlow } returns flowOf(
-            listOf(StockEntity(code = "SH.600036", name = "招商银行", marketCode = "1"))
-        )
-        vm = ScreenshotImportViewModel(ocr, llmRepo, strategyRepo, stockRepo, RuntimeEnvironment.getApplication())
+    fun setup() {
+        Dispatchers.setMain(StandardTestDispatcher())
+        vm = ScreenshotImportViewModel(ocr, llmRepo, strategyRepo, RuntimeEnvironment.getApplication())
     }
 
     @After fun teardown() { Dispatchers.resetMain() }
@@ -1335,7 +1247,6 @@ class ScreenshotImportViewModelTest {
 
     @Test
     fun startAnalysis_success_reviewStrategy() = runTest {
-        // 预置 OCR 文本
         coEvery { ocr.recognize(any()) } returns listOf(OcrElement("招商银行", 0f,0f,10f,10f))
         vm.onImagePicked(mockk(relaxed = true)); advanceUntilIdle()
         coEvery { llmRepo.analyze(any()) } returns ScreenshotStrategyState.Success(
@@ -1344,8 +1255,8 @@ class ScreenshotImportViewModelTest {
         vm.startAnalysis(); advanceUntilIdle()
         val s = vm.uiState.value
         assertThat(s.phase).isEqualTo(ScreenshotImportPhase.ReviewStrategy)
-        assertThat(s.matchResult).isInstanceOf(StockMatchResult.Matched::class.java)
         assertThat(s.editableStrategy!!.direction).isEqualTo(ScreenshotStrategy.StrategyDirection.BUY)
+        assertThat(s.editableStrategy!!.targetText).isEqualTo("招商银行")
     }
 
     @Test
@@ -1359,7 +1270,7 @@ class ScreenshotImportViewModelTest {
     }
 
     @Test
-    fun confirmSave_persistsEntity() = runTest {
+    fun confirmSave_persistsEntity_noStockCode() = runTest {
         coEvery { ocr.recognize(any()) } returns listOf(OcrElement("招商银行", 0f,0f,10f,10f))
         vm.onImagePicked(mockk(relaxed = true)); advanceUntilIdle()
         coEvery { llmRepo.analyze(any()) } returns ScreenshotStrategyState.Success(
@@ -1373,7 +1284,7 @@ class ScreenshotImportViewModelTest {
 }
 ```
 
-（注意 import `TradeStrategyEntity` 从 `data.local.entity`；`coVerify` 来自 mockk。）
+> 注意：Robolectric 的 `Dispatchers.setMain(StandardTestDispatcher())` 后，`onImagePicked` 用 `viewModelScope.launch`（Main 调度器）。`loadSampledBitmap` 用 `Dispatchers.IO`，Robolectric 下需保证 `advanceUntilIdle` 推进；若 IO 调度阻塞测试，可在测试内 `Dispatchers.setMain(StandardTestDispatcher(testScheduler))` 即可（loadSampledBitmap 的 IO 在 runTest 下会真实执行读图片，mockk bitmap 需用真实小图或 mock `loadSampledBitmap`）。若集成困难，改为 `@Inject` 测试 fake；以实际编译为准。
 
 - [ ] **Step 3: 运行验证失败**
 
@@ -1417,13 +1328,10 @@ fun startAnalysis() {
         when (val r = screenshotStrategyRepository.analyze(ocrText)) {
             is ScreenshotStrategyState.Success -> {
                 val s = r.strategy
-                val stocks = runCatching { stockRepository.allStocksFlow.first() }.getOrDefault(emptyList())
-                val match = matchTargetStock(s.targetText, stocks)
                 _uiState.update {
                     it.copy(
                         phase = ScreenshotImportPhase.ReviewStrategy,
                         editableStrategy = EditableStrategy(s.targetText, s.direction, s.reasoning, s.risks.toMutableList(), s.validUntil),
-                        matchResult = match,
                         analysisError = null
                     )
                 }
@@ -1453,8 +1361,6 @@ fun addRisk() = editStrategy { es -> es.copy(risks = es.risks.toMutableList().ap
 fun removeRisk(i: Int) = editStrategy { es -> es.copy(risks = es.risks.toMutableList().apply { removeAt(i) }) }
 fun onValidUntilChanged(d: String?) = editStrategy { it.copy(validUntil = d) }
 fun onSourceNoteChanged(t: String) = _uiState.update { it.copy(sourceNote = t) }
-fun onManualMatch(code: String, name: String) = _uiState.update { it.copy(matchResult = StockMatchResult.Matched(code, name)) }
-fun clearMatch() = _uiState.update { it.copy(matchResult = StockMatchResult.Unmatched) }
 
 private fun editStrategy(transform: (EditableStrategy) -> EditableStrategy) {
     _uiState.update { st ->
@@ -1471,11 +1377,8 @@ fun confirmSave() {
     val cur = _uiState.value.editableStrategy ?: return
     viewModelScope.launch {
         try {
-            val match = _uiState.value.matchResult
-            val stockCode = (match as? StockMatchResult.Matched)?.code
             val entity = TradeStrategyEntity(
                 id = UUID.randomUUID().toString(),
-                stockCode = stockCode,
                 targetText = cur.targetText,
                 direction = cur.direction.name,
                 reasoning = cur.reasoning,
@@ -1498,9 +1401,6 @@ fun resetToIdle() {
 }
 ```
 
-> 注意 `editStrategy` 里 `it.apply { risks[i] = t }` 会突变；改用纯 copy 更安全：
-> `onRiskChanged` 实现：`editStrategy { es -> es.copy(risks = es.risks.toMutableList().also { it[i] = t }) }`；`addRisk`/`removeRisk` 同理用 copy 返回新 list。按此修正。
-
 - [ ] **Step 5: 运行验证通过**
 
 Run: `./gradlew :app:testDebugUnitTest --tests "com.stock.dividend.viewmodel.ScreenshotImportViewModelTest"`
@@ -1511,7 +1411,7 @@ Expected: PASS（4 用例）
 ```bash
 git add app/src/main/java/com/stock/dividend/viewmodel/ScreenshotImportViewModel.kt \
         app/src/test/java/com/stock/dividend/viewmodel/ScreenshotImportViewModelTest.kt
-git commit -m "feat(vm): ScreenshotImportViewModel 两步 Review 流程与测试"
+git commit -m "feat(vm): ScreenshotImportViewModel 两步 Review 流程与测试（无关联个股）"
 ```
 
 ---
@@ -1535,6 +1435,7 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -1545,10 +1446,10 @@ class TradeStrategyListViewModelTest {
     fun observeAll_rendersItems() = runTest {
         val dao = mockk<TradeStrategyDao>()
         coEvery { dao.observeAll() } returns flowOf(listOf(
-            TradeStrategyEntity("1", "SH.600036", "招商银行", "BUY", "r", "[]", null, null, "ocr")
+            TradeStrategyEntity("1", "招商银行", "BUY", "r", "[]", null, null, "ocr")
         ))
         val vm = TradeStrategyListViewModel(dao)
-        kotlinx.coroutines.test.advanceUntilIdle()
+        advanceUntilIdle()
         assertThat(vm.uiState.value.items).hasSize(1)
     }
 
@@ -1557,7 +1458,7 @@ class TradeStrategyListViewModelTest {
         val dao = mockk<TradeStrategyDao>(relaxed = true)
         val vm = TradeStrategyListViewModel(dao)
         vm.archive("1")
-        kotlinx.coroutines.test.advanceUntilIdle()
+        advanceUntilIdle()
         coVerify { dao.updateStatus("1", "ARCHIVED", any()) }
     }
 }
@@ -1590,7 +1491,6 @@ import javax.inject.Inject
 
 data class StrategyListItem(
     val id: String,
-    val stockCode: String?,
     val targetText: String,
     val direction: String,
     val reasoning: String,
@@ -1620,7 +1520,7 @@ class TradeStrategyListViewModel @Inject constructor(
     }
 
     private fun TradeStrategyEntity.toItem() = StrategyListItem(
-        id, stockCode, targetText, direction, reasoning, risksFromJson(risks), validUntil, sourceNote, createdAt
+        id, targetText, direction, reasoning, risksFromJson(risks), validUntil, sourceNote, createdAt
     )
 }
 ```
@@ -1644,6 +1544,8 @@ git commit -m "feat(vm): TradeStrategyListViewModel 列表/归档/删除"
 
 **Files:**
 - Modify: `app/src/main/java/com/stock/dividend/ui/navigation/AppNavigation.kt`
+- Modify: `app/src/main/java/com/stock/dividend/ui/screen/MainScaffold.kt`
+- Modify: `app/src/main/java/com/stock/dividend/ui/screen/NotificationSettingsScreen.kt`
 
 - [ ] **Step 1: 加 Routes + composable**
 
@@ -1678,16 +1580,9 @@ onOpenStrategyLibrary = { rootNavController.navigate(Routes.TRADE_STRATEGY_LIST)
 ```
 在 `SettingsScreen` 签名（`NotificationSettingsScreen.kt:70`）加 `onOpenStrategyLibrary: () -> Unit` 参数，并在内容区加一项 `SettingsEntryRow`「策略库」→ 调 `onOpenStrategyLibrary`。
 
-- [ ] **Step 3: 提交（先不构建，Screen 下一 Task 补）**
+- [ ] **Step 3: 提交（与 Task 15/16 一起在 Task 16 末尾构建验证）**
 
-```bash
-git add app/src/main/java/com/stock/dividend/ui/navigation/AppNavigation.kt \
-        app/src/main/java/com/stock/dividend/ui/screen/MainScaffold.kt \
-        app/src/main/java/com/stock/dividend/ui/screen/NotificationSettingsScreen.kt
-git commit -m "feat(nav): 策略库与截图导入路由 + 设置页入口"
-```
-
-> 本 Task 因依赖 Screen 文件存在才能编译，实际与 Task 15/16 一起在 Task 16 末尾构建验证。
+暂不单独提交。
 
 ---
 
@@ -1696,7 +1591,7 @@ git commit -m "feat(nav): 策略库与截图导入路由 + 设置页入口"
 **Files:**
 - Create: `app/src/main/java/com/stock/dividend/ui/screen/TradeStrategyListScreen.kt`
 
-- [ ] **Step 1: 实现（复用设计系统 StatusPill/FinanceStatusTone/AppCardDefaults）**
+- [ ] **Step 1: 实现（复用设计系统组件）**
 
 ```kotlin
 package com.stock.dividend.ui.screen
@@ -1789,20 +1684,18 @@ private fun directionZh(d: String) = when (d) {
 }
 ```
 
-> `AssistChip` 着色用 `FinanceStatusTone`（绿/红/中性）可后续打磨；初版用默认 chip。`EmptyStateView` 签名以真实组件为准（若有 `message` 参数；若签名不同，调整）。
+> `EmptyStateView` 签名以真实组件为准（若有 `message` 参数；若签名不同，调整）。`AssistChip` 着色用 `FinanceStatusTone`（绿/红/中性）可后续打磨；初版用默认 chip。
 
-- [ ] **Step 2: 提交（与 Task 16 一起构建）**
-
-暂不单独提交。
+- [ ] **Step 2: 暂不单独提交（与 Task 16 一起）**
 
 ---
 
-## Task 16: UI — ScreenshotImportScreen（两步 Review）+ 全量构建
+## Task 16: UI — ScreenshotImportScreen（两步 Review，无关联）+ 全量构建
 
 **Files:**
 - Create: `app/src/main/java/com/stock/dividend/ui/screen/ScreenshotImportScreen.kt`
 
-- [ ] **Step 1: 实现（PhotoPicker 仿 PortfolioImportScreen）**
+- [ ] **Step 1: 实现（PhotoPicker 仿 PortfolioImportScreen；第二步无关联区块）**
 
 ```kotlin
 package com.stock.dividend.ui.screen
@@ -1894,7 +1787,7 @@ private fun ReviewOcrContent(state: com.stock.dividend.viewmodel.ScreenshotImpor
 @Composable
 private fun ReviewStrategyContent(state: com.stock.dividend.viewmodel.ScreenshotImportUiState, vm: ScreenshotImportViewModel) {
     val s = state.editableStrategy ?: return
-    OutlinedTextField(s.targetText, vm::onTargetTextChanged, label = { Text("标的") }, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(s.targetText, vm::onTargetTextChanged, label = { Text("标的/语境") }, modifier = Modifier.fillMaxWidth())
     Text("方向")
     Row {
         ScreenshotStrategy.StrategyDirection.values().forEach { d ->
@@ -1909,7 +1802,6 @@ private fun ReviewStrategyContent(state: com.stock.dividend.viewmodel.Screenshot
     // validUntil / sourceNote 用简单文本框（日期选择器可后续打磨）
     OutlinedTextField(s.validUntil ?: "", { vm.onValidUntilChanged(it.ifBlank { null }) }, label = { Text("有效期 YYYY-MM-DD（空=长期）") }, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(state.sourceNote, vm::onSourceNoteChanged, label = { Text("来源备注（可选）") }, modifier = Modifier.fillMaxWidth())
-    Text("关联：${(state.matchResult as? com.stock.dividend.data.repository.StockMatchResult.Matched)?.let { "已关联 ${it.name}" } ?: "未关联自选股"}")
     state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     Row {
         Button(onClick = vm::confirmSave) { Text("保存策略") }
@@ -1925,17 +1817,22 @@ private fun dirZh(d: ScreenshotStrategy.StrategyDirection) = when (d) {
 }
 ```
 
-- [ ] **Step 2: 全量构建验证**
+> 第二步**无**自选股关联区块（策略全局，不关联个股）。
+
+- [ ] **Step 2: 全量构建验证（含 Task 14/15）**
 
 Run: `./gradlew assembleDebug`
-Expected: BUILD SUCCESSFUL（Task 14/15/16 路由+两 Screen 编译通过）
+Expected: BUILD SUCCESSFUL（路由 + 两 Screen 编译通过）
 
-- [ ] **Step 3: 提交**
+- [ ] **Step 3: 提交（Task 14/15/16 一起）**
 
 ```bash
-git add app/src/main/java/com/stock/dividend/ui/screen/ScreenshotImportScreen.kt \
+git add app/src/main/java/com/stock/dividend/ui/navigation/AppNavigation.kt \
+        app/src/main/java/com/stock/dividend/ui/screen/MainScaffold.kt \
+        app/src/main/java/com/stock/dividend/ui/screen/NotificationSettingsScreen.kt \
+        app/src/main/java/com/stock/dividend/ui/screen/ScreenshotImportScreen.kt \
         app/src/main/java/com/stock/dividend/ui/screen/TradeStrategyListScreen.kt
-git commit -m "feat(ui): 截图导入页（两步 Review）+ 策略库列表页"
+git commit -m "feat(ui): 截图导入页（两步 Review，无关联）+ 策略库列表页 + 设置页入口"
 ```
 
 ---
@@ -1956,7 +1853,7 @@ Expected: BUILD SUCCESSFUL
 
 - [ ] **Step 3: 修复任何回归（若有）**
 
-若现有 `StockDetailViewModelTest`/`PortfolioViewModelTest` 因 `buildStockLlmInput` 签名变化或新构造参数失败，补 mock（Task 11 的 Step 2/4 已覆盖；若有遗漏按错误信息补 `strategyRepository` mock 与 `activeStrategiesFor` 桩）。
+若现有 `StockDetailViewModelTest`/`PortfolioViewModelTest` 因构造参数（新增 `TradeStrategyRepository`）失败，补 mock（Task 11 已覆盖；若有遗漏按错误信息补 `strategyRepository` mock 与 `activeStrategies` 桩）。
 
 - [ ] **Step 4: 最终提交（如有修复）**
 
@@ -1971,25 +1868,30 @@ git commit -m "test(stock): 修复回流集成测试回归"
 
 | Spec 要求 | 对应 Task |
 |---|---|
-| §3.1 trade_strategies 表 | T1 |
-| §3.2 DAO（observeAll/observeByStock/activeStrategiesFor/upsert/updateStatus/delete/backup） | T1 |
+| §3.1 trade_strategies 表（无 stockCode） | T1 |
+| §3.2 DAO（observeAll/activeStrategies 全局/upsert/updateStatus/delete/backup） | T1 |
 | §3.3 MIGRATION_15_16 + version 16 + DI 注册 | T2 |
 | §3.4 备份纳入 | T8 |
 | §4.1 ScreenshotStrategy + ScreenshotStrategyState（含 NoStrategy） | T5 |
 | §4.2 PromptBuilder 纯函数 | T4 |
 | §4.3 Parser 纯函数 + JsonExtraction 复用 | T5 |
 | §4.4 ScreenshotStrategyRepository 编排 | T6 |
-| §5.1 ScreenshotImportViewModel 两步 Review + 匹配 | T12（+T3 match） |
+| §5.1 ScreenshotImportViewModel 两步 Review（无关联） | T12 |
 | §5.2 TradeStrategyListViewModel | T13 |
-| §5.3 TradeStrategyRepository 持久化 | T7 |
-| §6 回流（UserStrategyRef + 两 PromptBuilder + 两 VM） | T9/T10/T11 |
-| §7.1 ScreenshotImportScreen（两步 Review UI） | T16 |
+| §5.3 TradeStrategyRepository 持久化（activeStrategies 全局） | T7 |
+| §6 回流全局（builder 加参数 + 两 VM + LlmAnalysisRepository 透传） | T9/T10/T11 |
+| §7.1 ScreenshotImportScreen（两步 Review UI，无关联） | T16 |
 | §7.2 TradeStrategyListScreen | T15 |
 | §7.3 路由 + 设置页入口 | T14 |
 | §8 DI（DAO provider + Repository 自动装配） | T2/T7 |
 | §9 测试 | 各 Task TDD 步骤 |
 | §11 红线（Migration/吞异常/loading 复位/纯函数/中文） | 贯穿各 Task |
 
-**类型一致性核对：** `UserStrategyRef`（T3）→ `StockLlmInput.userStrategies`（T9）→ `EvaluatedStock.userStrategies`（T10）字段名一致；`ScreenshotStrategy.StrategyDirection`（T5）→ `EditableStrategy.direction`（T12）一致；`StockMatchResult`（T3 data 层）→ VM/UI 引用一致；`risksToJsonString`/`risksFromJson`（T3）→ VM 存/取（T12/T13）一致。
+**类型一致性核对：**
+- `UserStrategyRef`（T3）→ `StockLlmPromptBuilder.build(_, userStrategies)`（T9）/`LlmPromptBuilder.build(..., userStrategies)`（T10）参数名一致；
+- `ScreenshotStrategy.StrategyDirection`（T5）→ `EditableStrategy.direction`（T12）一致；
+- `TradeStrategyEntity` 无 `stockCode`（T1）→ Migration 无该列（T2）→ `confirmSave` 不写 `stockCode`（T12）→ 列表 `StrategyListItem` 无 `stockCode`（T13）→ 备份 round-trip 无 `stockCode`（T8）全链一致；
+- `risksToJsonString`/`risksFromJson`/`toUserStrategyRef`（T3）→ VM 存（T12）/列表取（T13）/回流转（T11）一致；
+- `activeStrategies()`（T7 DAO + Repository）→ 两 VM 取（T11）一致（全局无参，不再有 `activeStrategiesFor(code)`）。
 
 **无 placeholder**：所有代码块完整、命令含 expected、文件路径绝对。
