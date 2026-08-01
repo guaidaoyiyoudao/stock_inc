@@ -137,7 +137,7 @@ class GetTransactionsTool(
         properties = mapOf(
             "code" to Schema(
                 type = Type.STRING,
-                description = "可选：股票代码或名称（6 位数字、sh./sz. 前缀或名称）；不传返回全部交易"
+                description = "可选：股票代码或名称（推荐 6 位数字代码，带前缀代码会自动归一化）；不传返回全部交易"
             )
         )
     ),

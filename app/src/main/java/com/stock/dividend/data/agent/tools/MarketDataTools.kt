@@ -23,7 +23,7 @@ private val CODE_SCHEMA = Schema(
     properties = mapOf(
         "code" to Schema(
             type = Type.STRING,
-            description = "股票代码或名称：6 位数字（如 600519）、带前缀（sh.600519 / sz.000001）或名称（如 贵州茅台）；拿不准先调用 search_stock"
+            description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称（如 贵州茅台）；带前缀代码（sh.600519 / sz.000001）会自动归一化，同样可用；拿不准先调用 search_stock"
         )
     ),
     required = listOf("code")

@@ -13,13 +13,13 @@ class AddStockTool(
     private val stockRepository: StockRepository,
 ) : WriteTool(
     name = "add_stock",
-    description = "添加自选股票；shares>0 时同时记录一笔买入交易。code 支持 6 位代码、sh./sz. 前缀或股票名称。",
+    description = "添加自选股票；shares>0 时同时记录一笔买入交易。code 推荐 6 位数字代码或股票名称，带前缀代码会自动归一化。",
     parameters = Schema(
         type = Type.OBJECT,
         properties = mapOf(
             "code" to Schema(
                 type = Type.STRING,
-                description = "股票代码或名称：6 位数字（如 600519）、带前缀（sh.600519 / sz.000001）或名称（如 贵州茅台）；拿不准先调用 search_stock"
+                description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称；带前缀代码（sh.600519 / sz.000001）会自动归一化，同样可用"
             ),
             "shares" to Schema(type = Type.INTEGER, description = "整数股数，默认 0（0=仅观察不持仓），如 100"),
             "costPerShare" to Schema(type = Type.NUMBER, description = "每股成本价（元），默认 0，如 12.50")
@@ -50,13 +50,13 @@ class RemoveStockTool(
     private val stockRepository: StockRepository,
 ) : WriteTool(
     name = "remove_stock",
-    description = "从自选/持仓中删除一只股票（不可恢复，请谨慎）。code 支持 6 位代码、sh./sz. 前缀或股票名称。",
+    description = "从自选/持仓中删除一只股票（不可恢复，请谨慎）。code 推荐 6 位数字代码或股票名称，带前缀代码会自动归一化。",
     parameters = Schema(
         type = Type.OBJECT,
         properties = mapOf(
             "code" to Schema(
                 type = Type.STRING,
-                description = "股票代码或名称：6 位数字（如 600519）、带前缀（sh.600519 / sz.000001）或名称（如 贵州茅台）"
+                description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称；带前缀代码会自动归一化"
             )
         ),
         required = listOf("code")
@@ -83,7 +83,7 @@ class UpdateHoldingTool(
         properties = mapOf(
             "code" to Schema(
                 type = Type.STRING,
-                description = "股票代码或名称：6 位数字（如 600519）、带前缀（sh.600519 / sz.000001）或名称"
+                description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称；带前缀代码会自动归一化"
             ),
             "shares" to Schema(type = Type.INTEGER, description = "最新整数股数（>=0），如 100"),
             "costPerShare" to Schema(type = Type.NUMBER, description = "最新每股成本价（元，>=0），如 12.50")
@@ -117,7 +117,7 @@ class AddTransactionTool(
         properties = mapOf(
             "code" to Schema(
                 type = Type.STRING,
-                description = "股票代码或名称：6 位数字（如 600519）、带前缀（sh.600519 / sz.000001）或名称"
+                description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称；带前缀代码会自动归一化"
             ),
             "type" to Schema(type = Type.STRING, description = "交易方向，必须为 BUY（买入）或 SELL（卖出），大写"),
             "shares" to Schema(type = Type.INTEGER, description = "股数（正整数），如 100"),
@@ -164,7 +164,7 @@ class SetStockTagsTool(
         properties = mapOf(
             "code" to Schema(
                 type = Type.STRING,
-                description = "股票代码或名称：6 位数字（如 600519）、带前缀（sh.600519 / sz.000001）或名称"
+                description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称；带前缀代码会自动归一化"
             ),
             "tags" to Schema(
                 type = Type.ARRAY,

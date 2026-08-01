@@ -395,14 +395,21 @@ class StockRepository @Inject constructor(
     suspend fun resolveStock(rawCodeOrName: String): StockSearchResult? {
         val trimmed = rawCodeOrName.trim()
         if (trimmed.isEmpty()) return null
-        val results = searchStocks(trimmed).getOrDefault(emptyList())
+        // sh.600519 / SH600519 / sz.000001 → 600519；名称与纯 6 位代码原样
+        val normalized = PREFIXED_CODE_REGEX.matchEntire(trimmed)?.groupValues?.get(2) ?: trimmed
+        val results = searchStocks(normalized).getOrDefault(emptyList())
         if (results.isEmpty()) return null
-        val isNumericCode = trimmed.matches(Regex("\\d{6}"))
+        val isNumericCode = normalized.matches(Regex("\\d{6}"))
         return if (isNumericCode) {
-            results.firstOrNull { it.code.substringAfter(".") == trimmed } ?: results.first()
+            results.firstOrNull { it.code.substringAfter(".") == normalized } ?: results.first()
         } else {
             results.first()
         }
+    }
+
+    private companion object {
+        /** 带交易所前缀的 A 股代码：sh.600519 / SH600519 / sz 000001 等。 */
+        val PREFIXED_CODE_REGEX = Regex("(?i)^(sh|sz)[.\\s]?(\\d{6})$")
     }
 
     /**

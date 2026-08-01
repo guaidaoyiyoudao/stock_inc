@@ -551,6 +551,36 @@ class StockRepositoryTest {
     }
 
     @Test
+    fun `resolveStock 把带 sh 前缀的代码归一化后再搜索`() = runTest {
+        coEvery { api.searchStocks(input = "600519") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("600519", "贵州茅台", "1"))
+            )
+        )
+
+        val resolved = repository.resolveStock("sh.600519")
+
+        assertThat(resolved).isNotNull()
+        assertThat(resolved!!.code).isEqualTo("sh.600519")
+        coVerify { api.searchStocks(input = "600519") }
+    }
+
+    @Test
+    fun `resolveStock 把 sz 前缀无分隔符的代码归一化`() = runTest {
+        coEvery { api.searchStocks(input = "000001") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("000001", "平安银行", "0"))
+            )
+        )
+
+        val resolved = repository.resolveStock("SZ000001")
+
+        assertThat(resolved).isNotNull()
+        assertThat(resolved!!.code).isEqualTo("sz.000001")
+        coVerify { api.searchStocks(input = "000001") }
+    }
+
+    @Test
     fun `resolveStock returns null when search yields no results`() = runTest {
         coEvery { api.searchStocks(input = "不存在的") } returns StockSearchResponse(
             quotationCodeTable = null
