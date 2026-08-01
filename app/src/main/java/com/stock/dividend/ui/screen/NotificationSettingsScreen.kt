@@ -71,6 +71,7 @@ fun SettingsScreen(
     onOpenDataManagement: () -> Unit,
     onOpenOcrDebug: () -> Unit,
     onOpenNotificationReliability: () -> Unit,
+    onOpenStrategyLibrary: () -> Unit,
     viewModel: NotificationSettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -119,6 +120,13 @@ fun SettingsScreen(
         SettingsEntryRow(
             entry = settingsEntries[1],
             onClick = onOpenDataManagement
+        )
+        SettingsEntryRow(
+            entry = SettingsEntry(
+                title = "策略库",
+                description = "截图经 AI 分析提取的买卖策略，对所有股票通用"
+            ),
+            onClick = onOpenStrategyLibrary
         )
         SettingsEntryRow(
             entry = SettingsEntry(

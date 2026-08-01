@@ -8,12 +8,16 @@ import com.stock.dividend.ui.screen.BackupRestoreScreen
 import com.stock.dividend.ui.screen.ExpenseCoverageScreen
 import com.stock.dividend.ui.screen.FireGoalSetupScreen
 import com.stock.dividend.ui.screen.MainScaffold
+import com.stock.dividend.ui.screen.ScreenshotImportScreen
+import com.stock.dividend.ui.screen.TradeStrategyListScreen
 
 object Routes {
     const val MAIN = "main"
     const val FIRE_GOAL_SETUP = "fireGoalSetup"
     const val EXPENSE_COVERAGE = "expenseCoverage"
     const val BACKUP_RESTORE = "backupRestore"
+    const val TRADE_STRATEGY_LIST = "tradeStrategyList"
+    const val SCREENSHOT_IMPORT = "screenshotImport"
 }
 
 @Composable
@@ -48,6 +52,18 @@ fun AppNavigation(
         composable(Routes.BACKUP_RESTORE) {
             BackupRestoreScreen(
                 onBack = { rootNavController.popBackStack() }
+            )
+        }
+        composable(Routes.TRADE_STRATEGY_LIST) {
+            TradeStrategyListScreen(
+                onBack = { rootNavController.popBackStack() },
+                onAddFromScreenshot = { rootNavController.navigate(Routes.SCREENSHOT_IMPORT) }
+            )
+        }
+        composable(Routes.SCREENSHOT_IMPORT) {
+            ScreenshotImportScreen(
+                onBack = { rootNavController.popBackStack() },
+                onViewList = { rootNavController.navigate(Routes.TRADE_STRATEGY_LIST) }
             )
         }
     }

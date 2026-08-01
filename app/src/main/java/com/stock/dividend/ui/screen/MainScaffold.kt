@@ -172,7 +172,8 @@ fun MainScaffold(
                 SettingsScreen(
                     onOpenDataManagement = { rootNavController.navigate(Routes.BACKUP_RESTORE) },
                     onOpenOcrDebug = { tabNavController.navigate("ocrDebug") },
-                    onOpenNotificationReliability = { tabNavController.navigate("notificationReliability") }
+                    onOpenNotificationReliability = { tabNavController.navigate("notificationReliability") },
+                    onOpenStrategyLibrary = { rootNavController.navigate(Routes.TRADE_STRATEGY_LIST) }
                 )
             }
             composable("addStock") {
