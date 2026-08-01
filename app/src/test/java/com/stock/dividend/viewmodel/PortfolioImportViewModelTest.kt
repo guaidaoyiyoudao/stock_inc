@@ -3,6 +3,7 @@ package com.stock.dividend.viewmodel
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.repository.ImportRow
 import com.stock.dividend.data.repository.ImportSummary
@@ -13,7 +14,6 @@ import com.stock.dividend.data.scan.TextRecognitionService
 import com.stock.dividend.data.scan.loadSampledBitmap
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
@@ -26,31 +26,34 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
 class PortfolioImportViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val stockRepository: StockRepository = mockk()
     private val dividendRepository: DividendRepository = mockk(relaxed = true)
     private val textRecognitionService: TextRecognitionService = mockk()
-    private val context: Context = mockk(relaxed = true)
+    // Robolectric 提供真实 Context；Uri.parse 在 Robolectric 下返回真实 Uri，无需 mockkStatic(Uri::class)
+    private lateinit var context: Context
     private val fakeBitmap: Bitmap = mockk(relaxed = true)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        context = ApplicationProvider.getApplicationContext()
+        // loadSampledBitmap 真实实现会解码图片文件，单测里仍需 mock
         mockkStatic("com.stock.dividend.data.scan.BitmapLoaderKt")
         coEvery { loadSampledBitmap(any(), any<Uri>()) } returns fakeBitmap
-        mockkStatic(Uri::class)
-        every { Uri.parse(any()) } returns mockk(relaxed = true)
     }
 
     @After
     fun tearDown() {
         Dispatchers.resetMain()
         unmockkStatic("com.stock.dividend.data.scan.BitmapLoaderKt")
-        unmockkStatic(Uri::class)
     }
 
     @Test

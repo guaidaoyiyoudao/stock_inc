@@ -2,6 +2,7 @@ package com.stock.dividend.viewmodel
 
 import android.content.Context
 import android.net.Uri
+import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.backup.BackupMetadata
 import com.stock.dividend.data.repository.BackupRepository
@@ -17,14 +18,18 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
 class BackupViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val repository: BackupRepository = mockk(relaxed = true)
-    private val context: Context = mockk(relaxed = true)
-    private val uri: Uri = mockk(relaxed = true)
+    // Robolectric 提供真实 Context + Uri，替代 mockk 哑参数
+    private val context: Context = ApplicationProvider.getApplicationContext()
+    private val uri: Uri = Uri.parse("content://com.stock.dividend.backup/backup.json")
     private val metadata = BackupMetadata(
         appVersion = "2.0.0",
         versionCode = 3,
