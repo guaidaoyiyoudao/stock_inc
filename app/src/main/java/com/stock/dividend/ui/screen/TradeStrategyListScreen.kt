@@ -1,6 +1,7 @@
 package com.stock.dividend.ui.screen
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,13 +32,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.data.local.entity.STRATEGY_DIRECTION_BUY
 import com.stock.dividend.data.local.entity.STRATEGY_DIRECTION_SELL
 import com.stock.dividend.data.local.entity.STRATEGY_DIRECTION_WATCH
-import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.viewmodel.StrategyListItem
 import com.stock.dividend.viewmodel.TradeStrategyListViewModel
 
@@ -63,10 +64,19 @@ fun TradeStrategyListScreen(
         }
     ) { padding ->
         if (state.items.isEmpty()) {
-            EmptyStateView(
-                onAddClick = onAddFromScreenshot,
-                modifier = Modifier.padding(padding)
-            )
+            // 不复用持仓页的 EmptyStateView（文案是「添加股票」，与策略库语义不符）；
+            // 用贴合场景的本地空态，引导用右下 FAB「+」从截图添加。
+            Box(
+                Modifier.fillMaxSize().padding(padding).padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "暂无策略\n点右下 + 从截图分析添加",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
         } else {
             LazyColumn(
                 Modifier.fillMaxSize().padding(padding),
