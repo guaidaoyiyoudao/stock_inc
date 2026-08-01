@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "com.stock.dividend"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 35
         versionCode = 7
         versionName = "3.1.1"
@@ -69,6 +69,14 @@ android {
         }
     }
 
+    packaging {
+        resources {
+            // ADK 传递依赖（google-auth 等）的 META-INF 清单冲突
+            merges += "**/META-INF/INDEX.LIST"
+            merges += "**/META-INF/DEPENDENCIES"
+        }
+    }
+
 }
 
 dependencies {
@@ -111,6 +119,32 @@ dependencies {
     // Coroutines
     implementation(libs.coroutines.android)
 
+    // ADK（Android Agent Development Kit）
+    // - RoomSessionService 本期不用 → 排除 Room 传递依赖
+    // - ML Kit GenAI（Gemini Nano）本期不用 → 排除 genai-prompt，避免其 beta 组件把
+    //   kotlin-stdlib 顶到 2.3.x（Kotlin 2.1 编译器无法读取 2.3 元数据）
+    implementation(libs.adk.kotlin.core) {
+        exclude(group = "com.google.mlkit", module = "genai-prompt")
+        // kxml2 自带 org.xmlpull.v1 实现，与 Android 框架类冲突导致 R8 报错；系统自带该 API
+        exclude(group = "net.sf.kxml")
+    }
+
+    // AI 聊天 Markdown 渲染
+    implementation(libs.compose.markdown)
+
+    // stdlib 强制对齐 2.1.21（Vico 2.1.3 所需版本；Kotlin 2.1.20 编译器可读其 2.1 元数据），
+    // 防止 ADK 传递依赖（kotlinx-coroutines 1.11 等）把 stdlib 顶到 2.2/2.3 造成编译失败。
+    configurations.configureEach {
+        resolutionStrategy {
+            force(
+                "org.jetbrains.kotlin:kotlin-stdlib:2.1.21",
+                "org.jetbrains.kotlin:kotlin-stdlib-common:2.1.21",
+                "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.21",
+                "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.21"
+            )
+        }
+    }
+
     // Image loading (SVG logos)
     implementation(libs.coil.compose)
     implementation(libs.coil.svg)
@@ -140,6 +174,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.test.runner)
+    testImplementation(libs.mockwebserver)
     debugImplementation(libs.compose.test.manifest)
     androidTestImplementation(composeBom)
     androidTestImplementation(libs.compose.junit)

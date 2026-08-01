@@ -1,0 +1,244 @@
+package com.stock.dividend.viewmodel
+
+import androidx.compose.runtime.Stable
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.agent.AiChatEvent
+import com.stock.dividend.data.agent.AiChatRepository
+import com.stock.dividend.data.agent.AiSessionMessage
+import com.stock.dividend.data.agent.AiSessionSummary
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+enum class ChatRole { USER, AGENT, SYSTEM }
+
+@Stable
+data class ChatMessageUi(
+    val role: ChatRole,
+    val text: String,
+    /** true 表示流式半成品：UI 应显示纯文本，禁止 Markdown 渲染。 */
+    val streaming: Boolean = false,
+)
+
+@Stable
+data class ConfirmationUi(
+    val requestId: String,
+    val toolName: String,
+    val summary: String,
+)
+
+@Stable
+data class AiChatUiState(
+    val messages: List<ChatMessageUi> = emptyList(),
+    val sessions: List<AiSessionSummary> = emptyList(),
+    val currentSessionId: String? = null,
+    val isSending: Boolean = false,
+    val llmConfigured: Boolean = false,
+    val input: String = "",
+    val pendingConfirmation: ConfirmationUi? = null,
+)
+
+@HiltViewModel
+class AiChatViewModel @Inject constructor(
+    private val repository: AiChatRepository,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(AiChatUiState())
+    val uiState: StateFlow<AiChatUiState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            repository.observeConfigured().collect { configured ->
+                _uiState.update { it.copy(llmConfigured = configured) }
+            }
+        }
+        viewModelScope.launch { initSession() }
+    }
+
+    private suspend fun initSession() {
+        var sessions = repository.listSessions()
+        var currentId = sessions.firstOrNull()?.id
+        if (currentId == null) {
+            currentId = repository.createSession()
+            sessions = repository.listSessions()
+        }
+        val messages = loadMessages(currentId)
+        _uiState.update {
+            it.copy(sessions = sessions, currentSessionId = currentId, messages = messages)
+        }
+    }
+
+    fun refreshSessions() {
+        viewModelScope.launch {
+            val sessions = repository.listSessions()
+            _uiState.update { it.copy(sessions = sessions) }
+        }
+    }
+
+    fun onNewSession() {
+        if (_uiState.value.isSending) return
+        viewModelScope.launch {
+            val id = repository.createSession()
+            refreshSessions()
+            _uiState.update {
+                it.copy(currentSessionId = id, messages = emptyList(), pendingConfirmation = null)
+            }
+        }
+    }
+
+    fun onSelectSession(sessionId: String) {
+        if (_uiState.value.isSending) return
+        viewModelScope.launch {
+            val messages = loadMessages(sessionId)
+            _uiState.update {
+                it.copy(currentSessionId = sessionId, messages = messages, pendingConfirmation = null)
+            }
+            refreshSessions()
+        }
+    }
+
+    fun onDeleteSession(sessionId: String) {
+        viewModelScope.launch {
+            repository.deleteSession(sessionId)
+            val sessions = repository.listSessions()
+            var currentId = _uiState.value.currentSessionId
+            var messages = _uiState.value.messages
+            if (currentId == sessionId) {
+                currentId = sessions.firstOrNull()?.id
+                if (currentId == null) {
+                    currentId = repository.createSession()
+                    messages = emptyList()
+                } else {
+                    messages = loadMessages(currentId)
+                }
+            }
+            _uiState.update {
+                it.copy(
+                    sessions = sessions,
+                    currentSessionId = currentId,
+                    messages = messages,
+                    pendingConfirmation = null
+                )
+            }
+        }
+    }
+
+    fun onInputChanged(text: String) {
+        _uiState.update { it.copy(input = text) }
+    }
+
+    fun onSend() {
+        val state = _uiState.value
+        val sessionId = state.currentSessionId ?: return
+        val text = state.input.trim()
+        if (text.isEmpty() || state.isSending) return
+        val titleNeedsGeneration =
+            state.sessions.firstOrNull { it.id == sessionId }?.title == DEFAULT_TITLE
+        _uiState.update {
+            it.copy(
+                messages = it.messages + ChatMessageUi(ChatRole.USER, text),
+                input = "",
+                isSending = true
+            )
+        }
+        collectTurn(repository.send(sessionId, text), sessionId = sessionId, userText = text, titleOnComplete = titleNeedsGeneration)
+    }
+
+    fun onConfirm(confirmation: ConfirmationUi) {
+        val sessionId = _uiState.value.currentSessionId ?: return
+        _uiState.update { it.copy(pendingConfirmation = null, isSending = true) }
+        collectTurn(repository.confirm(sessionId, confirmation.requestId, confirmed = true))
+    }
+
+    fun onReject(confirmation: ConfirmationUi) {
+        val sessionId = _uiState.value.currentSessionId ?: return
+        _uiState.update { it.copy(pendingConfirmation = null, isSending = true) }
+        collectTurn(repository.confirm(sessionId, confirmation.requestId, confirmed = false))
+    }
+
+    private fun collectTurn(
+        events: Flow<AiChatEvent>,
+        sessionId: String? = null,
+        userText: String? = null,
+        titleOnComplete: Boolean = false,
+    ) {
+        var finalText: String? = null
+        viewModelScope.launch {
+            try {
+                events.collect { event ->
+                    when (event) {
+                        is AiChatEvent.Partial -> _uiState.update {
+                            it.copy(messages = it.messages.appendAgentText(event.text, replace = false, streaming = true))
+                        }
+                        is AiChatEvent.Final -> {
+                            finalText = event.text
+                            _uiState.update {
+                                it.copy(messages = it.messages.appendAgentText(event.text, replace = true, streaming = false))
+                            }
+                        }
+                        is AiChatEvent.ToolStatus -> _uiState.update {
+                            it.copy(messages = it.messages + ChatMessageUi(ChatRole.SYSTEM, "正在处理：${event.toolName}…"))
+                        }
+                        is AiChatEvent.ConfirmationRequest -> _uiState.update {
+                            it.copy(
+                                pendingConfirmation = ConfirmationUi(
+                                    requestId = event.requestId,
+                                    toolName = event.toolName,
+                                    summary = event.summary
+                                )
+                            )
+                        }
+                        is AiChatEvent.Error -> _uiState.update {
+                            it.copy(messages = it.messages + ChatMessageUi(ChatRole.SYSTEM, event.message))
+                        }
+                    }
+                }
+            } finally {
+                _uiState.update { it.copy(isSending = false) }
+                if (titleOnComplete) {
+                    val session = sessionId ?: return@launch
+                    val user = userText ?: return@launch
+                    val reply = finalText ?: return@launch
+                    viewModelScope.launch {
+                        repository.ensureTitle(session, user, reply)
+                        refreshSessions()
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun loadMessages(sessionId: String): List<ChatMessageUi> =
+        repository.loadMessages(sessionId).map { message ->
+            ChatMessageUi(
+                role = if (message.isUser) ChatRole.USER else ChatRole.AGENT,
+                text = message.text
+            )
+        }
+
+    companion object {
+        private const val DEFAULT_TITLE = "新会话"
+    }
+}
+
+/** 流式气泡：Partial 追加/新建，Final 覆盖最后一条 agent 气泡。 */
+private fun List<ChatMessageUi>.appendAgentText(
+    text: String,
+    replace: Boolean,
+    streaming: Boolean,
+): List<ChatMessageUi> {
+    val last = lastOrNull()
+    return if (replace && last?.role == ChatRole.AGENT) {
+        dropLast(1) + last.copy(text = text, streaming = streaming)
+    } else if (!replace && last?.role == ChatRole.AGENT) {
+        dropLast(1) + last.copy(text = last.text + text, streaming = streaming)
+    } else {
+        this + ChatMessageUi(ChatRole.AGENT, text, streaming = streaming)
+    }
+}

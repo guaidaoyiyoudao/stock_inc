@@ -1,0 +1,163 @@
+package com.stock.dividend.data.agent
+
+import com.google.adk.kt.models.LlmRequest
+import com.google.adk.kt.types.Content
+import com.google.adk.kt.types.FinishReason
+import com.google.adk.kt.types.FunctionCall
+import com.google.adk.kt.types.FunctionDeclaration
+import com.google.adk.kt.types.FunctionResponse
+import com.google.adk.kt.types.GenerateContentConfig
+import com.google.adk.kt.types.Part
+import com.google.adk.kt.types.Role
+import com.google.adk.kt.types.Schema
+import com.google.adk.kt.types.Tool
+import com.google.adk.kt.types.Type
+import com.google.common.truth.Truth.assertThat
+import com.google.gson.Gson
+import org.junit.Test
+
+class OpenAiProtocolTest {
+    private val gson = Gson()
+
+    @Test
+    fun `buildOpenAiRequest 把 system 指令放首条消息`() {
+        val request = buildOpenAiRequest(
+            LlmRequest(
+                config = GenerateContentConfig(
+                    systemInstruction = Content(role = Role.SYSTEM, parts = listOf(Part(text = "你是助手")))
+                ),
+                contents = listOf(Content(role = Role.USER, parts = listOf(Part(text = "你好"))))
+            ),
+            modelName = "deepseek-chat"
+        )
+        assertThat(request.model).isEqualTo("deepseek-chat")
+        assertThat(request.messages[0].role).isEqualTo("system")
+        assertThat(request.messages[0].content).isEqualTo("你是助手")
+        assertThat(request.messages[1].role).isEqualTo("user")
+        assertThat(request.messages[1].content).isEqualTo("你好")
+    }
+
+    @Test
+    fun `buildOpenAiRequest 把 functionCall 转 tool_calls`() {
+        val request = buildOpenAiRequest(
+            LlmRequest(
+                contents = listOf(
+                    Content(
+                        role = Role.MODEL,
+                        parts = listOf(
+                            Part(functionCall = FunctionCall(name = "get_holdings", args = emptyMap(), id = "call-1"))
+                        )
+                    )
+                )
+            ),
+            modelName = "m"
+        )
+        val msg = request.messages.single()
+        assertThat(msg.role).isEqualTo("assistant")
+        assertThat(msg.toolCalls!!.single().id).isEqualTo("call-1")
+        assertThat(msg.toolCalls!!.single().function.name).isEqualTo("get_holdings")
+        assertThat(gson.fromJson(msg.toolCalls!!.single().function.arguments, Map::class.java)).isEmpty()
+    }
+
+    @Test
+    fun `buildOpenAiRequest 把 functionResponse 转 tool 消息`() {
+        val request = buildOpenAiRequest(
+            LlmRequest(
+                contents = listOf(
+                    Content(
+                        role = Role.USER,
+                        parts = listOf(
+                            Part(
+                                functionResponse = FunctionResponse(
+                                    name = "get_holdings",
+                                    id = "call-1",
+                                    response = mapOf("holdings" to emptyList<String>())
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            modelName = "m"
+        )
+        val msg = request.messages.single()
+        assertThat(msg.role).isEqualTo("tool")
+        assertThat(msg.toolCallId).isEqualTo("call-1")
+        assertThat(msg.content).contains("holdings")
+    }
+
+    @Test
+    fun `buildOpenAiRequest 转换 tools 声明与 JSON Schema`() {
+        val request = buildOpenAiRequest(
+            LlmRequest(
+                config = GenerateContentConfig(
+                    tools = listOf(
+                        Tool(
+                            functionDeclarations = listOf(
+                                FunctionDeclaration(
+                                    name = "get_stock_info",
+                                    description = "查询个股",
+                                    parameters = Schema(
+                                        type = Type.OBJECT,
+                                        properties = mapOf("code" to Schema(type = Type.STRING, description = "代码")),
+                                        required = listOf("code")
+                                    )
+                                )
+                            )
+                        )
+                    )
+                ),
+                contents = listOf(Content(role = Role.USER, parts = listOf(Part(text = "x"))))
+            ),
+            modelName = "m"
+        )
+        val tool = request.tools!!.single()
+        assertThat(tool.function.name).isEqualTo("get_stock_info")
+        assertThat(tool.function.parameters).containsEntry("type", "object")
+        assertThat(tool.function.parameters!!["required"]).isEqualTo(listOf("code"))
+        val props = tool.function.parameters!!["properties"] as Map<*, *>
+        assertThat((props["code"] as Map<*, *>)["type"]).isEqualTo("string")
+    }
+
+    @Test
+    fun `toLlmResponse 映射文本与 tool_calls`() {
+        val response = toLlmResponse(
+            OpenAiChatResponse(
+                choices = listOf(
+                    OpenAiChoice(
+                        message = OpenAiMessage(
+                            role = "assistant",
+                            content = "好的",
+                            toolCalls = listOf(
+                                OpenAiToolCall(
+                                    id = "call-9",
+                                    function = OpenAiFunctionCall(name = "add_stock", arguments = """{"code":"600519"}""")
+                                )
+                            )
+                        ),
+                        finishReason = "tool_calls"
+                    )
+                )
+            )
+        )
+        val parts = response.content!!.parts
+        assertThat(parts.mapNotNull { it.text }).containsExactly("好的")
+        val fc = parts.mapNotNull { it.functionCall }.single()
+        assertThat(fc.name).isEqualTo("add_stock")
+        assertThat(fc.id).isEqualTo("call-9")
+        assertThat(fc.args).containsEntry("code", "600519")
+        assertThat(response.finishReason).isEqualTo(FinishReason.STOP)
+    }
+
+    @Test
+    fun `toLlmResponse 把 length 映射为 MAX_TOKENS`() {
+        val response = toLlmResponse(
+            OpenAiChatResponse(
+                choices = listOf(
+                    OpenAiChoice(message = OpenAiMessage(role = "assistant", content = "x"), finishReason = "length")
+                )
+            )
+        )
+        assertThat(response.finishReason).isEqualTo(FinishReason.MAX_TOKENS)
+    }
+}

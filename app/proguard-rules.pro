@@ -13,6 +13,9 @@
 -keep class * extends androidx.room.RoomDatabase
 -keep @androidx.room.Entity class *
 
+# ADK AI 会话（RoomSessionService 经反射调用，须保留）
+-keep class com.google.adk.kt.sessions.room.** { *; }
+
 # Hilt
 -dontwarn dagger.hilt.**
 

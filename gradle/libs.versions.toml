@@ -1,10 +1,12 @@
 [versions]
 agp = "8.7.3"
-kotlin = "2.0.21"
-ksp = "2.0.21-1.0.28"
+kotlin = "2.1.20"
+ksp = "2.1.20-1.0.32"
+adk-kotlin = "0.6.0"
+compose-markdown = "0.7.2"
 compose-bom = "2024.12.01"
 hilt = "2.53.1"
-room = "2.6.1"
+room = "2.8.4"
 retrofit = "2.11.0"
 okhttp = "4.12.0"
 navigation = "2.8.5"
@@ -68,6 +70,15 @@ retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = 
 retrofit-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
+mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+
+# ADK（Android Agent Development Kit）Kotlin — Android 变体
+# 注意：不能依赖 google-adk-kotlin-core（其 module 元数据 Android 变体为空，会落到 JVM 变体，
+# 导致 RoomSessionService 等 androidMain 类缺失）
+adk-kotlin-core = { group = "com.google.adk", name = "google-adk-kotlin-core-android", version.ref = "adk-kotlin" }
+
+# Compose Markdown（AI 聊天气泡渲染，JitPack 发布）
+compose-markdown = { group = "com.github.jeziellago", name = "compose-markdown", version.ref = "compose-markdown" }
 
 # Coroutines
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

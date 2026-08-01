@@ -1,6 +1,6 @@
-// 本地开发用国内镜像加速；CI 环境通过 USE_CHINA_MIRROR=false 直连官方仓库。
-// 阿里云镜像存在间歇性 502 且对部分 artifact 不全（如 KSP plugin marker），
-// 海外 CI runner 直连官方更稳定。
+// 本地开发用国内镜像加速（临时改为镜像优先、官方兜底）；CI 环境通过 USE_CHINA_MIRROR=false
+// 直连官方仓库。阿里云镜像存在间歇性 502 且对部分 artifact 不全（如 KSP plugin marker），
+// 海外 CI runner 直连官方更稳定。网络恢复后可把镜像块移回官方仓库之后。
 //
 // 注意：pluginManagement {} 块在 Kotlin DSL 里有独立编译作用域，无法引用脚本顶层的
 // val/fun，因此两个块内各自直接读取环境变量。
@@ -24,9 +24,10 @@ pluginManagement {
                     includeGroup("com.google.testing.platform")
                 }
             }
+            // 临时：镜像优先（含 plugin marker / 依赖 jar），官方仓库兜底
+            maven("https://maven.aliyun.com/repository/central")
+            maven("https://maven.aliyun.com/repository/gradle-plugin")
         }
-        // Plugin marker（如 KSP）只在官方 Maven Central / Gradle Portal 有，
-        // 阿里云镜像不全且 502 会让 Gradle 不 fallback。故 plugin 解析官方优先。
         gradlePluginPortal()
         mavenCentral()
         google {
@@ -41,10 +42,6 @@ pluginManagement {
                 includeGroup("com.google.ar")
                 includeGroup("com.google.testing.platform")
             }
-        }
-        if (useChinaMirror) {
-            maven("https://maven.aliyun.com/repository/central")
-            maven("https://maven.aliyun.com/repository/gradle-plugin")
         }
     }
 }
