@@ -7,9 +7,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,6 +16,10 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.PercentFormatter
+import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.tabularNumberStyle
 
 @Composable
 fun IncomeSummaryCard(
@@ -29,10 +30,9 @@ fun IncomeSummaryCard(
     autoCount: Int,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    AppCard(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        tone = AppCardTone.Surface,
     ) {
         Column(
             modifier = Modifier
@@ -47,14 +47,15 @@ fun IncomeSummaryCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            // 大额展示：¥ 符号加粗 + 金额（tnum 等宽；千分位由 MoneyFormatter 统一）
             Text(
                 text = buildAnnotatedString {
                     withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                         append("¥ ")
                     }
-                    append("%.2f".format(totalAmount))
+                    append(MoneyFormatter.amount(totalAmount))
                 },
-                style = MaterialTheme.typography.headlineMedium,
+                style = MaterialTheme.typography.headlineMedium.merge(tabularNumberStyle),
                 color = MaterialTheme.colorScheme.onSurface
             )
 
@@ -64,19 +65,24 @@ fun IncomeSummaryCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // YoY comparison
-                Text(
-                    text = when {
-                        prevYearTotal == null -> "首年记录"
-                        prevYearTotal > 0 -> {
-                            val change = ((totalAmount - prevYearTotal) / prevYearTotal) * 100
-                            if (change >= 0) "较去年 ↑%.1f%%".format(change)
-                            else "较去年 ↓%.1f%%".format(-change)
+                val ext = LocalExtendedColors.current
+                // YoY comparison（同比涨跌：走财务语义色）
+                val (yoyText, yoyColor) = when {
+                    prevYearTotal == null -> "首年记录" to MaterialTheme.colorScheme.onSurfaceVariant
+                    prevYearTotal > 0 -> {
+                        val change = ((totalAmount - prevYearTotal) / prevYearTotal) * 100
+                        if (change >= 0) {
+                            "较去年 ↑${PercentFormatter.percent(change, decimals = 1)}" to ext.positive
+                        } else {
+                            "较去年 ↓${PercentFormatter.percent(-change, decimals = 1)}" to ext.negative
                         }
-                        else -> "较去年 —"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    else -> "较去年 —" to MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Text(
+                    text = yoyText,
+                    style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                    color = yoyColor
                 )
 
                 // Source breakdown

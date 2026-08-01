@@ -551,7 +551,7 @@ class StockRepositoryTest {
     }
 
     @Test
-    fun `resolveStock 把带 sh 前缀的代码归一化后再搜索`() = runTest {
+    fun resolveStock_normalizesShPrefixedCode() = runTest {
         coEvery { api.searchStocks(input = "600519") } returns StockSearchResponse(
             quotationCodeTable = StockSearchResponse.QuotationCodeTable(
                 Data = listOf(stockItem("600519", "贵州茅台", "1"))
@@ -566,7 +566,7 @@ class StockRepositoryTest {
     }
 
     @Test
-    fun `resolveStock 把 sz 前缀无分隔符的代码归一化`() = runTest {
+    fun resolveStock_normalizesSzPrefixedCode() = runTest {
         coEvery { api.searchStocks(input = "000001") } returns StockSearchResponse(
             quotationCodeTable = StockSearchResponse.QuotationCodeTable(
                 Data = listOf(stockItem("000001", "平安银行", "0"))

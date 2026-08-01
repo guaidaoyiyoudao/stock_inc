@@ -14,14 +14,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,11 +25,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -49,7 +43,10 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.HoldingAction
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.data.repository.EvaluatedStock
@@ -57,6 +54,8 @@ import com.stock.dividend.data.repository.LlmAnalysisState
 import com.stock.dividend.data.repository.PortfolioSignals
 import com.stock.dividend.data.repository.StockLlmComment
 import com.stock.dividend.viewmodel.PortfolioViewModel
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppOutlinedButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -133,7 +132,10 @@ private fun NoEvaluationState(modifier: Modifier, onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(16.dp))
-            OutlinedButton(onClick = onBack) { Text("返回") }
+            AppOutlinedButton(
+                onClick = onBack,
+                text = "返回",
+            )
         }
     }
 }
@@ -151,7 +153,10 @@ private fun EmptyEvaluationState(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = onReevaluate) { Text("重新评估") }
+            AppOutlinedButton(
+                onClick = onReevaluate,
+                text = "重新评估",
+            )
         }
     }
 }
@@ -207,7 +212,7 @@ private fun EvaluationContent(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Button(
+                AppButton(
                     onClick = onReevaluate,
                     modifier = Modifier.weight(1f)
                 ) {
@@ -215,10 +220,11 @@ private fun EvaluationContent(
                     Spacer(Modifier.padding(end = 4.dp))
                     Text("重新评估")
                 }
-                OutlinedButton(
+                AppOutlinedButton(
                     onClick = onClear,
-                    modifier = Modifier.weight(1f)
-                ) { Text("清除结果") }
+                    modifier = Modifier.weight(1f),
+                    text = "清除结果",
+                )
             }
         }
     }
@@ -268,11 +274,8 @@ private fun SectionHeader(action: HoldingAction) {
 
 @Composable
 private fun EvaluationCard(stock: EvaluatedStock, aiComment: StockLlmComment? = null) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
@@ -377,7 +380,7 @@ private fun PortfolioSignalsSection(signals: PortfolioSignals) {
     if (pc.triggered) {
         Surface(
             tonalElevation = 2.dp,
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.errorContainer,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -394,7 +397,7 @@ private fun PortfolioSignalsSection(signals: PortfolioSignals) {
     if (signals.buySignals.isNotEmpty()) {
         Surface(
             tonalElevation = 2.dp,
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.tertiaryContainer,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -437,7 +440,10 @@ private fun LlmAnalysisSection(
                             },
                             style = MaterialTheme.typography.titleSmall
                         )
-                        TextButton(onClick = onReanalyze) { Text("重新分析") }
+                        AppTextButton(
+                            onClick = onReanalyze,
+                            text = "重新分析",
+                        )
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(a.overview, style = MaterialTheme.typography.bodyMedium)
@@ -473,12 +479,15 @@ private fun LlmAnalysisSection(
             Column {
                 Text(state.message, color = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.height(4.dp))
-                TextButton(onClick = onRetry) { Text("重试") }
+                AppTextButton(
+                    onClick = onRetry,
+                    text = "重试",
+                )
             }
         }
         LlmAnalysisState.NotConfigured -> {
             Column {
-                OutlinedButton(onClick = onAnalyze, enabled = false) {
+                AppOutlinedButton(onClick = onAnalyze, enabled = false) {
                     Icon(Icons.Filled.AutoAwesome, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
                     Text("AI 解读")
@@ -487,7 +496,7 @@ private fun LlmAnalysisSection(
             }
         }
         LlmAnalysisState.Idle -> {
-            OutlinedButton(onClick = onAnalyze) {
+            AppOutlinedButton(onClick = onAnalyze) {
                 Icon(Icons.Filled.AutoAwesome, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text("AI 解读")

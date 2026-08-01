@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -58,13 +57,11 @@ fun IncomeTimelineCard(
     val displayDate = if (date.length >= 10) date.substring(5, 10) else date
     val sourceText = if (isManual) "实际到账" else "推算待确认"
 
-    Card(
+    AppCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable { expanded = !expanded },
-        shape = MaterialTheme.shapes.medium,
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        colors = AppCardDefaults.listCardColors()
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier

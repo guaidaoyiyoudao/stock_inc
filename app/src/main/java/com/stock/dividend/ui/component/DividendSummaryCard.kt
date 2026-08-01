@@ -1,6 +1,5 @@
 package com.stock.dividend.ui.component
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,7 +22,9 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import java.util.Locale
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.PercentFormatter
+import com.stock.dividend.ui.theme.tabularNumberStyle
 
 @Composable
 fun DividendSummaryCard(
@@ -39,13 +38,9 @@ fun DividendSummaryCard(
         ?.takeIf { it > 0.0 }
         ?.let { totalAmount / it * 100 }
 
-    Card(
+    AppCard(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+        tone = AppCardTone.Surface,
     ) {
         Column(
             modifier = Modifier
@@ -65,8 +60,8 @@ fun DividendSummaryCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     costDividendYield?.let {
                         Text(
-                            text = "成本息率 %.2f%%".format(Locale.US, it * 100),
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "成本息率 ${PercentFormatter.fromRatio(it, decimals = 2)}",
+                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -74,8 +69,8 @@ fun DividendSummaryCard(
                     }
                     annualYield?.let {
                         Text(
-                            text = "股息率 %.2f%%".format(Locale.US, it),
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "股息率 ${PercentFormatter.percent(it)}",
+                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
                         )
@@ -85,14 +80,15 @@ fun DividendSummaryCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // 大额展示：¥ 符号加粗 + 金额（tnum 等宽对齐）
             Text(
                 text = buildAnnotatedString {
                     withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                         append("¥ ")
                     }
-                    append(formatAmount(totalAmount))
+                    append(MoneyFormatter.amount(totalAmount))
                 },
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.headlineSmall.merge(tabularNumberStyle),
                 color = MaterialTheme.colorScheme.onSurface
             )
 
@@ -108,13 +104,13 @@ fun DividendSummaryCard(
             ) {
                 SummaryMetric(
                     label = "日均",
-                    value = "¥${formatAmount(totalAmount / 365)}",
+                    value = MoneyFormatter.withSymbol(totalAmount / 365),
                     modifier = Modifier.weight(1f)
                 )
                 MetricDivider()
                 SummaryMetric(
                     label = "月均",
-                    value = "¥${formatAmount(totalAmount / 12)}",
+                    value = MoneyFormatter.withSymbol(totalAmount / 12),
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -141,7 +137,7 @@ private fun SummaryMetric(
         Spacer(modifier = Modifier.height(3.dp))
         Text(
             text = value,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.titleSmall.merge(tabularNumberStyle),
             fontWeight = FontWeight.Bold,
             color = valueColor
         )
@@ -158,5 +154,3 @@ private fun MetricDivider() {
             .background(MaterialTheme.colorScheme.outlineVariant)
     )
 }
-
-private fun formatAmount(value: Double): String = "%,.2f".format(Locale.US, value)

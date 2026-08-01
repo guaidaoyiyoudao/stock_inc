@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,14 +35,10 @@ fun ForecastComparisonCard(
     val periods = listOf("1" to "1年", "3" to "3年", "5" to "5年")
     val maxIncome = allForecasts.values.maxOfOrNull { it.forecastIncome }?.coerceAtLeast(1.0) ?: 1.0
 
-    Card(
+    AppCard(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+            .animateContentSize()
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
             Text(

@@ -16,8 +16,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -36,11 +34,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.ui.component.AppCard
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.viewmodel.BackupViewModel
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,19 +90,16 @@ fun BackupRestoreScreen(
                 )
             },
             confirmButton = {
-                TextButton(
+                AppTextButton(
                     onClick = { viewModel.confirmRestore(context) },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("导入")
-                }
+                    text = "导入",
+                )
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.dismissConfirmDialog() }) {
-                    Text("取消")
-                }
+                AppTextButton(
+                    onClick = { viewModel.dismissConfirmDialog() },
+                    text = "取消",
+                )
             }
         )
     }
@@ -129,11 +128,9 @@ fun BackupRestoreScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Export section
-                Card(
+                AppCard(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
+                    tone = AppCardTone.List
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -149,21 +146,18 @@ fun BackupRestoreScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Button(
+                        AppButton(
                             onClick = { exportLauncher.launch(exportFileName) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("导出备份文件")
-                        }
+                            modifier = Modifier.fillMaxWidth(),
+                            text = "导出备份文件",
+                        )
                     }
                 }
 
                 // Import section
-                Card(
+                AppCard(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
+                    tone = AppCardTone.List
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -179,12 +173,11 @@ fun BackupRestoreScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Button(
+                        AppButton(
                             onClick = { importLauncher.launch(arrayOf("application/json")) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("选择备份文件")
-                        }
+                            modifier = Modifier.fillMaxWidth(),
+                            text = "选择备份文件",
+                        )
                     }
                 }
 
@@ -195,14 +188,16 @@ fun BackupRestoreScreen(
                     exit = fadeOut()
                 ) {
                     state.message?.let { msg ->
-                        Card(
+                        AppCard(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (state.isError)
-                                    MaterialTheme.colorScheme.errorContainer
-                                else
-                                    MaterialTheme.colorScheme.primaryContainer
-                            )
+                            containerColor = if (state.isError)
+                                MaterialTheme.colorScheme.errorContainer
+                            else
+                                MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = if (state.isError)
+                                MaterialTheme.colorScheme.onErrorContainer
+                            else
+                                MaterialTheme.colorScheme.onPrimaryContainer,
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
@@ -216,9 +211,10 @@ fun BackupRestoreScreen(
                                     else
                                         MaterialTheme.colorScheme.onPrimaryContainer
                                 )
-                                TextButton(onClick = { viewModel.clearMessage() }) {
-                                    Text("关闭")
-                                }
+                                AppTextButton(
+                                    onClick = { viewModel.clearMessage() },
+                                    text = "关闭",
+                                )
                             }
                         }
                     }

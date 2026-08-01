@@ -25,7 +25,7 @@ class AiTitleGeneratorTest {
     }
 
     @Test
-    fun `根据对话生成标题并解析文本`() = runTest {
+    fun generate_producesAndParsesTitle() = runTest {
         server.enqueue(
             MockResponse().setBody(
                 """{"choices":[{"message":{"role":"assistant","content":"持仓分析"},"finish_reason":"stop"}]}"""
@@ -44,7 +44,7 @@ class AiTitleGeneratorTest {
     }
 
     @Test
-    fun `空响应返回 null`() = runTest {
+    fun emptyResponse_returnsNull() = runTest {
         server.enqueue(MockResponse().setBody("""{"choices":[]}"""))
         val generator = AiTitleGenerator(OkHttpClient())
         val title = generator.generate(

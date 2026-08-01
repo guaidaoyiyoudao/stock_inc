@@ -18,14 +18,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BollTone
 import com.stock.dividend.data.repository.HoldingRecommender
-import com.stock.dividend.ui.theme.FinanceGreen
-import com.stock.dividend.ui.theme.FinanceRed
+import com.stock.dividend.ui.theme.LocalExtendedColors
 
 /**
  * 周线 BOLL 带→价位 横轴。与 [DividendPriceScale] 视觉对等：一条横轴展示
@@ -44,10 +44,12 @@ fun BollPriceScale(
     band: BollBand?,
     modifier: Modifier = Modifier
 ) {
+    val ext = LocalExtendedColors.current
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -60,7 +62,7 @@ fun BollPriceScale(
             Text(
                 text = "超卖",
                 style = MaterialTheme.typography.labelSmall,
-                color = FinanceGreen,
+                color = ext.positive,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
@@ -71,7 +73,7 @@ fun BollPriceScale(
             Text(
                 text = "超买",
                 style = MaterialTheme.typography.labelSmall,
-                color = FinanceRed,
+                color = ext.negative,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -156,10 +158,13 @@ fun BollPriceScale(
 }
 
 @Composable
-private fun toneColor(tone: BollTone) = when (tone) {
-    BollTone.Buy -> FinanceGreen
-    BollTone.Sell -> FinanceRed
-    BollTone.Current -> MaterialTheme.colorScheme.primary
+private fun toneColor(tone: BollTone): Color {
+    val ext = LocalExtendedColors.current
+    return when (tone) {
+        BollTone.Buy -> ext.positive
+        BollTone.Sell -> ext.negative
+        BollTone.Current -> MaterialTheme.colorScheme.primary
+    }
 }
 
 @Composable

@@ -12,9 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -67,7 +64,7 @@ fun EmptyStateView(
                 Box(
                     modifier = Modifier
                         .size(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(MaterialTheme.shapes.medium)
                         .background(
                             brush = Brush.linearGradient(
                                 colors = listOf(
@@ -106,18 +103,10 @@ fun EmptyStateView(
 
             if (onAddClick != {}) {
                 Spacer(modifier = Modifier.height(24.dp))
-                Button(
+                AppButton(
                     onClick = onAddClick,
-                    shape = MaterialTheme.shapes.large,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Text(
-                        "添加股票",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
+                    text = "添加股票",
+                )
             }
         }
     }

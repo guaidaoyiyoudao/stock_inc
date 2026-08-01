@@ -8,14 +8,14 @@ import org.junit.Test
 class AgentInstructionBuilderTest {
 
     @Test
-    fun `无策略时只返回基础指令`() {
+    fun withoutStrategies_returnsBaseInstructionOnly() {
         val instruction = AgentInstructionBuilder.build(emptyList())
         assertThat(instruction).contains("AI 投资助手")
         assertThat(instruction).doesNotContain("全局投资原则")
     }
 
     @Test
-    fun `有策略时注入方向目标与理由`() {
+    fun withStrategies_injectsDirectionGoalAndReason() {
         val strategy = TradeStrategyEntity(
             id = "s1",
             targetText = "银行股",
@@ -34,7 +34,7 @@ class AgentInstructionBuilderTest {
     }
 
     @Test
-    fun `过长的理由被截断`() {
+    fun overlongReason_isTruncated() {
         val strategy = TradeStrategyEntity(
             id = "s2",
             targetText = "测试",

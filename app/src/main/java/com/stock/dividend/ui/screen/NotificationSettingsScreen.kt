@@ -19,9 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,7 +37,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.TextButton
 import com.stock.dividend.data.repository.LlmProviderPreset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +44,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.ui.component.AppCard
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.viewmodel.NotificationSettingsViewModel
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppTextField
 
 internal data class SettingsEntry(
     val title: String,
@@ -224,7 +225,7 @@ private fun NotificationSettingsContent(
             onCheckedChange = onEnabledChange
         )
     }
-    OutlinedTextField(
+    AppTextField(
         value = state.thresholdInput,
         onValueChange = onThresholdChange,
         label = { Text("阈值 (%)") },
@@ -235,12 +236,11 @@ private fun NotificationSettingsContent(
         },
         modifier = Modifier.fillMaxWidth()
     )
-    Button(
+    AppButton(
         onClick = onSave,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text("保存")
-    }
+        modifier = Modifier.fillMaxWidth(),
+        text = "保存",
+    )
     if (state.saved) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
@@ -256,13 +256,11 @@ private fun SettingsEntryRow(
     entry: SettingsEntry,
     onClick: () -> Unit
 ) {
-    Card(
+    AppCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        tone = AppCardTone.List,
     ) {
         Row(
             modifier = Modifier
@@ -313,14 +311,14 @@ private fun EvalThresholdSettingsContent(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        OutlinedTextField(
+        AppTextField(
             value = state.evalMinInput,
             onValueChange = onMinChange,
             label = { Text("最低股息率 (%)") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
-        OutlinedTextField(
+        AppTextField(
             value = state.evalBoostInput,
             onValueChange = onBoostChange,
             label = { Text("加分股息率 (%)") },
@@ -331,12 +329,11 @@ private fun EvalThresholdSettingsContent(
             },
             modifier = Modifier.fillMaxWidth()
         )
-        Button(
+        AppButton(
             onClick = onSave,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("保存")
-        }
+            modifier = Modifier.fillMaxWidth(),
+            text = "保存",
+        )
         if (state.evalSaved) {
             Text(
                 text = "已保存",
@@ -384,7 +381,7 @@ private fun LlmConfigSettingsContent(viewModel: NotificationSettingsViewModel) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
+        AppTextField(
             value = baseUrl,
             onValueChange = { baseUrl = it },
             label = { Text("Base URL") },
@@ -392,21 +389,22 @@ private fun LlmConfigSettingsContent(viewModel: NotificationSettingsViewModel) {
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
+        AppTextField(
             value = apiKey,
             onValueChange = { apiKey = it },
             label = { Text("API Key") },
             singleLine = true,
             visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
-                TextButton(onClick = { showKey = !showKey }) {
-                    Text(if (showKey) "隐藏" else "显示")
-                }
+                AppTextButton(
+                    onClick = { showKey = !showKey },
+                    text = if (showKey) "隐藏" else "显示",
+                )
             },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
+        AppTextField(
             value = model,
             onValueChange = { model = it },
             label = { Text("Model") },
@@ -414,8 +412,9 @@ private fun LlmConfigSettingsContent(viewModel: NotificationSettingsViewModel) {
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(12.dp))
-        Button(onClick = { viewModel.saveLlmConfig(baseUrl, apiKey, model) }) {
-            Text("保存")
-        }
+        AppButton(
+            onClick = { viewModel.saveLlmConfig(baseUrl, apiKey, model) },
+            text = "保存",
+        )
     }
 }

@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -61,10 +59,8 @@ fun DividendRateChart(
     val thresholdColor = MaterialTheme.colorScheme.tertiary.toArgb()
     val reachedColor = MaterialTheme.colorScheme.primary.toArgb()
 
-    Card(
+    AppCard(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -203,10 +199,8 @@ fun DividendRateFallbackCard(
     point: DividendRatePoint?,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    AppCard(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -290,7 +284,7 @@ private fun DividendRatePointChip(
 
     Row(
         modifier = Modifier
-            .background(containerColor, RoundedCornerShape(10.dp))
+            .background(containerColor, MaterialTheme.shapes.small)
             .padding(horizontal = 10.dp, vertical = 7.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -374,7 +368,7 @@ private fun BuyThresholdPrompt(status: BuyThresholdStatus) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(bg, RoundedCornerShape(10.dp))
+            .background(bg, MaterialTheme.shapes.small)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

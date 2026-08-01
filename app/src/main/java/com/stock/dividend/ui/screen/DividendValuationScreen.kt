@@ -14,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,16 +34,22 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.data.repository.DividendValuationStatus
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.PercentFormatter
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.component.FinanceMetric
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.SectionHeader
 import com.stock.dividend.ui.component.StatusPill
+import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.viewmodel.DividendValuationPreset
 import com.stock.dividend.viewmodel.DividendValuationUiState
 import com.stock.dividend.viewmodel.DividendValuationViewModel
-import java.util.Locale
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppTextField
 
 data class DividendValuationFieldHelp(
     val title: String,
@@ -151,7 +156,7 @@ private fun DividendValuationContent(
                 item { EmptyCashFlowCard() }
             } else {
                 items(rows, key = { it.year }) { row ->
-                    Card(colors = AppCardDefaults.listCardColors()) {
+                    AppCard {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -188,7 +193,7 @@ private fun DividendValuationContent(
 private fun ValuationSummaryCard(state: DividendValuationUiState) {
     val result = state.result
 
-    Card(colors = AppCardDefaults.summaryCardColors()) {
+    AppCard(tone = AppCardTone.Summary) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -206,7 +211,7 @@ private fun ValuationSummaryCard(state: DividendValuationUiState) {
                     )
                     Text(
                         text = result?.let { formatCurrency(it.intrinsicValuePerShare) } ?: "--",
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.headlineSmall.merge(tabularNumberStyle),
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -270,7 +275,7 @@ private fun AssumptionCard(
 ) {
     var selectedHelp by remember { mutableStateOf<DividendValuationFieldHelp?>(null) }
 
-    Card(colors = AppCardDefaults.listCardColors()) {
+    AppCard {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -343,9 +348,10 @@ private fun AssumptionCard(
             title = { Text(help.title) },
             text = { Text(help.description) },
             confirmButton = {
-                TextButton(onClick = { selectedHelp = null }) {
-                    Text("知道了")
-                }
+                AppTextButton(
+                    onClick = { selectedHelp = null },
+                    text = "知道了",
+                )
             }
         )
     }
@@ -359,7 +365,7 @@ private fun AssumptionField(
     onHelpClick: (DividendValuationFieldHelp) -> Unit,
     onValueChange: (String) -> Unit
 ) {
-    OutlinedTextField(
+    AppTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
@@ -379,7 +385,7 @@ private fun AssumptionField(
 
 @Composable
 private fun EmptyCashFlowCard() {
-    Card(colors = AppCardDefaults.listCardColors()) {
+    AppCard {
         Text(
             text = "输入有效估值参数后显示现金流明细。",
             modifier = Modifier
@@ -395,7 +401,7 @@ private fun EmptyCashFlowCard() {
 private fun TerminalValueCard(state: DividendValuationUiState) {
     val result = state.result ?: return
 
-    Card(colors = AppCardDefaults.listCardColors()) {
+    AppCard {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -423,9 +429,11 @@ private fun TerminalValueCard(state: DividendValuationUiState) {
     }
 }
 
-private fun formatCurrency(value: Double): String = String.format(Locale.US, "¥%.2f", value)
+// 统一走 MoneyFormatter（千分位 + Locale.US），修复旧实现无千分位的不一致
+private fun formatCurrency(value: Double): String = MoneyFormatter.withSymbol(value)
 
-private fun formatPercent(value: Double): String = String.format(Locale.US, "%.1f%%", value * 100)
+// 入参是 0~1 的比率，自动 ×100 后保留 1 位小数
+private fun formatPercent(value: Double): String = PercentFormatter.fromRatio(value, decimals = 1)
 
 private fun helpFor(title: String): DividendValuationFieldHelp =
     dividendValuationFieldHelp.first { it.title == title }

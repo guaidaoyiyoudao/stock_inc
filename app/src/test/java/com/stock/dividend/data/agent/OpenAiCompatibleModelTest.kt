@@ -35,7 +35,7 @@ class OpenAiCompatibleModelTest {
     )
 
     @Test
-    fun `非流式请求带 Authorization 头与 tools，响应映射为 tool_calls`() = runTest {
+    fun nonStreamingRequest_mapsResponseToToolCalls() = runTest {
         server.enqueue(
             MockResponse().setBody(
                 """{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"c1","type":"function","function":{"name":"add_stock","arguments":"{\"code\":\"600519\"}"}}]},"finish_reason":"tool_calls"}]}"""
@@ -58,7 +58,7 @@ class OpenAiCompatibleModelTest {
     }
 
     @Test
-    fun `流式模式产出 partial 文本与最终响应`() = runTest {
+    fun streamingMode_producesPartialTextAndFinalResponse() = runTest {
         server.enqueue(
             MockResponse().setBody(
                 """
@@ -85,7 +85,7 @@ class OpenAiCompatibleModelTest {
     }
 
     @Test
-    fun `HTTP 非 2xx 抛异常而非静默`() = runTest {
+    fun non2xxHttp_throwsException() = runTest {
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"bad key"}"""))
         val error = runCatching {
             model().generateContent(

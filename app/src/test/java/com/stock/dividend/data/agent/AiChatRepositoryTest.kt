@@ -47,7 +47,7 @@ class AiChatRepositoryTest {
     }
 
     @Test
-    fun `只读工具回路：tool_calls 后文本，事件含 ToolStatus 与 Final`() = runTest {
+    fun readOnlyToolLoop_emitsToolStatusAndFinal() = runTest {
         val stockRepository = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepository.observeAllStocksForSnapshot() } returns emptyList()
         coEvery { stockRepository.getCachedPrices(emptyList()) } returns emptyMap()
@@ -89,7 +89,7 @@ class AiChatRepositoryTest {
     }
 
     @Test
-    fun `会话创建后列表返回默认标题`() = runTest {
+    fun afterCreateSession_listReturnsDefaultTitle() = runTest {
         val repository = AiChatRepository(
             configSource(LlmConfig("http://x", "k", "m")),
             mockk(relaxed = true),
@@ -104,7 +104,7 @@ class AiChatRepositoryTest {
     }
 
     @Test
-    fun `loadMessages 还原用户与助手消息`() = runTest {
+    fun loadMessages_restoresUserAndAssistantMessages() = runTest {
         val stockRepository = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepository.observeAllStocksForSnapshot() } returns emptyList()
         coEvery { stockRepository.getCachedPrices(emptyList()) } returns emptyMap()
@@ -146,7 +146,7 @@ class AiChatRepositoryTest {
     }
 
     @Test
-    fun `ensureTitle 用 LLM 标题更新会话`() = runTest {
+    fun ensureTitle_updatesSessionWithLlmTitle() = runTest {
         val titleGenerator = mockk<AiTitleGenerator>(relaxed = true)
         coEvery { titleGenerator.generate(any(), "你好", "回复") } returns "持仓分析"
         val sessionService = com.google.adk.kt.sessions.InMemorySessionService()
@@ -162,7 +162,7 @@ class AiChatRepositoryTest {
     }
 
     @Test
-    fun `写工具确认门：先 ConfirmationRequest，确认后执行并 Final`() = runTest {
+    fun writeToolConfirmation_emitsConfirmationThenFinal() = runTest {
         val stockRepository = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepository.resolveStock("600519") } returns
             StockSearchResult(code = "sh.600519", name = "贵州茅台", marketCode = "1")
@@ -220,7 +220,7 @@ class AiChatRepositoryTest {
     }
 
     @Test
-    fun `未配置 LLM 时 send 直接返回错误事件`() = runTest {
+    fun withoutLlmConfig_sendReturnsErrorEvent() = runTest {
         val factory = mockk<AiAgentFactory>(relaxed = true)
         val repository = AiChatRepository(
             configSource(LlmConfig(baseUrl = "", apiKey = "", model = "")),

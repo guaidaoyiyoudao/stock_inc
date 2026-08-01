@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -37,7 +36,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,17 +52,25 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.R
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.PercentFormatter
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
+import com.stock.dividend.ui.component.AppCardTone
+import com.stock.dividend.ui.component.AppTextButton
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.component.FinanceMetric
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
+import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.viewmodel.CoverageStatus
 import com.stock.dividend.viewmodel.ExpenseCoverageRow
 import com.stock.dividend.viewmodel.ExpenseCoverageUiState
 import com.stock.dividend.viewmodel.ExpenseCoverageViewModel
 import com.stock.dividend.viewmodel.ExpensePeriod
 import kotlin.math.roundToInt
+import com.stock.dividend.ui.component.AppTextField
 
 @Composable
 fun ExpenseCoverageScreen(
@@ -166,9 +172,8 @@ private fun ExpenseCoverageContent(
 
 @Composable
 private fun SummaryCard(state: ExpenseCoverageUiState) {
-    Card(
-        shape = MaterialTheme.shapes.large,
-        colors = AppCardDefaults.summaryCardColors()
+    AppCard(
+        tone = AppCardTone.Summary
     ) {
         Column(
             modifier = Modifier
@@ -198,8 +203,8 @@ private fun SummaryCard(state: ExpenseCoverageUiState) {
                     )
                 }
                 Text(
-                    text = "%.1f%%".format(state.coverageRatio * 100),
-                    style = MaterialTheme.typography.headlineMedium,
+                    text = PercentFormatter.fromRatio(state.coverageRatio, decimals = 1),
+                    style = MaterialTheme.typography.headlineMedium.merge(tabularNumberStyle),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.End
@@ -273,9 +278,7 @@ private fun EmptyExpenseCard(onAddExpense: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Button(onClick = onAddExpense) {
-                Text(text = stringResource(R.string.expense_coverage_action_add_expense))
-            }
+            AppButton(onClick = onAddExpense, text = stringResource(R.string.expense_coverage_action_add_expense))
         }
     }
 }
@@ -291,9 +294,7 @@ private fun ExpenseRowCard(
     onDelete: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    Card(
-        colors = AppCardDefaults.listCardColors()
-    ) {
+    AppCard {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -517,13 +518,13 @@ private fun ExpenseDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
+                AppTextField(
                     value = state.expenseNameInput,
                     onValueChange = onNameChanged,
                     label = { Text(stringResource(R.string.expense_coverage_name_label)) },
                     singleLine = true
                 )
-                OutlinedTextField(
+                AppTextField(
                     value = state.expenseAmountInput,
                     onValueChange = onAmountChanged,
                     label = { Text(stringResource(R.string.expense_coverage_amount_label)) },
@@ -556,19 +557,16 @@ private fun ExpenseDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onSave) {
-                Text(stringResource(R.string.save))
-            }
+            AppButton(onClick = onSave, text = stringResource(R.string.save))
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.cancel))
-            }
+            AppTextButton(onClick = onDismiss, text = stringResource(R.string.cancel))
         }
     )
 }
 
-private fun formatMoney(value: Double): String = "¥%.2f".format(value)
+// 统一走 MoneyFormatter（千分位 + Locale.US），修复旧实现无千分位的不一致
+private fun formatMoney(value: Double): String = MoneyFormatter.withSymbol(value)
 
 private fun formatPeriodAmount(amount: Double, period: ExpensePeriod): String =
     when (period) {

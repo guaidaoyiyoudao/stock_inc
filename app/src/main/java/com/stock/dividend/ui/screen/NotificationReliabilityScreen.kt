@@ -17,9 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +34,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppCard
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.data.notification.VivoPermissionIntents
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -132,11 +132,9 @@ private fun ReliabilityCard(
     actionText: String,
     onAction: () -> Unit,
 ) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        tone = AppCardTone.List,
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -147,9 +145,7 @@ private fun ReliabilityCard(
                 color = if (statusOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
             )
             Spacer(Modifier.height(8.dp))
-            Button(onClick = onAction, modifier = Modifier.fillMaxWidth()) {
-                Text(actionText)
-            }
+            AppButton(onClick = onAction, modifier = Modifier.fillMaxWidth(), text = actionText)
         }
     }
 }

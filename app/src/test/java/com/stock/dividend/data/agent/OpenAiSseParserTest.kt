@@ -6,14 +6,14 @@ import org.junit.Test
 class OpenAiSseParserTest {
 
     @Test
-    fun `parseSseDataLine 解析 data 前缀的 JSON`() {
+    fun parseSseDataLine_parsesJsonAfterDataPrefix() {
         val chunk = parseSseDataLine("""data: {"choices":[{"delta":{"content":"你"}}]}""")
         assertThat(chunk).isNotNull()
         assertThat(chunk!!.choices.single().delta!!.content).isEqualTo("你")
     }
 
     @Test
-    fun `parseSseDataLine 忽略 DONE 心跳与非 data 行`() {
+    fun parseSseDataLine_ignoresDoneAndNonDataLines() {
         assertThat(parseSseDataLine("data: [DONE]")).isNull()
         assertThat(parseSseDataLine(": keep-alive")).isNull()
         assertThat(parseSseDataLine("")).isNull()
@@ -21,7 +21,7 @@ class OpenAiSseParserTest {
     }
 
     @Test
-    fun `accumulator 累积文本增量并产出最终响应`() {
+    fun accumulator_accumulatesTextAndProducesFinalResponse() {
         val acc = SseAccumulator()
         assertThat(
             acc.onChunk(OpenAiSseChunk(choices = listOf(OpenAiSseChoice(delta = OpenAiDelta(content = "你好")))))
@@ -35,7 +35,7 @@ class OpenAiSseParserTest {
     }
 
     @Test
-    fun `accumulator 按 index 累积流式 tool_calls`() {
+    fun accumulator_accumulatesToolCallsByIndex() {
         val acc = SseAccumulator()
         acc.onChunk(
             OpenAiSseChunk(

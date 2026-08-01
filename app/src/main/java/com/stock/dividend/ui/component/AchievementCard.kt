@@ -12,8 +12,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,14 +34,9 @@ fun AchievementCard(
 ) {
     val alpha = if (item.unlocked) 1f else 0.4f
 
-    Card(
+    AppCard(
         modifier = modifier.alpha(alpha),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = if (item.unlocked) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else MaterialTheme.colorScheme.surfaceVariant
-        )
+        tone = if (item.unlocked) AppCardTone.Summary else AppCardTone.List
     ) {
         Column(
             modifier = Modifier
