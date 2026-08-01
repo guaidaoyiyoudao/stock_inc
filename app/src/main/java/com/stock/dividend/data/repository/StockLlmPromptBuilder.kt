@@ -28,6 +28,9 @@ object StockLlmPromptBuilder {
 - 距下轨%：0=价格在 BOLL 下轨（便宜），100=在上轨（贵）；给出 日/周/月 三周期，据此判断多周期共振
 - 分红率%：当年现金分红 / 当年股价（逐年序列反映分红力度趋势）
 - 股息率%：最新一期年现金分红 / 现价
+- PE(TTM)：市盈率，股价 / 每股收益；越低代表估值越便宜，但需结合成长性，过低可能是盈利下滑信号
+- PB：市净率，股价 / 每股净资产；红利股常 <1，反映破净程度
+- 总市值：公司规模（元），大盘股流动性好但弹性小，小盘股反之
 - 预测：基于历史分红的线性平均，非承诺；实际样本年数越少越不可靠
 - 买入线：股息率达到「国债收益率×倍数」时视为低估信号
 - ROE%：净资产收益率，反映赚钱效率，持续下滑是分红可持续性的危险信号
@@ -54,6 +57,15 @@ object StockLlmPromptBuilder {
         input.industry?.takeIf { it.isNotBlank() }?.let { sb.append(" [$it]") }
         sb.append("\n")
         sb.append("【现价】${input.currentPrice?.let { "¥${"%.2f".format(it)}" } ?: "—"}\n")
+
+        // 估值（PE/PB/总市值；三者全缺则不输出此段，避免噪音）
+        val hasValuation = input.pe != null || input.pb != null || input.totalMarketCap != null
+        if (hasValuation) {
+            val peStr = input.pe?.let { "%.2f".format(it) } ?: "—"
+            val pbStr = input.pb?.let { "%.2f".format(it) } ?: "—"
+            val capStr = input.totalMarketCap?.let { "%.0f亿".format(it / 1_0000_0000) } ?: "—"
+            sb.append("【估值】PE $peStr / PB $pbStr / 总市值 $capStr\n")
+        }
 
         // 分红率趋势
         val points = input.dividendRatePoints

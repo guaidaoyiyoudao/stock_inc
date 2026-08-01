@@ -6,16 +6,21 @@ import com.google.adk.kt.types.Type
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.BuyThresholdStatus
+import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.DividendDiscountCalculator
 import com.stock.dividend.data.repository.DividendDiscountInput
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.HoldingRecommender
 import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StockSearchResult
+import com.stock.dividend.data.repository.BollCalculator
 import com.stock.dividend.data.repository.computeBuyThreshold
+import com.stock.dividend.data.repository.enrichPayoutRatio
 import kotlinx.coroutines.flow.first
 
 private val CODE_SCHEMA = Schema(
@@ -31,11 +36,6 @@ private val CODE_SCHEMA = Schema(
 
 private fun StockSearchResult.toEntity(): StockEntity =
     StockEntity(code = code, name = name, marketCode = marketCode)
-
-/** 现价：先网络刷新，失败回退缓存。 */
-private suspend fun StockRepository.refreshPrice(entity: StockEntity): Double? =
-    runCatching { fetchQuotes(listOf(entity))[entity.code] }.getOrNull()
-        ?: runCatching { getCachedPrices(listOf(entity.code))[entity.code] }.getOrNull()
 
 class GetStockInfoTool(
     private val stockRepository: StockRepository,
@@ -60,12 +60,145 @@ class GetStockInfoTool(
                 put("marketCode", stock.marketCode)
                 put("currentPrice", price)
                 saved?.industry?.takeIf { it.isNotBlank() }?.let { put("industry", it) }
+                saved?.lastUpdated?.let { put("lastUpdated", it) }
                 latest?.let {
                     it.dividendYield?.let { v -> put("dividendYield", v) }
                     it.exDividendDate?.let { v -> put("exDividendDate", v) }
                 }
             }
         }.getOrElse { e -> mapOf("error" to (e.message ?: "查询失败")) }
+    }
+}
+
+class GetFundamentalsTool(
+    private val stockRepository: StockRepository,
+    private val dividendRepository: DividendRepository,
+    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
+) : ReadTool(
+    name = "get_stock_fundamentals",
+    description = "查询单只股票近 5 期基本面：报告期、ROE、资产负债率、营收/净利同比、基本每股收益、派息率、公告股息率与分红方案。forceRefresh=true 可绕过 7 天缓存强制刷新。",
+    parameters = Schema(
+        type = Type.OBJECT,
+        properties = mapOf(
+            "code" to Schema(
+                type = Type.STRING,
+                description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称；带前缀代码会自动归一化"
+            ),
+            "forceRefresh" to Schema(
+                type = Type.BOOLEAN,
+                description = "可选：是否强制刷新（默认 false，优先读 7 天缓存）"
+            )
+        ),
+        required = listOf("code")
+    ),
+) {
+    override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
+        val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
+        return runCatching {
+            val stock = stockRepository.resolveStock(code)
+                ?: return@runCatching mapOf("error" to "未找到股票：$code")
+            val forceRefresh = args.boolArg("forceRefresh") ?: false
+            val raw = fundamentalsCacheRepository.getFundamentals(stock.code, forceRefresh = forceRefresh)
+                ?: return@runCatching mapOf("error" to "基本面数据不足，无法查询")
+            val epsDivByDate = dividendRepository.observeDividends(stock.code).first()
+                .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
+                .associate { it.reportDate to it.cashPerShare }
+            val enriched = enrichPayoutRatio(raw, epsDivByDate)
+            mapOf(
+                "code" to stock.code,
+                "name" to stock.name,
+                "periods" to enriched.periods.map { p ->
+                    buildMap<String, Any?> {
+                        put("reportDate", p.reportDate)
+                        p.roe?.let { put("roe", it) }
+                        p.debtToAssetRatio?.let { put("debtToAssetRatio", it) }
+                        p.revenueYoy?.let { put("revenueYoy", it) }
+                        p.netProfitYoy?.let { put("netProfitYoy", it) }
+                        p.basicEps?.let { put("basicEps", it) }
+                        p.payoutRatio?.let { put("payoutRatio", it) }
+                        p.announceYield?.let { put("announceYield", it) }
+                        p.dividendPlan?.let { put("dividendPlan", it) }
+                    }
+                }
+            )
+        }.getOrElse { e -> mapOf("error" to (e.message ?: "查询失败")) }
+    }
+}
+
+class GetKlineTool(
+    private val stockRepository: StockRepository,
+    private val klineRepository: KlineRepository,
+) : ReadTool(
+    name = "get_kline",
+    description = "查询单只股票的前复权 OHLCV K 线序列（旧→新：日期/开/收/高/低/量）与 BOLL 上/中/下轨（收盘价不足 20 根时无 BOLL）。period 为 DAILY/WEEKLY/MONTHLY，默认 WEEKLY；bars 默认 40，范围 10-120。",
+    parameters = Schema(
+        type = Type.OBJECT,
+        properties = mapOf(
+            "code" to Schema(
+                type = Type.STRING,
+                description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称；带前缀代码会自动归一化"
+            ),
+            "period" to Schema(
+                type = Type.STRING,
+                description = "可选：K 线周期，DAILY/WEEKLY/MONTHLY，默认 WEEKLY"
+            ),
+            "bars" to Schema(
+                type = Type.INTEGER,
+                description = "可选：返回收盘价根数（10-120），默认 40"
+            )
+        ),
+        required = listOf("code")
+    ),
+) {
+    override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
+        val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
+        val period = args.stringArg("period")?.uppercase() ?: KlinePeriod.WEEKLY.name
+        if (period !in KlinePeriod.entries.map { it.name }) {
+            return mapOf("error" to "period 只能是 DAILY/WEEKLY/MONTHLY")
+        }
+        val bars = args.intArg("bars") ?: 40
+        if (bars !in MIN_BARS..MAX_BARS) {
+            return mapOf("error" to "bars 必须在 10-120 之间")
+        }
+        return runCatching {
+            val stock = stockRepository.resolveStock(code)
+                ?: return@runCatching mapOf("error" to "未找到股票：$code")
+            val klines = klineRepository.fetchKlines(stock.code, KlinePeriod.valueOf(period), bars)
+            val closes = klines.map { it.close }
+            val band = BollCalculator.calculate(closes)
+            buildMap<String, Any?> {
+                put("code", stock.code)
+                put("name", stock.name)
+                put("period", period)
+                put("closes", closes)
+                put(
+                    "bars",
+                    klines.map {
+                        mapOf(
+                            "date" to it.date,
+                            "open" to it.open,
+                            "close" to it.close,
+                            "high" to it.high,
+                            "low" to it.low,
+                            "volume" to it.volume
+                        )
+                    }
+                )
+                closes.lastOrNull()?.let { put("latestClose", it) }
+                band?.let {
+                    put("bollUpper", it.upper)
+                    put("bollMiddle", it.middle)
+                    put("bollLower", it.lower)
+                    put("bollPeriod", it.period)
+                }
+                if (band == null) put("bollNote", "收盘价不足 ${BollBand.DEFAULT_PERIOD} 根，无法计算 BOLL")
+            }
+        }.getOrElse { e -> mapOf("error" to (e.message ?: "查询失败")) }
+    }
+
+    companion object {
+        const val MIN_BARS = 10
+        const val MAX_BARS = 120
     }
 }
 

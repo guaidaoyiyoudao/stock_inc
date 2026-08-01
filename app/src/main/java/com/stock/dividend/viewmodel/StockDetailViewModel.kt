@@ -13,8 +13,11 @@ import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
+import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.LlmAnalysisRepository
+import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.StockLlmAnalysisResult
 import com.stock.dividend.data.repository.StockLlmAnalysisState
 import com.stock.dividend.data.repository.StockLlmInput
@@ -31,6 +34,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -64,6 +68,10 @@ data class StockDetailUiState(
     val buyThreshold: BuyThresholdStatus? = null,
     val fundamentals: Fundamentals? = null,
     val fundamentalsLoading: Boolean = true,
+    /** 实时行情快照（PE/PB/涨跌/OHLC/换手/市值等）；纯内存，与现价同生命周期。 */
+    val quote: QuoteSnapshot? = null,
+    /** 近 N 日 K 线（OHLCV，前复权）；供走势/成交量图，空表表示未加载/失败。 */
+    val klines: List<KlineBar> = emptyList(),
     val llmAnalysis: StockLlmAnalysisState = StockLlmAnalysisState.Idle
 )
 
@@ -75,7 +83,8 @@ class StockDetailViewModel @Inject constructor(
     private val bondYieldRepository: BondYieldRepository,
     private val llmAnalysisRepository: LlmAnalysisRepository,
     private val fundamentalsCacheRepository: FundamentalsCacheRepository,
-    private val tradeStrategyRepository: TradeStrategyRepository
+    private val tradeStrategyRepository: TradeStrategyRepository,
+    private val klineRepository: KlineRepository
 ) : ViewModel() {
 
     private val stockCode: String = savedStateHandle["code"] ?: ""
@@ -144,6 +153,40 @@ class StockDetailViewModel @Inject constructor(
 
         // 独立加载基本面（AGENTS §4.2：与分红 collector 解耦，各管各的字段）
         loadFundamentals()
+        // 独立加载实时行情 + K线（与分红 collector 解耦；行情/K线失败降级为 null/空，不崩 UI）
+        loadQuote()
+        loadKlines()
+    }
+
+    /**
+     * 拉取单股实时行情快照（价格/PE/PB/涨跌/OHLC/换手/市值等）；失败降级为 null（红线 #2）。
+     * 与 [loadFundamentals] 同样独立加载，避免与分红 collector 耦合。
+     */
+    private fun loadQuote() {
+        viewModelScope.launch {
+            val stock = _uiState.value.stock ?: stockFlow.let { sf ->
+                // init 早期 stock 可能尚未就绪，等首条 stock 流入后再拉；失败即放弃（下次刷新重试）
+                runCatching { sf.first() }.getOrNull()
+            } ?: return@launch
+            val snapshot = runCatching {
+                stockRepository.fetchQuoteSnapshots(listOf(stock))[stock.code]
+            }.getOrNull()
+            if (snapshot != null) {
+                _uiState.value = _uiState.value.copy(quote = snapshot)
+            }
+        }
+    }
+
+    /** 拉取近 [KLINE_BARS] 日 K 线（OHLCV，前复权）供走势/成交量图；失败降级为空表（红线 #2）。 */
+    private fun loadKlines() {
+        viewModelScope.launch {
+            val bars = runCatching {
+                klineRepository.fetchKlines(stockCode, KlinePeriod.DAILY, KLINE_BARS)
+            }.getOrDefault(emptyList())
+            if (bars.isNotEmpty()) {
+                _uiState.value = _uiState.value.copy(klines = bars)
+            }
+        }
     }
 
     /** 拉取单股基本面（走缓存仓库，非 forceRefresh）并补全派息率；失败降级为 null（红线 #2）。成功/失败均复位 fundamentalsLoading（红线 #3）。 */
@@ -193,9 +236,9 @@ class StockDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val bondYield = runCatching { bondYieldRepository.fetch10YBondYield() }
                 .getOrDefault(BondYieldRepository.DEFAULT_YIELD)
-            val currentPrice = runCatching {
-                stockRepository.fetchQuotes(listOf(stock))[stock.code]
-            }.getOrNull()
+            // 优先复用已加载的行情快照现价；缺失时才单独拉一次（loadQuote 异步，首帧可能未就绪）
+            val currentPrice = _uiState.value.quote?.price
+                ?: runCatching { stockRepository.fetchQuotes(listOf(stock))[stock.code] }.getOrNull()
             val latestCash = ForecastCalculator.latestYearlyCashPerShare(dividends)
             val status = computeBuyThreshold(
                 bondYield10Y = bondYield,
@@ -300,12 +343,12 @@ class StockDetailViewModel @Inject constructor(
                 async { runCatching { stockRepository.fetchBoll(stockCode, KlinePeriod.MONTHLY) }.getOrNull() }
             ).awaitAll().let { Triple(it[0] as BollBand?, it[1] as BollBand?, it[2] as BollBand?) }
 
-            // 现价：现拉一次（buyThreshold 的字段无法可靠反推现价）；失败降级 null
-            val currentPrice = runCatching {
-                stockRepository.fetchQuotes(listOf(stock))[stock.code]
-            }.getOrNull()
+            // 现价：优先复用已加载的行情快照（含 PE/PB/市值）；缺失才单独拉一次
+            val quote = state.quote
+            val currentPrice = quote?.price
+                ?: runCatching { stockRepository.fetchQuotes(listOf(stock))[stock.code] }.getOrNull()
 
-            val input = buildStockLlmInput(stock, state, currentPrice, dailyBand, weeklyBand, monthlyBand)
+            val input = buildStockLlmInput(stock, state, currentPrice, dailyBand, weeklyBand, monthlyBand, quote)
             // 回流全局用户投资原则（失败降级空，不阻塞分析，红线 #2）
             val userStrategies = runCatching {
                 tradeStrategyRepository.activeStrategies().map { toUserStrategyRef(it) }
@@ -329,14 +372,15 @@ class StockDetailViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(llmAnalysis = StockLlmAnalysisState.Idle)
     }
 
-    /** 组装个股 LLM 输入快照（从当前 uiState + 拉到的 BOLL/现价构建）。 */
+    /** 组装个股 LLM 输入快照（从当前 uiState + 拉到的 BOLL/现价/行情构建）。 */
     private fun buildStockLlmInput(
         stock: StockEntity,
         state: StockDetailUiState,
         currentPrice: Double?,
         dailyBand: BollBand?,
         weeklyBand: BollBand?,
-        monthlyBand: BollBand?
+        monthlyBand: BollBand?,
+        quote: QuoteSnapshot?
     ): StockLlmInput {
         val ratePoints = state.dividendRatePoints
             .takeIf { it.isNotEmpty() }
@@ -378,7 +422,10 @@ class StockDetailViewModel @Inject constructor(
             bollDaily = dailyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) },
             bollWeekly = weeklyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) },
             bollMonthly = monthlyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) },
-            fundamentals = state.fundamentals
+            fundamentals = state.fundamentals,
+            pe = quote?.pe,
+            pb = quote?.pb,
+            totalMarketCap = quote?.totalMarketCap
         )
     }
 
@@ -386,6 +433,11 @@ class StockDetailViewModel @Inject constructor(
     private fun ratioVsLowerPercent(price: Double?, band: BollBand?): Int {
         if (price == null || price <= 0.0 || band == null || band.upper <= band.lower) return 50
         return ((price - band.lower) / (band.upper - band.lower) * 100).toInt().coerceIn(0, 100)
+    }
+
+    private companion object {
+        /** 详情页走势/成交量图展示的近 N 个交易日。 */
+        const val KLINE_BARS = 30
     }
 
 }

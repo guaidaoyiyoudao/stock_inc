@@ -757,6 +757,69 @@ class StockRepositoryTest {
         coVerify(exactly = 0) { priceCacheDao.upsertAll(any()) }
     }
 
+    // ── fetchQuoteSnapshots（完整行情：PE/PB/涨跌/市值等）──────────────
+
+    @Test
+    fun `fetchQuoteSnapshots parses full quote into snapshots keyed by app code`() = runTest {
+        val stocks = listOf(
+            StockEntity(code = "sh.600036", name = "招商银行", marketCode = "1"),
+            StockEntity(code = "sz.000001", name = "平安银行", marketCode = "0")
+        )
+        coEvery { quoteApi.getQuotes(secids = any()) } returns QuoteResponse(
+            data = QuoteData(
+                diff = listOf(
+                    // 招行实测裸值（÷100 规则）：现价 3962→39.62，PE 660→6.60，市值原值
+                    QuoteItem(
+                        price = 3962.0, changePct = -229.0, pe = 660.0, pb = 90.0,
+                        turnoverRate = 72.0, totalMarketCap = 999210282712.0,
+                        code = "600036", market = 1
+                    ),
+                    QuoteItem(
+                        price = 1163.0, changePct = 17.0, pe = 389.0, pb = 49.0,
+                        code = "000001", market = 0
+                    )
+                )
+            )
+        )
+
+        val snapshots = repository.fetchQuoteSnapshots(stocks)
+
+        assertThat(snapshots).hasSize(2)
+        val cmb = snapshots["sh.600036"]!!
+        assertThat(cmb.price).isWithin(0.01).of(39.62)
+        assertThat(cmb.changePct).isWithin(0.01).of(-2.29)
+        assertThat(cmb.pe).isWithin(0.001).of(6.60)
+        assertThat(cmb.pb).isWithin(0.01).of(0.90)
+        assertThat(cmb.turnoverRate).isWithin(0.01).of(0.72)
+        // 市值原值不除
+        assertThat(cmb.totalMarketCap).isEqualTo(999210282712.0)
+        val pab = snapshots["sz.000001"]!!
+        assertThat(pab.price).isWithin(0.01).of(11.63)
+        assertThat(pab.pe).isWithin(0.01).of(3.89)
+    }
+
+    @Test
+    fun `fetchQuoteSnapshots returns empty map on network error`() = runTest {
+        val stocks = listOf(StockEntity(code = "sh.600036", name = "招商银行", marketCode = "1"))
+        coEvery { quoteApi.getQuotes(secids = any()) } throws java.io.IOException("down")
+
+        assertThat(repository.fetchQuoteSnapshots(stocks)).isEmpty()
+    }
+
+    @Test
+    fun `fetchQuoteSnapshots returns empty map for empty stock list`() = runTest {
+        assertThat(repository.fetchQuoteSnapshots(emptyList())).isEmpty()
+        coVerify(exactly = 0) { quoteApi.getQuotes(any(), any(), any()) }
+    }
+
+    @Test
+    fun `fetchQuoteSnapshots returns empty map when response data is null`() = runTest {
+        val stocks = listOf(StockEntity(code = "sh.600036", name = "招商银行", marketCode = "1"))
+        coEvery { quoteApi.getQuotes(secids = any()) } returns QuoteResponse(data = null)
+
+        assertThat(repository.fetchQuoteSnapshots(stocks)).isEmpty()
+    }
+
     // ── getCachedPrices ─────────────────────────────────────────────
 
     @Test

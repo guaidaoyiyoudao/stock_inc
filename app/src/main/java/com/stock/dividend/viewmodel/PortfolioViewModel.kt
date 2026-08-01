@@ -30,6 +30,7 @@ import com.stock.dividend.data.repository.PortfolioAdvisor
 import com.stock.dividend.data.repository.PortfolioLlmInput
 import com.stock.dividend.data.repository.PortfolioLlmStockDetail
 import com.stock.dividend.data.repository.PortfolioSignals
+import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
@@ -127,6 +128,8 @@ data class PortfolioUiState(
     /** shares=0 的纯自选股（合并自选 tab 后仍展示，但与持仓股区分样式）。 */
     val watchlist: List<StockEntity> = emptyList(),
     val stockForecasts: Map<String, StockForecast> = emptyMap(),
+    /** 实时行情快照（PE/PB/涨跌幅/换手/市值等）；按 code 索引，与现价同生命周期，纯内存。 */
+    val stockQuotes: Map<String, QuoteSnapshot> = emptyMap(),
     /** 周线 BOLL 带（按 code 缓存）。null 值表示已尝试但无数据（防重试）；缺 key 表示尚未加载。 */
     val stockBands: Map<String, BollBand?> = emptyMap(),
     val forecastTotal: Double = 0.0,
@@ -357,15 +360,21 @@ class PortfolioViewModel @Inject constructor(
                             .map {
                                 _uiState.update { it.copy(isLoading = true) }
                                 try {
-                                    stockRepository.fetchQuotes(stocks)
+                                    // 一次请求拿全量行情（PE/PB/涨跌/市值等），从中提取 price 喂下游
+                                    // recompute/通知链路，避免再发一次只取现价的 fetchQuotes 请求。
+                                    stockRepository.fetchQuoteSnapshots(stocks)
                                 } catch (_: Exception) {
-                                    // fetchQuotes 自身已吞异常返回空 map，这里兜底网络层之外的问题
+                                    // fetchQuoteSnapshots 自身已吞异常返回空 map，这里兜底网络层之外的问题
                                     emptyMap()
                                 }
                             }
                     }
                 }
-                .collect { prices ->
+                .collect { snapshots ->
+                    // snapshots: Map<String, QuoteSnapshot>。提取 price 喂既有现价链路（recompute/通知），
+                    // 完整快照写入 stockQuotes 供 UI 展示 PE/PB/涨跌幅等。
+                    val prices = snapshots.mapValues { it.value.price ?: 0.0 }
+                        .filterValues { it > 0.0 }
                     // 关键：无论 prices 是否为空（网络失败），都必须结束 loading，
                     // 否则悬浮刷新按钮会因 enabled=!isRefreshing 被永久禁用，卡死。
                     val effectivePrices = if (prices.isNotEmpty()) {
@@ -391,7 +400,8 @@ class PortfolioViewModel @Inject constructor(
                                         currentPrice = p,
                                         marketValue = if (p != null && f.shares > 0) p * f.shares else null
                                     )
-                                }
+                                },
+                                stockQuotes = if (snapshots.isNotEmpty()) snapshots else state.stockQuotes
                             )
                         }
                         if (holdings.isNotEmpty()) {

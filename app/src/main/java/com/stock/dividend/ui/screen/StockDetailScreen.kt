@@ -67,6 +67,7 @@ import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.StockLlmAnalysisState
 import com.stock.dividend.data.repository.MoneyFormatter
 import com.stock.dividend.data.repository.PercentFormatter
+import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.formatFundamentalsPeriod
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
@@ -78,6 +79,7 @@ import com.stock.dividend.ui.component.DividendRateFallbackCard
 import com.stock.dividend.ui.component.FinanceMetric
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.ForecastComparisonCard
+import com.stock.dividend.ui.component.PriceVolumeChart
 import com.stock.dividend.ui.component.SectionHeader
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.viewmodel.ForecastDetail
@@ -199,6 +201,21 @@ fun StockDetailScreen(
                             )
                         }
 
+                        // 实时盘口 + 估值（与持仓横幅紧邻，体现"现价"语义聚合）
+                        val quote = uiState.quote
+                        if (quote != null) {
+                            item {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                SectionHeader(title = "实时盘口")
+                            }
+                            item { QuoteBoardCard(quote = quote) }
+                            item {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                SectionHeader(title = "估值")
+                            }
+                            item { ValuationCard(quote = quote) }
+                        }
+
                         item {
                             Spacer(modifier = Modifier.height(8.dp))
                             SectionHeader(title = "预测股息收入")
@@ -255,6 +272,17 @@ fun StockDetailScreen(
                             else -> {
                                 DividendRateFallbackCard(point = null)
                             }
+                        }
+                    }
+
+                    // 近期走势（收盘价摘要 + 成交量柱），仅 klines 非空时展示
+                    if (uiState.klines.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            SectionHeader(title = "近期走势（${uiState.klines.size} 日）")
+                        }
+                        item {
+                            PriceVolumeChart(bars = uiState.klines)
                         }
                     }
 
@@ -756,6 +784,91 @@ private fun StockLlmAnalysisSection(
  * 基本面区块（设计文档 §5）：三态——加载中 / 空 / 成功。
  * 位置在「分红率趋势」与「AI 解读」之间，逻辑顺序：过去的分红 → 支撑分红的盈利 → 综合解读。
  */
+@Composable
+private fun QuoteBoardCard(quote: QuoteSnapshot) {
+    val ext = LocalExtendedColors.current
+    // 涨跌色：>0 红(A股涨)、<0 绿、null/0 中性
+    val changeColor = quote.change?.let {
+        when {
+            it > 0 -> ext.positive
+            it < 0 -> ext.negative
+            else -> MaterialTheme.colorScheme.onSurface
+        }
+    } ?: MaterialTheme.colorScheme.onSurface
+    AppCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
+            // 第一行：现价 + 涨跌额/幅（现价突出）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                FinanceMetric(
+                    label = "现价",
+                    value = quote.price?.let { MoneyFormatter.withSymbol(it) } ?: "—",
+                    valueColor = changeColor
+                )
+                FinanceMetric(
+                    label = "涨跌",
+                    value = quote.change?.let { "${if (it > 0) "+" else ""}${"%.2f".format(it)}" } ?: "—",
+                    valueColor = changeColor
+                )
+                FinanceMetric(
+                    label = "涨跌幅",
+                    value = quote.changePct?.let { "${if (it > 0) "+" else ""}${"%.2f".format(it)}%" } ?: "—",
+                    valueColor = changeColor
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            // 第二行：开 / 高 / 低
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                FinanceMetric(label = "今开", value = quote.open?.let { MoneyFormatter.withSymbol(it) } ?: "—")
+                FinanceMetric(label = "最高", value = quote.high?.let { MoneyFormatter.withSymbol(it) } ?: "—")
+                FinanceMetric(label = "最低", value = quote.low?.let { MoneyFormatter.withSymbol(it) } ?: "—")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            // 第三行：换手 / 量比 / 振幅
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                FinanceMetric(label = "换手率", value = quote.turnoverRate?.let { "%.2f%%".format(it) } ?: "—")
+                FinanceMetric(label = "量比", value = quote.volumeRatio?.let { "%.2f".format(it) } ?: "—")
+                FinanceMetric(label = "振幅", value = quote.amplitude?.let { "%.2f%%".format(it) } ?: "—")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ValuationCard(quote: QuoteSnapshot) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
+            // 第一行：PE / PB
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                FinanceMetric(label = "PE(TTM)", value = quote.pe?.let { "%.2f".format(it) } ?: "—")
+                FinanceMetric(label = "PB", value = quote.pb?.let { "%.2f".format(it) } ?: "—")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            // 第二行：总市值 / 流通市值（紧凑万亿单位）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                FinanceMetric(label = "总市值", value = quote.totalMarketCap?.let { MoneyFormatter.compact(it) } ?: "—")
+                FinanceMetric(label = "流通市值", value = quote.circMarketCap?.let { MoneyFormatter.compact(it) } ?: "—")
+            }
+        }
+    }
+}
+
 @Composable
 private fun FundamentalsSection(
     fundamentals: Fundamentals?,

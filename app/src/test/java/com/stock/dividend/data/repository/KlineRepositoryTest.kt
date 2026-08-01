@@ -131,6 +131,158 @@ class KlineRepositoryTest {
         assertThat(param).endsWith(",640,qfq")
     }
 
+    // ── parseKlineBars 纯函数（实测腾讯 fqkline 数组格式）──────────────
+    // 数组下标：[0]date [1]open [2]close [3]high [4]low [5]volume，均为字符串
+
+    @Test
+    fun `parseKlineBars parses OHLCV in order`() {
+        // 取自实测腾讯返回（招行 600036 前复权日线片段）
+        val rows = listOf(
+            listOf("2024-10-08", "37.354", "35.984", "37.354", "34.804", "2973039.000"),
+            listOf("2024-10-09", "35.684", "32.994", "35.704", "32.994", "1855932.000")
+        )
+
+        val bars = parseKlineBars(rows)
+
+        assertThat(bars).hasSize(2)
+        val first = bars[0]
+        assertThat(first.date).isEqualTo("2024-10-08")
+        assertThat(first.open).isWithin(0.001).of(37.354)
+        assertThat(first.close).isWithin(0.001).of(35.984)
+        assertThat(first.high).isWithin(0.001).of(37.354)
+        assertThat(first.low).isWithin(0.001).of(34.804)
+        assertThat(first.volume).isEqualTo(2973039.0)
+    }
+
+    @Test
+    fun `parseKlineBars drops rows with non-positive close`() {
+        val rows = listOf(
+            listOf("2024-10-08", "37.354", "35.984", "37.354", "34.804", "2973039.000"),
+            listOf("2024-10-09", "0.000", "0.000", "0.000", "0.000", "0"),
+            listOf("2024-10-10", "33.384", "34.714", "35.484", "33.384", "1433298.000")
+        )
+
+        val bars = parseKlineBars(rows)
+
+        assertThat(bars).hasSize(2)
+        assertThat(bars.map { it.date }).containsExactly("2024-10-08", "2024-10-10").inOrder()
+    }
+
+    @Test
+    fun `parseKlineBars drops rows with non-numeric close`() {
+        val rows = listOf(
+            listOf("2024-10-08", "37.354", "35.984", "37.354", "34.804", "2973039.000"),
+            listOf("2024-10-09", "33.384", "abc", "35.484", "33.384", "1433298.000")
+        )
+
+        val bars = parseKlineBars(rows)
+
+        assertThat(bars).hasSize(1)
+        assertThat(bars[0].close).isWithin(0.001).of(35.984)
+    }
+
+    @Test
+    fun `parseKlineBars treats missing ohl as close fallback`() {
+        // OHLC 任一缺失时降级用 close 填充（不丢整根 K 线）；volume 缺失视为 0
+        val rows = listOf(
+            listOf("2024-10-08", "37.354", "35.984")  // 仅有 open+close
+        )
+
+        val bars = parseKlineBars(rows)
+
+        assertThat(bars).hasSize(1)
+        val bar = bars[0]
+        assertThat(bar.close).isWithin(0.001).of(35.984)
+        assertThat(bar.open).isWithin(0.001).of(37.354)
+        // high/low 缺失 → 降级为 close
+        assertThat(bar.high).isEqualTo(bar.close)
+        assertThat(bar.low).isEqualTo(bar.close)
+        assertThat(bar.volume).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `parseKlineBars returns empty for empty rows`() {
+        assertThat(parseKlineBars(emptyList())).isEmpty()
+    }
+
+    @Test
+    fun `parseKlineBars drops rows with blank date`() {
+        val rows = listOf(
+            listOf("", "37.354", "35.984", "37.354", "34.804", "1000"),
+            listOf("2024-10-08", "37.354", "35.984", "37.354", "34.804", "1000")
+        )
+
+        val bars = parseKlineBars(rows)
+
+        assertThat(bars).hasSize(1)
+        assertThat(bars[0].date).isEqualTo("2024-10-08")
+    }
+
+    // ── fetchKlines（Repository 层，mock TencentDividendApi）──────────
+
+    @Test
+    fun `fetchKlines returns full OHLCV bars for weekly period`() = runTest {
+        coEvery { tencentApi.getKline(any()) } returns klineResponse(
+            listOf(
+                listOf("2026-07-21", "10.00", "10.50", "10.80", "9.90", "1000"),
+                listOf("2026-07-28", "10.50", "11.00", "11.20", "10.40", "1200")
+            )
+        )
+
+        val bars = repository.fetchKlines("sh.600036", KlinePeriod.WEEKLY)
+
+        assertThat(bars).hasSize(2)
+        assertThat(bars[0].close).isWithin(0.001).of(10.50)
+        assertThat(bars[0].high).isWithin(0.001).of(10.80)
+        assertThat(bars[0].low).isWithin(0.001).of(9.90)
+        assertThat(bars[0].volume).isEqualTo(1000.0)
+    }
+
+    @Test
+    fun `fetchKlines returns empty on network exception`() = runTest {
+        coEvery { tencentApi.getKline(any()) } throws java.io.IOException("down")
+
+        assertThat(repository.fetchKlines("sh.600036", KlinePeriod.WEEKLY)).isEmpty()
+    }
+
+    @Test
+    fun `fetchKlines returns empty for unknown code prefix`() = runTest {
+        // 非 sh./sz. → toTencentCode 返回 null，不发请求
+        assertThat(repository.fetchKlines("600036", KlinePeriod.WEEKLY)).isEmpty()
+        coVerify(exactly = 0) { tencentApi.getKline(any()) }
+    }
+
+    @Test
+    fun `fetchKlines returns empty when qfqweek null and qfqday null`() = runTest {
+        coEvery { tencentApi.getKline(any()) } returns TencentKlineResponse(
+            code = 0,
+            msg = null,
+            data = mapOf("sh600036" to TencentKlineResponse.StockData(qfqday = null, qfqweek = null))
+        )
+
+        assertThat(repository.fetchKlines("sh.600036", KlinePeriod.WEEKLY)).isEmpty()
+    }
+
+    @Test
+    fun `fetchKlines monthly falls back to qfqweek when qfqmonth absent`() = runTest {
+        coEvery { tencentApi.getKline(any()) } returns TencentKlineResponse(
+            code = 0,
+            msg = null,
+            data = mapOf(
+                "sh600036" to TencentKlineResponse.StockData(
+                    qfqday = null,
+                    qfqweek = listOf(listOf("2026-06-30", "10.0", "10.5", "11.0", "9.8", "5000")),
+                    qfqmonth = null
+                )
+            )
+        )
+
+        val bars = repository.fetchKlines("sh.600036", KlinePeriod.MONTHLY)
+
+        assertThat(bars).hasSize(1)
+        assertThat(bars[0].close).isWithin(0.001).of(10.5)
+    }
+
     private fun klineResponse(rows: List<List<*>>): TencentKlineResponse = TencentKlineResponse(
         code = 0,
         msg = null,

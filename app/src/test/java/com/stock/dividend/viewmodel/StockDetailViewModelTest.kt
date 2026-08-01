@@ -9,6 +9,7 @@ import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.LlmAnalysisRepository
 import com.stock.dividend.data.repository.StockLlmAnalysis
 import com.stock.dividend.data.repository.StockLlmAnalysisResult
@@ -51,6 +52,9 @@ class StockDetailViewModelTest {
     private val tradeStrategyRepository: TradeStrategyRepository = mockk {
         coEvery { activeStrategies() } returns emptyList()
     }
+    private val klineRepository: KlineRepository = mockk {
+        coEvery { fetchKlines(any(), any(), any()) } returns emptyList()
+    }
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
     private val stockFlow = MutableStateFlow<StockEntity?>(null)
@@ -63,6 +67,7 @@ class StockDetailViewModelTest {
         coEvery { stockRepository.getFirstBuyDate(any()) } returns null
         coEvery { bondYieldRepository.fetch10YBondYield(any()) } returns BondYieldRepository.DEFAULT_YIELD
         coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
+        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns emptyMap()
         coEvery { stockRepository.fetchBoll(any(), any()) } returns null
     }
 
@@ -87,7 +92,8 @@ class StockDetailViewModelTest {
             bondYieldRepository = bondYieldRepository,
             llmAnalysisRepository = llmAnalysisRepository,
             fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository
+        tradeStrategyRepository = tradeStrategyRepository,
+        klineRepository = klineRepository
         )
 
         assertThat(viewModel.uiState.value.isLoading).isTrue()
@@ -105,7 +111,8 @@ class StockDetailViewModelTest {
             bondYieldRepository = bondYieldRepository,
             llmAnalysisRepository = llmAnalysisRepository,
             fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository
+        tradeStrategyRepository = tradeStrategyRepository,
+        klineRepository = klineRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -135,7 +142,8 @@ class StockDetailViewModelTest {
             bondYieldRepository = bondYieldRepository,
             llmAnalysisRepository = llmAnalysisRepository,
             fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository
+        tradeStrategyRepository = tradeStrategyRepository,
+        klineRepository = klineRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -155,7 +163,8 @@ class StockDetailViewModelTest {
             bondYieldRepository = bondYieldRepository,
             llmAnalysisRepository = llmAnalysisRepository,
             fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository
+        tradeStrategyRepository = tradeStrategyRepository,
+        klineRepository = klineRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -171,7 +180,8 @@ class StockDetailViewModelTest {
             bondYieldRepository = bondYieldRepository,
             llmAnalysisRepository = llmAnalysisRepository,
             fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository
+        tradeStrategyRepository = tradeStrategyRepository,
+        klineRepository = klineRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -188,7 +198,8 @@ class StockDetailViewModelTest {
             bondYieldRepository = bondYieldRepository,
             llmAnalysisRepository = llmAnalysisRepository,
             fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository
+        tradeStrategyRepository = tradeStrategyRepository,
+        klineRepository = klineRepository
         )
 
         assertThat(viewModel.uiState.value.error).isNull()
@@ -207,7 +218,8 @@ class StockDetailViewModelTest {
             bondYieldRepository = bondYieldRepository,
             llmAnalysisRepository = llmAnalysisRepository,
             fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository
+        tradeStrategyRepository = tradeStrategyRepository,
+        klineRepository = klineRepository
         )
     }
 

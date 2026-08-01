@@ -7,10 +7,17 @@ import retrofit2.http.Query
 
 interface QuoteApi {
 
+    /**
+     * 批量行情：一次拉多只股票的实时盘口（价格/涨跌/PE/PB/市值/换手/量比等）。
+     *
+     * fields 为东财字段编号全集，与 [com.stock.dividend.data.remote.dto.QuoteItem] 一一对应。
+     * 裸值 ÷100 规则见 [com.stock.dividend.data.remote.dto.QuoteItem] 文档。
+     */
     @GET("api/qt/ulist.np/get")
     suspend fun getQuotes(
         @Query("secids") secids: String,
-        @Query("fields") fields: String = "f2,f12,f13",
+        @Query("fields") fields: String =
+            "f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f15,f16,f17,f18,f20,f21,f23",
         @Query("ut") ut: String = "fa5fd1943c7b386f172d6893dbfba10b"
     ): QuoteResponse
 

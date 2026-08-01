@@ -213,20 +213,40 @@ class UpdateIndustryTargetTool(
 }
 
 class UpdateNotificationRuleTool(
+    private val stockRepository: StockRepository,
     private val notificationRuleRepository: NotificationRuleRepository,
 ) : WriteTool(
     name = "update_notification_rule",
-    description = "更新全局评估门槛（用于单股评估的买入股息率门槛）。minYield=买入建议最低股息率%，boostYield=加强信号股息率%，要求 0 <= minYield <= boostYield，如 2.0 与 5.0。",
+    description = "设置提醒/评估规则。不带 code：更新全局评估门槛（minYield=买入建议最低股息率%，boostYield=加强信号股息率%，要求 0 <= minYield <= boostYield）；带 code：为单只股票设置股息率提醒阈值（thresholdPercent=阈值%，enabled=是否启用，默认 true）。",
     parameters = Schema(
         type = Type.OBJECT,
         properties = mapOf(
-            "minYield" to Schema(type = Type.NUMBER, description = "最低股息率（%），如 2.0 表示 2%"),
-            "boostYield" to Schema(type = Type.NUMBER, description = "加强信号股息率（%），如 5.0 表示 5%；必须 >= minYield")
+            "code" to Schema(
+                type = Type.STRING,
+                description = "可选：股票代码或名称；带 code 时为该股设置股息率提醒阈值"
+            ),
+            "minYield" to Schema(type = Type.NUMBER, description = "全局评估门槛：最低股息率（%），如 2.0 表示 2%"),
+            "boostYield" to Schema(type = Type.NUMBER, description = "全局评估门槛：加强信号股息率（%），如 5.0 表示 5%；必须 >= minYield"),
+            "thresholdPercent" to Schema(type = Type.NUMBER, description = "个股规则：股息率提醒阈值（%），如 5.0 表示 5%"),
+            "enabled" to Schema(type = Type.BOOLEAN, description = "个股规则：是否启用提醒，默认 true")
         ),
-        required = listOf("minYield", "boostYield")
+        required = listOf()
     ),
 ) {
     override suspend fun execute(context: ToolContext, args: Map<String, Any>): Any {
+        val code = args.stringArg("code")
+        if (code != null) {
+            val threshold = args.doubleArg("thresholdPercent")
+                ?: return mapOf("error" to "设置个股规则需要 thresholdPercent 参数")
+            val enabled = args.boolArg("enabled") ?: true
+            if (threshold < 0) return mapOf("error" to "thresholdPercent 不能为负")
+            return runCatching {
+                val stock = stockRepository.resolveStock(code)
+                    ?: return@runCatching mapOf("error" to "未找到股票：$code")
+                notificationRuleRepository.saveDividendYieldRule(stock.code, enabled, threshold)
+                mapOf("ok" to true, "code" to stock.code, "thresholdPercent" to threshold, "enabled" to enabled)
+            }.getOrElse { e -> mapOf("error" to (e.message ?: "设置失败")) }
+        }
         val min = args.doubleArg("minYield") ?: return mapOf("error" to "缺少 minYield 参数")
         val boost = args.doubleArg("boostYield") ?: return mapOf("error" to "缺少 boostYield 参数")
         if (min < 0 || boost < 0 || boost < min) return mapOf("error" to "参数非法：0 <= minYield <= boostYield")
@@ -234,5 +254,61 @@ class UpdateNotificationRuleTool(
             notificationRuleRepository.saveEvalThresholds(min, boost)
             mapOf("ok" to true, "minYield" to min, "boostYield" to boost)
         }.getOrElse { e -> mapOf("error" to (e.message ?: "设置失败")) }
+    }
+}
+
+class UpdateStockSettingsTool(
+    private val stockRepository: StockRepository,
+) : WriteTool(
+    name = "update_stock_settings",
+    description = "修改单只股票的分析参数：buyThresholdMultiplier=买入线倍数（>0，默认 2.5）；yieldPeriod=股息预测历史年数，只能是 1/3/5。至少提供其中一个参数。",
+    parameters = Schema(
+        type = Type.OBJECT,
+        properties = mapOf(
+            "code" to Schema(
+                type = Type.STRING,
+                description = "股票代码或名称：推荐 6 位数字代码（如 600519）或股票名称；带前缀代码会自动归一化"
+            ),
+            "buyThresholdMultiplier" to Schema(
+                type = Type.NUMBER,
+                description = "可选：买入线倍数（>0），默认 2.5，如 3.0"
+            ),
+            "yieldPeriod" to Schema(
+                type = Type.STRING,
+                description = "可选：股息预测历史年数，只能是 1/3/5"
+            )
+        ),
+        required = listOf("code")
+    ),
+) {
+    override suspend fun execute(context: ToolContext, args: Map<String, Any>): Any {
+        val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
+        val multiplier = args.doubleArg("buyThresholdMultiplier")
+        val period = args.stringArg("yieldPeriod")
+        if (multiplier == null && period == null) {
+            return mapOf("error" to "至少提供 buyThresholdMultiplier 或 yieldPeriod 之一")
+        }
+        if (multiplier != null && multiplier <= 0.0) {
+            return mapOf("error" to "buyThresholdMultiplier 必须大于 0")
+        }
+        if (period != null && period !in YIELD_PERIODS) {
+            return mapOf("error" to "yieldPeriod 只能是 1/3/5")
+        }
+        return runCatching {
+            val stock = stockRepository.resolveStock(code)
+                ?: return@runCatching mapOf("error" to "未找到股票：$code")
+            multiplier?.let { stockRepository.updateBuyThresholdMultiplier(stock.code, it) }
+            period?.let { stockRepository.updateYieldPeriod(stock.code, it) }
+            mapOf(
+                "ok" to true,
+                "code" to stock.code,
+                "buyThresholdMultiplier" to multiplier,
+                "yieldPeriod" to period
+            )
+        }.getOrElse { e -> mapOf("error" to (e.message ?: "设置失败")) }
+    }
+
+    companion object {
+        private val YIELD_PERIODS = setOf("1", "3", "5")
     }
 }

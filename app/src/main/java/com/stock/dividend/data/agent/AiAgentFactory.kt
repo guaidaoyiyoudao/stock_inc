@@ -6,12 +6,16 @@ import com.stock.dividend.data.agent.tools.AddLivingExpenseTool
 import com.stock.dividend.data.agent.tools.AddStockTool
 import com.stock.dividend.data.agent.tools.AddTransactionTool
 import com.stock.dividend.data.agent.tools.GetBuyThresholdTool
+import com.stock.dividend.data.agent.tools.GetDividendIncomeTool
 import com.stock.dividend.data.agent.tools.GetDividendForecastTool
 import com.stock.dividend.data.agent.tools.GetDividendHistoryTool
+import com.stock.dividend.data.agent.tools.GetFundamentalsTool
 import com.stock.dividend.data.agent.tools.GetHoldingsTool
 import com.stock.dividend.data.agent.tools.GetIndustryAllocationTool
+import com.stock.dividend.data.agent.tools.GetKlineTool
 import com.stock.dividend.data.agent.tools.GetNotificationRulesTool
 import com.stock.dividend.data.agent.tools.GetPortfolioSummaryTool
+import com.stock.dividend.data.agent.tools.GetPortfolioSignalsTool
 import com.stock.dividend.data.agent.tools.GetStockEvaluationTool
 import com.stock.dividend.data.agent.tools.GetStockInfoTool
 import com.stock.dividend.data.agent.tools.GetTransactionsTool
@@ -27,10 +31,13 @@ import com.stock.dividend.data.agent.tools.UpdateHoldingTool
 import com.stock.dividend.data.agent.tools.UpdateIndustryTargetTool
 import com.stock.dividend.data.agent.tools.UpdateLivingExpenseTool
 import com.stock.dividend.data.agent.tools.UpdateNotificationRuleTool
+import com.stock.dividend.data.agent.tools.UpdateStockSettingsTool
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendIncomeRepository
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.FireGoalRepository
+import com.stock.dividend.data.repository.FundamentalsCacheRepository
+import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.LlmConfig
 import com.stock.dividend.data.repository.NotificationRuleRepository
@@ -42,13 +49,15 @@ import okhttp3.OkHttpClient
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** 组装 AI Tab 的单 LlmAgent（24 个工具，写操作全部带确认门）。 */
+/** 组装 AI Tab 的单 LlmAgent（30 个工具：18 只读 + 12 写，写操作全部带确认门）。 */
 @Singleton
 class AiAgentFactory @Inject constructor(
     private val stockRepository: StockRepository,
     private val dividendRepository: DividendRepository,
     private val dividendIncomeRepository: DividendIncomeRepository,
     private val bondYieldRepository: BondYieldRepository,
+    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
+    private val klineRepository: KlineRepository,
     private val fireGoalRepository: FireGoalRepository,
     private val livingExpenseRepository: LivingExpenseRepository,
     private val transactionRepository: TransactionRepository,
@@ -66,6 +75,8 @@ class AiAgentFactory @Inject constructor(
             GetValuationTool(stockRepository, dividendRepository),
             GetBuyThresholdTool(stockRepository, dividendRepository, bondYieldRepository),
             GetStockEvaluationTool(stockRepository, dividendRepository, notificationRuleRepository),
+            GetFundamentalsTool(stockRepository, dividendRepository, fundamentalsCacheRepository),
+            GetKlineTool(stockRepository, klineRepository),
         )
         val portfolioTools = listOf(
             GetHoldingsTool(stockRepository),
@@ -74,6 +85,8 @@ class AiAgentFactory @Inject constructor(
             GetTransactionsTool(stockRepository, transactionRepository),
             GetNotificationRulesTool(stockRepository, notificationRuleRepository),
             GetUserStrategiesTool(tradeStrategyRepository),
+            GetPortfolioSignalsTool(stockRepository, dividendRepository, notificationRuleRepository),
+            GetDividendIncomeTool(dividendIncomeRepository, stockRepository),
         )
         val actionTools = listOf(
             AddStockTool(stockRepository),
@@ -82,7 +95,8 @@ class AiAgentFactory @Inject constructor(
             AddTransactionTool(stockRepository, transactionRepository),
             SetStockTagsTool(stockRepository),
             UpdateIndustryTargetTool(stockRepository),
-            UpdateNotificationRuleTool(notificationRuleRepository),
+            UpdateNotificationRuleTool(stockRepository, notificationRuleRepository),
+            UpdateStockSettingsTool(stockRepository),
         )
         val financeTools = listOf(
             GetLivingExpensesTool(livingExpenseRepository),

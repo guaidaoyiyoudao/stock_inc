@@ -246,6 +246,34 @@ class StockRepository @Inject constructor(
     }
 
     /**
+     * 拉取 [stocks] 的完整行情快照（价格 + 涨跌 + PE/PB + 市值 + 换手/量比等）。
+     *
+     * 与 [fetchQuotes] 共用同一次请求（成本不变），只是把原本丢弃的 f3-f23 字段一并解析出来，
+     * 供持仓评估、LLM 解读、卡片展示等场景使用（见 [QuoteSnapshot]）。网络失败返回空 map（红线 #2）。
+     *
+     * @return key 为 App 内 `sh.XXXXXX`/`sz.XXXXXX` 格式，value 为 [QuoteSnapshot]；
+     *         现价无效（null/≤0）的条目仍保留（price=null），调用方按可空处理。
+     */
+    suspend fun fetchQuoteSnapshots(stocks: List<StockEntity>): Map<String, QuoteSnapshot> {
+        if (stocks.isEmpty()) return emptyMap()
+        return try {
+            val secids = stocks.joinToString(",") { stock ->
+                "${stock.marketCode}.${stock.code.substringAfter(".")}"
+            }
+            val response = quoteApi.getQuotes(secids = secids)
+            response.data?.diff?.associateBy(
+                keySelector = { item ->
+                    val prefix = if (item.market == 1) "sh" else "sz"
+                    "$prefix.${item.code}"
+                },
+                valueTransform = { toQuoteSnapshot(it) }
+            ).orEmpty()
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    /**
      * 读取 [codes] 的缓存价（冷启动兜底用）。仅返回有缓存的项。
      * key 格式与 [fetchQuotes] 一致：`sh.600036` / `sz.000001`。
      */

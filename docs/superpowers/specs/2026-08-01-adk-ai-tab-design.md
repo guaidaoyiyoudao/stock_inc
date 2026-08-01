@@ -1,4 +1,4 @@
-# AI Tab（ADK Agent 聊天 + 24 个股票/财务工具）— 设计文档
+# AI Tab（ADK Agent 聊天 + 30 个股票/财务工具）— 设计文档
 
 **日期:** 2026-08-01
 **状态:** Draft
@@ -25,7 +25,7 @@ App 目前只在「一键评估/截图策略」里以一次性提示词方式使
    消息气泡、流式打字效果、发送中禁用输入、错误提示。
 3. Agent 模型复用用户已在设置页配置的 OpenAI 兼容 LLM（DeepSeek / 智谱 / 通义 / 自定义
    baseUrl + apiKey + model），**不新增任何外部 key**。
-4. 单 Agent 提供 **24 个工具**：只读 13 个（行情/个股/组合/策略查询）+ 写操作 11 个
+4. 单 Agent 提供 **30 个工具**：只读 18 个（行情/个股/基本面/K线/组合/策略/收入查询）+ 写操作 12 个
    （股票/持仓/支出/FIRE 目标，全部带用户确认门）。
 5. 写操作工具执行前必须弹确认卡片，用户点「确认」后才真正写入 App 数据（ADK 内置确认门）。
 6. 多轮上下文：同一次进程内连续对话（ADK `InMemorySessionService`），跨轮可追问。
@@ -61,7 +61,7 @@ App 目前只在「一键评估/截图策略」里以一次性提示词方式使
 | Agent 框架 | Google ADK Kotlin `com.google.adk:google-adk-kotlin-core:0.6.0`（Android variant） | 用户指定；官方 Android 一等公民，框架提供 agent 循环/会话/流式事件/确认门 |
 | 模型后端 | 复用设置页 OpenAI 兼容配置 + 自写 `Model` 适配器 | ADK 官方只有 Gemini 模型；适配器约 200 行纯映射代码，可单测；无需新 key |
 | 替代方案 | 换 Semantic Kernel for Java / OpenAI Java SDK / 自制 loop | 调研后排除：SK Java 重且 Android 无官方示例；OpenAI SDK 无 agent 循环；自制 loop 缺框架能力（用户已选 ADK） |
-| Agent 架构 | **单 `LlmAgent` + 24 个工具** | 用户明确：模型均为大模型，工具数量不影响 function calling；不做子代理，实现与事件映射最简单 |
+| Agent 架构 | **单 `LlmAgent` + 30 个工具** | 用户明确：模型均为大模型，工具数量不影响 function calling；不做子代理，实现与事件映射最简单 |
 | 工具实现 | 只读工具手写 `BaseTool` 子类；写工具继承 `FunctionTool(requiresConfirmation=true)` | 不引 ADK KSP processor；`FunctionTool` 内置确认门（暂停回合 + `adk_request_confirmation` 事件），写操作必须用户确认 |
 | 工具范围 | A 全部只读（13）+ B 全部写操作（11） | 用户逐项确认「A+B 都要」 |
 | 会话 | `InMemorySessionService` 单例（固定 appName/userId/sessionId） | 满足进程内多轮；规避 ADK 传递的 Room 2.8.4 与项目 Room 2.6.1 冲突 |
@@ -151,10 +151,10 @@ SSE 解析 `parseSseLines(lines, ...)`（纯函数，逐行 `data:`，`[DONE]` �
 
 ### 5.2 工具全集（`data/agent/tools/`）
 
-单 `LlmAgent`，24 个工具按领域拆 4 个文件（仅为可读性，不构成子代理）。全部返回 JSON-native Map。
+单 `LlmAgent`，30 个工具按领域拆 4 个文件（仅为可读性，不构成子代理）。全部返回 JSON-native Map。
 数值类结果一律来自现有纯函数/仓库，禁止模型自行换算。
 
-**只读 · 个股/行情（`MarketDataTools.kt`，7 个）**
+**只读 · 个股/行情（`MarketDataTools.kt`，9 个）**
 
 | 工具 | 参数 | 数据源 |
 |---|---|---|
@@ -165,8 +165,10 @@ SSE 解析 `parseSseLines(lines, ...)`（纯函数，逐行 `data:`，`[DONE]` �
 | `get_valuation` | `code` | `DividendDiscountCalculator` + 现价 |
 | `get_buy_threshold` | `code` | `BondYieldRepository.fetch10YBondYield` + `BuyThresholdCalculator` + 现价/股息率 |
 | `get_stock_evaluation` | `code` | `HoldingRecommender`（BOLL 日/周/月 + 股息率门槛） |
+| `get_stock_fundamentals` | `code`、`forceRefresh?` | `FundamentalsCacheRepository` + `enrichPayoutRatio`（近 5 期 ROE/负债率/同比/派息率/分红方案） |
+| `get_kline` | `code`、`period?`、`bars?` | `KlineRepository.fetchKlines` + `BollCalculator`（前复权 OHLCV K 线 + BOLL 上/中/下轨） |
 
-**只读 · 组合/账户（`PortfolioDataTools.kt`，6 个）**
+**只读 · 组合/账户（`PortfolioDataTools.kt`，8 个）**
 
 | 工具 | 参数 | 数据源 |
 |---|---|---|
@@ -176,8 +178,10 @@ SSE 解析 `parseSseLines(lines, ...)`（纯函数，逐行 `data:`，`[DONE]` �
 | `get_transactions` | `code?`（可选） | `TransactionRepository.getAll` / `getByStock` |
 | `get_notification_rules` | 无 | `NotificationRuleRepository` 全局 + 个股阈值 |
 | `get_user_strategies` | 无 | `TradeStrategyRepository.activeStrategies` |
+| `get_portfolio_signals` | 无 | `PortfolioAdvisor`（仓位控制 + 三周期共振买点；日/周/月 BOLL，Semaphore(3) 限流） |
+| `get_dividend_income` | `year?` | `DividendIncomeRepository`（实际到账：年度合计/单股贡献/明细） |
 
-**写 · 股票/持仓（`StockActionTools.kt`，7 个，全部确认门）**
+**写 · 股票/持仓（`StockActionTools.kt`，8 个，全部确认门）**
 
 | 工具 | 参数 | 行为 |
 |---|---|---|
@@ -187,12 +191,14 @@ SSE 解析 `parseSseLines(lines, ...)`（纯函数，逐行 `data:`，`[DONE]` �
 | `add_transaction` | `code`、`type`（BUY/SELL）、`shares`、`price`、`date=today` | `TransactionRepository.addTransaction` + `recomputeHolding` |
 | `set_stock_tags` | `code`、`tags`（数组） | `StockRepository.setStockTags` |
 | `update_industry_target` | `industry`、`weight` | `StockRepository.updateIndustryTarget` |
-| `update_notification_rule` | `code`、`minYield`、`boostYield`（可选） | `NotificationRuleRepository.saveDividendYieldRule`（签名以实现时对齐） |
+| `update_notification_rule` | `code?`、`minYield`、`boostYield`、`thresholdPercent?`、`enabled?` | 无 `code` 写全局评估门槛（`saveEvalThresholds`）；带 `code` 写个股股息率提醒（`saveDividendYieldRule`） |
+| `update_stock_settings` | `code`、`buyThresholdMultiplier?`、`yieldPeriod?` | `updateBuyThresholdMultiplier` + `updateYieldPeriod`（倍数 >0，年限 ∈ {1,3,5}） |
 
-**写 · 财务（`FinanceActionTools.kt`，4 个，全部确认门）**
+**读/写 · 财务（`FinanceActionTools.kt`，5 个；写全部确认门）**
 
 | 工具 | 参数 | 行为 |
 |---|---|---|
+| `get_living_expenses` | 无 | `LivingExpenseRepository.observeExpenses`（读支出列表，改/删前先取 id） |
 | `add_living_expense` | `name`、`amount`、`period=MONTHLY` | `LivingExpenseRepository.addExpense` |
 | `update_living_expense` | `id`、`name`、`amount`、`period` | `LivingExpenseRepository.updateExpense` |
 | `remove_living_expense` | `id` | `LivingExpenseRepository.deleteExpense`（破坏性，确认文案注明） |
@@ -210,7 +216,7 @@ SSE 解析 `parseSseLines(lines, ...)`（纯函数，逐行 `data:`，`[DONE]` �
 
 **`AiAgentFactory`**：构造注入全部工具（Hilt），`create(config): LlmAgent` 组装
 `LlmAgent(name="ai_tab_agent", model=OpenAiCompatibleModel(config, okHttpClient),
-instruction=中文系统指令, tools=listOf(24 个工具))`；每次发送用最新 `config` 快照重建（幂等）。
+instruction=中文系统指令, tools=listOf(30 个工具))`；每次发送用最新 `config` 快照重建（幂等）。
 
 **`AiChatRepository`**：`@Singleton`，注入 `LlmConfigSource`、`AiAgentFactory`、
 `@LlmClient OkHttpClient`：
@@ -290,7 +296,7 @@ data class ConfirmationUi(
 ```text
 用户输入 → AiChatViewModel.onSend()
   → AiChatRepository.send(text)
-      → AiAgentFactory.create(最新 LlmConfig) → LlmAgent(model + 24 工具)
+      → AiAgentFactory.create(最新 LlmConfig) → LlmAgent(model + 30 工具)
       → InMemoryRunner.runAsync(sessionId="ai-tab", StreamingMode.SSE)
           → LlmAgent 调 model.generateContent(stream=true)
               → OpenAiCompatibleModel: POST {baseUrl}/chat/completions (stream SSE)
@@ -339,7 +345,7 @@ data class ConfirmationUi(
 | `OpenAiProtocolTest` | 纯 JUnit + Truth | 请求映射（system/tools/tool 消息）、Schema 转换、响应映射、finishReason |
 | `OpenAiSseParserTest` | 纯 JUnit + Truth | `data:` 行解析、`[DONE]`、文本增量 partial、tool_calls 按 index 累积 |
 | `OpenAiCompatibleModelTest` | JUnit + MockWebServer | 非流式/流式请求体与响应、Authorization 头、取消 |
-| `StockAgentToolsTest` | JUnit + MockK | 24 个工具的 declaration/run，仓库 mock，空数据/异常/非法参数路径；写工具确认门：未确认不执行、确认后执行、拒绝不执行 |
+| `StockAgentToolsTest` | JUnit + MockK | 30 个工具的 declaration/run，仓库 mock，空数据/异常/非法参数路径；写工具确认门：未确认不执行、确认后执行、拒绝不执行 |
 | `AiChatRepositoryTest` | JUnit + 假 Model | 用脚本化假 `Model`（预置 tool_calls/文本流）跑真实 `InMemoryRunner`：工具调用回路、确认暂停/恢复、事件映射、异常转 Error |
 | `AiChatViewModelTest` | Robolectric + MockK | 发送流程、流式 Partial/Final 更新、确认卡片出现与确认/取消恢复、Error 气泡、`isSending` 复位、未配置态 |
 
@@ -386,7 +392,7 @@ data class ConfirmationUi(
 4. **对话不持久化**：进程被杀即丢，属有意取舍；`RoomSessionService` 留作后续（需同步升级 Room）。
 5. **依赖升级面**：Kotlin 2.1.20 + KSP 2.1.20-1.0.32 为 KSP1 线，Hilt/Room 保持不动；
    若构建期出现 KSP 兼容问题，兜底方案是升 KSP2 线（2.1.20-2.0.1）并同步升 Hilt/Room。
-6. **24 个工具对 function calling 精度的影响**：用户明确所用模型均为大模型，接受此取舍；
+6. **30 个工具对 function calling 精度的影响**：用户明确所用模型均为大模型，接受此取舍；
    写操作仍有确认门兜底，只读误调无副作用。
 7. **确认流依赖 ADK 暂停/恢复机制**：已在源码确认 `RequestConfirmationProcessor` + `FunctionTool`
    行为；若个别厂商模型在工具返回错误后自行继续生成而非暂停，确认卡片仍会出现，但以 UI 状态为准，

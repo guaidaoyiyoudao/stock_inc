@@ -93,6 +93,7 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.MoneyFormatter
 import com.stock.dividend.data.repository.PercentFormatter
+import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.viewmodel.PortfolioItem
 import com.stock.dividend.viewmodel.PortfolioUiState
 import com.stock.dividend.viewmodel.PortfolioViewModel
@@ -291,7 +292,8 @@ fun PortfolioScreen(
                         onDeleteStock = { viewModel.deleteStock(item.code) },
                         latestYearlyDividend = uiState.stockForecasts[item.code]?.latestYearlyDividend,
                         bollBand = uiState.stockBands[item.code],
-                        onLoadBoll = { viewModel.loadBoll(item.code) }
+                        onLoadBoll = { viewModel.loadBoll(item.code) },
+                        quote = uiState.stockQuotes[item.code]
                     )
                 }
             }
@@ -320,6 +322,7 @@ fun PortfolioScreen(
                         marketValue = uiState.stockForecasts[stock.code]?.marketValue,
                         currentPrice = uiState.stockForecasts[stock.code]?.currentPrice,
                         latestYearlyDividend = uiState.stockForecasts[stock.code]?.latestYearlyDividend,
+                        changePct = uiState.stockQuotes[stock.code]?.changePct,
                         bollBand = uiState.stockBands[stock.code],
                         onLoadBoll = { viewModel.loadBoll(stock.code) },
                         onDismiss = { viewModel.deleteStock(stock) },
@@ -474,6 +477,7 @@ private fun PortfolioHoldingCard(
     latestYearlyDividend: Double?,
     bollBand: BollBand?,
     onLoadBoll: () -> Unit,
+    quote: QuoteSnapshot?,
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
@@ -549,11 +553,38 @@ private fun PortfolioHoldingCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "现价 ${item.currentPrice?.let { MoneyFormatter.withSymbol(it) } ?: "—"}",
-                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "现价 ${item.currentPrice?.let { MoneyFormatter.withSymbol(it) } ?: "—"}",
+                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        // 涨跌幅（紧跟现价，A股惯例红涨绿跌）；null 或 0 不展示，避免噪音
+                        quote?.changePct?.takeIf { it != 0.0 }?.let { pct ->
+                            Text(
+                                text = " ${if (pct > 0) "▲" else "▼"}${"%.2f".format(kotlin.math.abs(pct))}%",
+                                style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                                color = pnlColor(pct)
+                            )
+                        }
+                    }
+                    // PE / PB / 换手（缺失显示「—」）；三者全缺则不展示此行，保持留白干净
+                    val hasValuation = quote?.pe != null || quote?.pb != null || quote?.turnoverRate != null
+                    if (hasValuation) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = buildString {
+                                append("PE ")
+                                append(quote?.pe?.let { "%.2f".format(it) } ?: "—")
+                                append("  PB ")
+                                append(quote?.pb?.let { "%.2f".format(it) } ?: "—")
+                                append("  换手 ")
+                                append(quote?.turnoverRate?.let { "${"%.2f".format(it)}%" } ?: "—")
+                            },
+                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
@@ -781,7 +812,8 @@ private fun SwipeToDismissHoldingItem(
     onDeleteStock: () -> Unit,
     latestYearlyDividend: Double?,
     bollBand: BollBand?,
-    onLoadBoll: () -> Unit
+    onLoadBoll: () -> Unit,
+    quote: QuoteSnapshot?,
 ) {
     var showConfirmDialog by remember { mutableStateOf(false) }
     val density = LocalDensity.current
@@ -851,7 +883,8 @@ private fun SwipeToDismissHoldingItem(
                 onEditWeight = onEditWeight,
                 latestYearlyDividend = latestYearlyDividend,
                 bollBand = bollBand,
-                onLoadBoll = onLoadBoll
+                onLoadBoll = onLoadBoll,
+                quote = quote
             )
         }
 
@@ -917,6 +950,7 @@ private fun SwipeToDismissWatchItem(
     marketValue: Double?,
     currentPrice: Double?,
     latestYearlyDividend: Double?,
+    changePct: Double?,
     bollBand: BollBand?,
     onLoadBoll: () -> Unit,
     onDismiss: () -> Unit,
@@ -994,6 +1028,7 @@ private fun SwipeToDismissWatchItem(
                 lastUpdated = stock.lastUpdated,
                 currentPrice = currentPrice,
                 latestYearlyDividend = latestYearlyDividend,
+                changePct = changePct,
                 bollBand = bollBand,
                 onLoadBoll = onLoadBoll,
                 onClick = onClick,

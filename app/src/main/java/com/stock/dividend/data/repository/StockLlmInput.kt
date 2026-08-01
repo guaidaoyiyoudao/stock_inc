@@ -20,6 +20,12 @@ data class StockLlmInput(
     val bollMonthly: StockLlmBollPosition?,
     /** 近 N 期基本面（ROE/负债率/营收净利同比/派息率）；缺失为 null。 */
     val fundamentals: Fundamentals?,
+    /** 市盈率(TTM)；来自实时行情，缺失为 null。 */
+    val pe: Double? = null,
+    /** 市净率；来自实时行情，缺失为 null。 */
+    val pb: Double? = null,
+    /** 总市值（元，原值不除）；来自实时行情，缺失为 null。 */
+    val totalMarketCap: Double? = null,
 ) {
     /** 1/3/5 年预测：年均每股派息 + 实际样本年数（年数越少越不可靠）。 */
     data class StockLlmForecast(

@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.ui.theme.LocalExtendedColors
 import com.stock.dividend.ui.theme.tabularNumberStyle
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -45,6 +46,8 @@ fun StockCard(
     lastUpdated: Long? = null,
     currentPrice: Double? = null,
     latestYearlyDividend: Double? = null,
+    /** 当日涨跌幅%（A股惯例红涨绿跌）；null 或 0 不展示。 */
+    changePct: Double? = null,
     /** 周线 BOLL 带（切到 BOLL 视图时渲染；null 表示未加载/无数据）。 */
     bollBand: BollBand? = null,
     /** 切到 BOLL 视图时回调，ViewModel 据此按需懒加载。 */
@@ -167,6 +170,23 @@ fun StockCard(
                                     text = "自选",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        // 当日涨跌幅 pill（红涨绿跌，A股惯例）；null/0 不展示避免噪音
+                        changePct?.takeIf { it != 0.0 }?.let { pct ->
+                            val ext = LocalExtendedColors.current
+                            val color = if (pct > 0) ext.positive else ext.negative
+                            Box(
+                                modifier = Modifier
+                                    .background(color.copy(alpha = 0.12f), MaterialTheme.shapes.extraSmall)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "${if (pct > 0) "+" else ""}${"%.2f".format(pct)}%",
+                                    style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                                    color = color,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }

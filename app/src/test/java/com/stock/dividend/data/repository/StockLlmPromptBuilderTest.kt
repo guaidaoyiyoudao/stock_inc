@@ -17,6 +17,9 @@ class StockLlmPromptBuilderTest {
         bollDaily = StockLlmInput.StockLlmBollPosition(30),
         bollWeekly = StockLlmInput.StockLlmBollPosition(25),
         bollMonthly = StockLlmInput.StockLlmBollPosition(60),
+        pe = 6.60,
+        pb = 0.90,
+        totalMarketCap = 99_921_028_2712.0,   // ≈9992亿（实测招行总市值，元）
         fundamentals = Fundamentals(
             periods = listOf(
                 Fundamentals.Period("2023-12-31", roe = 12.0, debtToAssetRatio = 60.0, revenueYoy = 10.0, netProfitYoy = 7.0, basicEps = 1.0, payoutRatio = 28.0, dividendPlan = "10派2.00元(含税)"),
@@ -175,6 +178,42 @@ class StockLlmPromptBuilderTest {
         val p = prompt(input)
         assertThat(p.user).contains("营收-2.5%")
         assertThat(p.user).contains("净利-3.0%")
+    }
+
+    // ===== 估值段（PE/PB/总市值）=====
+
+    @Test
+    fun `user message renders valuation pe pb and market cap in 亿`() {
+        val p = prompt(fullInput())
+        assertThat(p.user).contains("【估值】")
+        assertThat(p.user).contains("PE 6.60")
+        assertThat(p.user).contains("PB 0.90")
+        // 999210282712 元 → 9992亿
+        assertThat(p.user).contains("总市值 9992亿")
+    }
+
+    @Test
+    fun `system prompt states pe pb market cap semantics`() {
+        val p = prompt(fullInput())
+        assertThat(p.system).contains("PE(TTM)")
+        assertThat(p.system).contains("PB")
+        assertThat(p.system).contains("总市值")
+    }
+
+    @Test
+    fun `valuation section omitted when all three null`() {
+        // 全缺时不输出【估值】段，避免噪音
+        val input = fullInput().copy(pe = null, pb = null, totalMarketCap = null)
+        val p = prompt(input)
+        assertThat(p.user).doesNotContain("【估值】")
+    }
+
+    @Test
+    fun `valuation section shows dash for partial missing fields`() {
+        // 仅 PE 有值，PB/市值 缺失显示「—」
+        val input = fullInput().copy(pe = 5.5, pb = null, totalMarketCap = null)
+        val p = prompt(input)
+        assertThat(p.user).contains("【估值】PE 5.50 / PB — / 总市值 —")
     }
 
     // ===== 回流：全局用户投资原则 =====
