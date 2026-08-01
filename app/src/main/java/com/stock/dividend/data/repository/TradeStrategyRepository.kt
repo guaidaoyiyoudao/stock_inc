@@ -1,8 +1,11 @@
 package com.stock.dividend.data.repository
 
 import com.google.gson.Gson
-import com.google.gson.JsonSyntaxException
+import com.stock.dividend.data.local.dao.TradeStrategyDao
 import com.stock.dividend.data.local.entity.TradeStrategyEntity
+import java.time.LocalDate
+import javax.inject.Inject
+import javax.inject.Singleton
 
 private val risksGson = Gson()
 
@@ -32,4 +35,20 @@ fun toUserStrategyRef(
         validUntil = entity.validUntil,
         daysAgo = daysAgo
     )
+}
+
+/**
+ * 持久化封装：策略的存取 + 全局回流查询。网络/DB 异常吞，返回安全空值（红线 #2）。
+ */
+@Singleton
+class TradeStrategyRepository @Inject constructor(
+    private val strategyDao: TradeStrategyDao
+) {
+    suspend fun upsert(entity: TradeStrategyEntity) =
+        runCatching { strategyDao.upsert(entity) }.getOrNull()
+
+    /** 全部活跃且未过期的策略（全局回流，不过滤个股）。 */
+    suspend fun activeStrategies(): List<TradeStrategyEntity> =
+        runCatching { strategyDao.activeStrategies(LocalDate.now().toString()) }
+            .getOrDefault(emptyList())
 }
