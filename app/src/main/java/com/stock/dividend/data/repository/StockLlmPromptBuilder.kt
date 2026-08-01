@@ -8,7 +8,15 @@ object StockLlmPromptBuilder {
 
     data class LlmPrompt(val system: String, val user: String)
 
-    fun build(input: StockLlmInput): LlmPrompt = LlmPrompt(SYSTEM, buildUser(input))
+    /**
+     * @param userStrategies 用户全局投资原则（来自截图分析，回流进 prompt）。默认空——
+     * 策略是全局背景而非个股属性，故作 builder 独立参数，不入 [StockLlmInput] 字段。
+     * sourceNote 不入 prompt（仅 DB 存 + 列表展示）。
+     */
+    fun build(
+        input: StockLlmInput,
+        userStrategies: List<UserStrategyRef> = emptyList()
+    ): LlmPrompt = LlmPrompt(SYSTEM, buildUser(input, userStrategies))
 
     private val SYSTEM = """
 你是一位稳健、客观的中文分红股投资分析助手。
@@ -22,9 +30,15 @@ object StockLlmPromptBuilder {
 - 股息率%：最新一期年现金分红 / 现价
 - 预测：基于历史分红的线性平均，非承诺；实际样本年数越少越不可靠
 - 买入线：股息率达到「国债收益率×倍数」时视为低估信号
+- ROE%：净资产收益率，反映赚钱效率，持续下滑是分红可持续性的危险信号
+- 资产负债率%：越高杠杆越大，>70% 需警惕（行业差异大，结合行业判断）
+- 营收/净利同比%：正负与趋势反映成长性，持续负增长会侵蚀分红能力
+- 派息率%：分红/盈利，>80% 或持续上升而盈利不增，分红可能不可持续
+- 分红方案：如「10派3.60元(含税)」表示每10股派3.6元，反映当期实际分红力度
+- 用户投资原则：用户此前从外部内容整理出的整体投资观点，对所有标的通用，属用户个人视角，非客观数据；解读时可对照呼应，但不要盲从或简单复述。
 
 【输出要求】严格输出 JSON：
-{"valuation":"估值判断≤120字：结合三周期位置判断当前贵/便宜/合理","dividendSustainability":"分红可持续性≤120字：结合分红率趋势与预测样本","action":"一句话结论≤20字：如可逢低关注/暂观望/持有等定性","risks":["具体风险点"]}
+{"valuation":"估值判断≤120字：结合三周期位置判断当前贵/便宜/合理","dividendSustainability":"分红可持续性≤120字：结合 ROE/派息率/成长性趋势","action":"一句话结论≤20字：如可逢低关注/暂观望/持有等定性","risks":["具体风险点"]}
 
 【约束】
 1. 仅基于提供数据，绝不编造价格/股息率/财报/未给出的信息。
@@ -34,7 +48,7 @@ object StockLlmPromptBuilder {
 5. 风险要点具体，不泛泛而谈；不复述规则逻辑。
     """.trim()
 
-    private fun buildUser(input: StockLlmInput): String {
+    private fun buildUser(input: StockLlmInput, userStrategies: List<UserStrategyRef>): String {
         val sb = StringBuilder()
         sb.append("【标的】${input.code} ${input.name}")
         input.industry?.takeIf { it.isNotBlank() }?.let { sb.append(" [$it]") }
@@ -93,6 +107,48 @@ object StockLlmPromptBuilder {
         sb.append("周距下轨 ${input.bollWeekly?.let { "${it.priceVsLowerPercent}%" } ?: "—"} / ")
         sb.append("月距下轨 ${input.bollMonthly?.let { "${it.priceVsLowerPercent}%" } ?: "—"}\n")
 
+        // 基本面（近 N 期，旧→新）
+        sb.append("【基本面（近${input.fundamentals?.periods?.size ?: 0}期）】")
+        val periods = input.fundamentals?.periods
+        if (periods.isNullOrEmpty()) {
+            sb.append("—\n")
+        } else {
+            sb.append("\n")
+            periods.forEach { p ->
+                sb.append("  ${p.reportDate}: ")
+                sb.append("ROE ${p.roe?.let { "${"%.1f".format(it)}%" } ?: "—"} / ")
+                sb.append("负债率 ${p.debtToAssetRatio?.let { "${"%.0f".format(it)}%" } ?: "—"} / ")
+                sb.append("营收${formatYoy(p.revenueYoy)} / ")
+                sb.append("净利${formatYoy(p.netProfitYoy)} / ")
+                sb.append("派息率 ${p.payoutRatio?.let { "${"%.0f".format(it)}%" } ?: "—"}")
+                p.dividendPlan?.takeIf { it.isNotBlank() }?.let { sb.append(" / $it") }
+                sb.append("\n")
+            }
+        }
+
+        // 用户投资原则（全局回流，不含 sourceNote）
+        sb.append("【用户投资原则（来自截图分析，全局，仅供参照）】")
+        if (userStrategies.isEmpty()) {
+            sb.append("—\n")
+        } else {
+            sb.append("\n")
+            userStrategies.forEach { ref ->
+                val dirZh = when (ref.direction) {
+                    "BUY" -> "买入"; "SELL" -> "卖出"; else -> "观望"
+                }
+                sb.append("  [$dirZh] ${ref.reasoning} (${ref.daysAgo}天前)\n")
+                if (ref.risks.isNotEmpty()) {
+                    sb.append("    风险: ${ref.risks.joinToString(" / ")}\n")
+                }
+            }
+        }
+
         return sb.toString()
+    }
+
+    /** 同比%带正负号渲染：+8.0% / -2.0% / —。 */
+    private fun formatYoy(value: Double?): String = when {
+        value == null || !value.isFinite() -> "—"
+        else -> "${if (value >= 0) "+" else ""}${"%.1f".format(value)}%"
     }
 }

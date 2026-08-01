@@ -95,4 +95,23 @@ class LlmPromptBuilderTest {
         assertThat(p.system).isNotEmpty()
         assertThat(p.user).isNotEmpty()
     }
+
+    // ===== 回流：全局用户投资原则 =====
+
+    @Test
+    fun `userStrategies rendered globally without sourceNote`() {
+        val p = LlmPromptBuilder.build(
+            listOf(stock("600036")), emptyMap(), emptyMap(), noSignals, DividendThresholds(),
+            listOf(UserStrategyRef("BUY", "ROE高", emptyList(), null, 5))
+        )
+        assertThat(p.user).contains("用户投资原则")
+        assertThat(p.user).contains("[买入]")
+        assertThat(p.user).contains("5天前")
+    }
+
+    @Test
+    fun `system contains user strategy semantics`() {
+        val p = prompt(listOf(stock("600036")))
+        assertThat(p.system).contains("用户投资原则")
+    }
 }

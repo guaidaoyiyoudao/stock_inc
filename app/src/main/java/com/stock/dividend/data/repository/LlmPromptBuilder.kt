@@ -14,7 +14,8 @@ object LlmPromptBuilder {
         monthlyBands: Map<String, BollBand?>,
         signals: PortfolioSignals,
         thresholds: DividendThresholds,
-    ): LlmPrompt = LlmPrompt(SYSTEM, buildUser(evaluatedStocks, dailyBands, monthlyBands, signals, thresholds))
+        userStrategies: List<UserStrategyRef> = emptyList(),
+    ): LlmPrompt = LlmPrompt(SYSTEM, buildUser(evaluatedStocks, dailyBands, monthlyBands, signals, thresholds, userStrategies))
 
     private val SYSTEM = """
 你是一位稳健、客观的中文分红股投资分析助手。
@@ -23,13 +24,14 @@ object LlmPromptBuilder {
 基于用户提供的持仓评估数据与策略信号（已由规则引擎判定），输出自然语言解读。
 
 【数据语义（仅供理解，不要复述规则公式）】
-- action=买：价格处于周线 BOLL 下轨附近（偏低），且股息率达门槛
+- action=买：日下轨+周下轨+月中轨及以下 三周期共振，且股息率达最低门槛
 - action=卖：价格处于周线 BOLL 上轨附近（偏高）
-- action=持有：价格在中轨附近或股息率不足以触发买
+- action=持有：未达三周期共振（中轨、仅单一周期偏低、或股息率不足）
 - 距下轨%：0=在下轨（便宜），100=在上轨（贵）；每只股给出 日/周/月 三周期的距下轨%，据此判断多周期共振
 - 股息率%：年现金分红 / 现价
 - 仓位控制信号：多数股票抵达上轨 + 整体股息偏低 → 建议控仓、现金 ≥ 目标%
-- 三周期共振买点：日下轨 + 周下轨 + 月中轨以下 同时成立
+- 三周期共振买点：与 action=买 同源（日下轨 + 周下轨 + 月中轨及以下 同时成立）
+- 用户投资原则：用户此前从外部内容整理出的整体投资观点，对所有标的通用，属用户个人视角，非客观数据；解读时可对照呼应，但不要盲从或简单复述。
 
 【输出要求】严格输出 JSON：
 {"overview":"组合整体解读≤150字","stockComments":{"<code>":"该股≤40字"},"risks":["具体风险点"]}
@@ -49,9 +51,10 @@ object LlmPromptBuilder {
         monthlyBands: Map<String, BollBand?>,
         signals: PortfolioSignals,
         thresholds: DividendThresholds,
+        userStrategies: List<UserStrategyRef>,
     ): String {
         val sb = StringBuilder()
-        sb.append("【门槛】最低股息率 ${thresholds.minYieldPercent}%，加分股息率 ${thresholds.boostYieldPercent}%\n")
+        sb.append("【门槛】买入需三周期共振且股息率 ≥ ${thresholds.minYieldPercent}%\n")
         sb.append("【持仓评估】\n")
         if (stocks.isEmpty()) sb.append("（无）\n")
         stocks.forEach { s ->
@@ -78,6 +81,19 @@ object LlmPromptBuilder {
             sb.append("- 三周期共振买点：${signals.buySignals.joinToString("、") { it.code }}\n")
         } else {
             sb.append("- 三周期共振买点：无\n")
+        }
+        // 用户投资原则（全局回流，不含 sourceNote）
+        sb.append("【用户投资原则（来自截图分析，全局，仅供参照）】")
+        if (userStrategies.isEmpty()) {
+            sb.append("—\n")
+        } else {
+            sb.append("\n")
+            userStrategies.forEach { ref ->
+                val dirZh = when (ref.direction) { "BUY" -> "买入"; "SELL" -> "卖出"; else -> "观望" }
+                sb.append("- [$dirZh] ${ref.reasoning}(${ref.daysAgo}天前)")
+                if (ref.risks.isNotEmpty()) sb.append(" 风险:${ref.risks.joinToString("/")}")
+                sb.append("\n")
+            }
         }
         return sb.toString()
     }
