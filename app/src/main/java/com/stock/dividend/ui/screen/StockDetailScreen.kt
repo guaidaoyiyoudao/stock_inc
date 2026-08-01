@@ -53,6 +53,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -273,7 +276,8 @@ fun StockDetailScreen(
                             state = uiState.llmAnalysis,
                             hasDividends = uiState.dividends.isNotEmpty(),
                             onAnalyze = { viewModel.analyzeWithLlm() },
-                            onRetry = { viewModel.analyzeWithLlm() }
+                            onRetry = { viewModel.analyzeWithLlm() },
+                            onReanalyze = { viewModel.analyzeWithLlm(forceRefresh = true) }
                         )
                     }
 
@@ -642,14 +646,32 @@ private fun StockLlmAnalysisSection(
     state: StockLlmAnalysisState,
     hasDividends: Boolean,
     onAnalyze: () -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onReanalyze: () -> Unit
 ) {
     when (state) {
         is StockLlmAnalysisState.Success -> {
             val a = state.analysis
             ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    Text("✨ AI 解读", style = MaterialTheme.typography.titleSmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            buildString {
+                                append("✨ AI 解读")
+                                state.analyzedAt?.let {
+                                    append(" · ")
+                                    append(formatAnalysisTime(it))
+                                }
+                                if (state.fromCache) append(" · 缓存")
+                            },
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        TextButton(onClick = onReanalyze) { Text("重新分析") }
+                    }
                     if (a.valuation.isNotBlank()) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(a.valuation, style = MaterialTheme.typography.bodyMedium)
@@ -671,6 +693,14 @@ private fun StockLlmAnalysisSection(
                             Text("• $it", style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    state.notice?.let {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         "仅供参考，不构成投资建议。",
@@ -685,7 +715,7 @@ private fun StockLlmAnalysisSection(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("AI 分析中…")
+                Text("正在拉取深度数据并分析…")
             }
         }
 
@@ -986,3 +1016,8 @@ private fun yoyColor(value: Double?): androidx.compose.ui.graphics.Color {
         else -> unspecified
     }
 }
+
+private fun formatAnalysisTime(epochMillis: Long): String =
+    DateTimeFormatter.ofPattern("MM-dd HH:mm")
+        .withZone(ZoneId.systemDefault())
+        .format(Instant.ofEpochMilli(epochMillis))

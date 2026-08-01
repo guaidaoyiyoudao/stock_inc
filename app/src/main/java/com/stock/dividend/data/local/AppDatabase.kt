@@ -8,8 +8,10 @@ import com.stock.dividend.data.local.dao.AchievementDao
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FireGoalDao
+import com.stock.dividend.data.local.dao.FundamentalsCacheDao
 import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
+import com.stock.dividend.data.local.dao.LlmAnalysisCacheDao
 import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.SearchCacheDao
@@ -21,8 +23,10 @@ import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
+import com.stock.dividend.data.local.entity.FundamentalsCacheEntity
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
+import com.stock.dividend.data.local.entity.LlmAnalysisCacheEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.PriceCacheEntity
 import com.stock.dividend.data.local.entity.SearchCacheEntity
@@ -45,9 +49,11 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         PriceCacheEntity::class,
         SearchCacheEntity::class,
         StockTagEntity::class,
-        TradeStrategyEntity::class
+        TradeStrategyEntity::class,
+        FundamentalsCacheEntity::class,
+        LlmAnalysisCacheEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -64,6 +70,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun searchCacheDao(): SearchCacheDao
     abstract fun stockTagDao(): StockTagDao
     abstract fun tradeStrategyDao(): TradeStrategyDao
+    abstract fun fundamentalsCacheDao(): FundamentalsCacheDao
+    abstract fun llmAnalysisCacheDao(): LlmAnalysisCacheDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -281,6 +289,26 @@ abstract class AppDatabase : RoomDatabase() {
                         "`status` TEXT NOT NULL DEFAULT 'ACTIVE', " +
                         "`createdAt` INTEGER NOT NULL, " +
                         "`updatedAt` INTEGER NOT NULL)"
+                )
+            }
+        }
+
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 基本面缓存：季报级慢变数据，7 天 TTL
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `fundamentals_cache` (" +
+                        "`stockCode` TEXT NOT NULL PRIMARY KEY, " +
+                        "`payload` TEXT NOT NULL, " +
+                        "`fetchedAt` INTEGER NOT NULL)"
+                )
+                // LLM 解读结果缓存：prompt 哈希 key，24h TTL
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `llm_analysis_cache` (" +
+                        "`cacheKey` TEXT NOT NULL PRIMARY KEY, " +
+                        "`scope` TEXT NOT NULL, " +
+                        "`payload` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL)"
                 )
             }
         }

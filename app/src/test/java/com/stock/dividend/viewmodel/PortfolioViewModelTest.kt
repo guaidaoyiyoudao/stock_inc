@@ -13,18 +13,27 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.notification.NotificationCheckCoordinator
 import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendThresholds
+import com.stock.dividend.data.repository.Fundamentals
+import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.HoldingAction
 import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.LlmAnalysis
 import com.stock.dividend.data.repository.LlmAnalysisRepository
+import com.stock.dividend.data.repository.LlmAnalysisResult
+import com.stock.dividend.data.repository.LlmAnalysisState
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
+import com.stock.dividend.data.repository.PortfolioLlmInput
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.TradeStrategyRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +61,12 @@ class PortfolioViewModelTest {
     private val llmAnalysisRepository: LlmAnalysisRepository = mockk()
     private val tradeStrategyRepository: TradeStrategyRepository = mockk {
         coEvery { activeStrategies() } returns emptyList()
+    }
+    private val fundamentalsCacheRepository: FundamentalsCacheRepository = mockk {
+        coEvery { getFundamentals(any(), any()) } returns null
+    }
+    private val bondYieldRepository: BondYieldRepository = mockk {
+        coEvery { fetch10YBondYield(any()) } returns BondYieldRepository.DEFAULT_YIELD
     }
     // Robolectric 提供真实可用的 Context + SharedPreferences，不再需要 mockk 整条 prefs 链
     private lateinit var context: Context
@@ -749,6 +764,129 @@ class PortfolioViewModelTest {
         assertThat(eval.first().action).isEqualTo(HoldingAction.HOLD)
     }
 
+    private fun deepSetup() {
+        stocksFlow.value = listOf(
+            stock("sh.600036", shares = 100, costPerShare = 10.0, industry = "银行")
+        )
+        val dividends = listOf(
+            DividendEntity(id = "sh.600036_2022", stockCode = "sh.600036", reportDate = "2022-12-31", cashPerShare = 0.2),
+            DividendEntity(id = "sh.600036_2023", stockCode = "sh.600036", reportDate = "2023-12-31", cashPerShare = 0.3),
+            DividendEntity(id = "sh.600036_2024", stockCode = "sh.600036", reportDate = "2024-12-31", cashPerShare = 0.4)
+        )
+        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(dividends)
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sh.600036" to 10.0)
+        coEvery { stockRepository.fetchBoll(any()) } returns BollBand(10.0, 12.0, 8.0)
+        coEvery { stockRepository.fetchBoll(any(), any()) } returns BollBand(10.0, 12.0, 8.0)
+        coEvery { bondYieldRepository.fetch10YBondYield(any()) } returns 2.5
+        coEvery { fundamentalsCacheRepository.getFundamentals("sh.600036", false) } returns Fundamentals(
+            periods = listOf(Fundamentals.Period("2024-12-31", 12.0, 60.0, 8.0, 5.0, payoutRatio = 25.0))
+        )
+    }
+
+    @Test
+    fun `stockForecasts include 1-3-5 year llm forecast`() = runTest {
+        val dividends = listOf(
+            DividendEntity(id = "sh.600036_2022", stockCode = "sh.600036", reportDate = "2022-12-31", cashPerShare = 0.2),
+            DividendEntity(id = "sh.600036_2023", stockCode = "sh.600036", reportDate = "2023-12-31", cashPerShare = 0.3),
+            DividendEntity(id = "sh.600036_2024", stockCode = "sh.600036", reportDate = "2024-12-31", cashPerShare = 0.4)
+        )
+        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(dividends)
+        stocksFlow.value = listOf(stock("sh.600036", shares = 100, costPerShare = 10.0))
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val llm = viewModel.uiState.value.stockForecasts["sh.600036"]?.llmForecast
+        assertThat(llm).isNotNull()
+        assertThat(llm!!.avgCashPerShare1Y).isEqualTo(0.4)
+        assertThat(llm.avgCashPerShare3Y).isWithin(1e-9).of(0.3)
+        assertThat(llm.avgCashPerShare5Y).isWithin(1e-9).of(0.3)  // 样本不足回退基准值
+        assertThat(llm.actualYears).isEqualTo(3)
+    }
+
+    @Test
+    fun `analyzeWithLlm assembles deep data and passes to repository`() = runTest {
+        deepSetup()
+        val inputSlot = slot<PortfolioLlmInput>()
+        coEvery { llmAnalysisRepository.analyze(capture(inputSlot), any()) } returns LlmAnalysisResult.Success(
+            LlmAnalysis("ok", emptyMap(), emptyList())
+        )
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.evaluateVisibleHoldings()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.analyzeWithLlm()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val input = inputSlot.captured
+        assertThat(input.stockDetails["sh.600036"]?.fundamentals).isNotNull()
+        assertThat(input.stockDetails["sh.600036"]?.forecast?.avgCashPerShare1Y).isEqualTo(0.4)
+        assertThat(input.stockDetails["sh.600036"]?.buyThreshold?.reached).isEqualTo(false)
+        coVerify { fundamentalsCacheRepository.getFundamentals("sh.600036", false) }
+        coVerify { llmAnalysisRepository.analyze(input, false) }
+    }
+
+    @Test
+    fun `analyzeWithLlm passes forceRefresh to fundamentals and repository`() = runTest {
+        deepSetup()
+        coEvery { llmAnalysisRepository.analyze(any(), any()) } returns LlmAnalysisResult.Success(
+            LlmAnalysis("ok", emptyMap(), emptyList())
+        )
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.evaluateVisibleHoldings()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.analyzeWithLlm(forceRefresh = true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify { fundamentalsCacheRepository.getFundamentals("sh.600036", true) }
+        coVerify { llmAnalysisRepository.analyze(any(), true) }
+    }
+
+    @Test
+    fun `analyzeWithLlm maps cached success metadata to state`() = runTest {
+        deepSetup()
+        coEvery { llmAnalysisRepository.analyze(any(), any()) } returns LlmAnalysisResult.Success(
+            LlmAnalysis("cached", emptyMap(), emptyList()),
+            analyzedAt = 123L,
+            fromCache = true
+        )
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.evaluateVisibleHoldings()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.analyzeWithLlm()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value.llmAnalysis as LlmAnalysisState.Success
+        assertThat(state.analysis.overview).isEqualTo("cached")
+        assertThat(state.fromCache).isTrue()
+        assertThat(state.analyzedAt).isEqualTo(123L)
+    }
+
+    @Test
+    fun `analyzeWithLlm degrades when fundamentals fail`() = runTest {
+        deepSetup()
+        coEvery { fundamentalsCacheRepository.getFundamentals(any(), any()) } throws RuntimeException("boom")
+        val inputSlot = slot<PortfolioLlmInput>()
+        coEvery { llmAnalysisRepository.analyze(capture(inputSlot), any()) } returns LlmAnalysisResult.Success(
+            LlmAnalysis("ok", emptyMap(), emptyList())
+        )
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.evaluateVisibleHoldings()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.analyzeWithLlm()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(inputSlot.captured.stockDetails["sh.600036"]?.fundamentals).isNull()
+        assertThat(viewModel.uiState.value.llmAnalysis).isInstanceOf(LlmAnalysisState.Success::class.java)
+    }
+
     private fun createViewModel() = PortfolioViewModel(
         stockRepository,
         dividendDao,
@@ -758,6 +896,8 @@ class PortfolioViewModelTest {
         notificationRuleRepository,
         llmAnalysisRepository,
         tradeStrategyRepository,
+        fundamentalsCacheRepository,
+        bondYieldRepository,
         context
     )
 

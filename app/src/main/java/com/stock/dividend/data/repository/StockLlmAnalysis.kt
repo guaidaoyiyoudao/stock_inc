@@ -15,6 +15,18 @@ data class StockLlmAnalysis(
     val risks: List<String>,
 )
 
+/** 个股级编排返回类型（与 [LlmAnalysisResult] 对称，Success 携带缓存元数据）。 */
+sealed interface StockLlmAnalysisResult {
+    data class Success(
+        val analysis: StockLlmAnalysis,
+        val analyzedAt: Long? = null,
+        val fromCache: Boolean = false,
+        val notice: String? = null,
+    ) : StockLlmAnalysisResult
+    data object NotConfigured : StockLlmAnalysisResult
+    data class Error(val message: String) : StockLlmAnalysisResult
+}
+
 /**
  * 个股 LLM 解读的 UI 状态。结构与组合级 [LlmAnalysisState] 完全对称（五态语义一致），
  * 但 Success 的 payload 是 [StockLlmAnalysis]，故独立定义以保持类型清晰。
@@ -23,6 +35,11 @@ sealed interface StockLlmAnalysisState {
     data object Idle : StockLlmAnalysisState
     data object Loading : StockLlmAnalysisState
     data object NotConfigured : StockLlmAnalysisState
-    data class Success(val analysis: StockLlmAnalysis) : StockLlmAnalysisState
+    data class Success(
+        val analysis: StockLlmAnalysis,
+        val analyzedAt: Long? = null,
+        val fromCache: Boolean = false,
+        val notice: String? = null,
+    ) : StockLlmAnalysisState
     data class Error(val message: String) : StockLlmAnalysisState
 }

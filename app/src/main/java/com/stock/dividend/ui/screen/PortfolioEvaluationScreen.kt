@@ -25,6 +25,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.HoldingAction
 import com.stock.dividend.ui.component.AppCardDefaults
@@ -51,6 +55,7 @@ import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.data.repository.EvaluatedStock
 import com.stock.dividend.data.repository.LlmAnalysisState
 import com.stock.dividend.data.repository.PortfolioSignals
+import com.stock.dividend.data.repository.StockLlmComment
 import com.stock.dividend.viewmodel.PortfolioViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,7 +95,8 @@ fun PortfolioEvaluationScreen(
                 llmAnalysis = uiState.llmAnalysis,
                 onReevaluate = viewModel::evaluateVisibleHoldings,
                 onClear = viewModel::clearEvaluation,
-                onAnalyze = viewModel::analyzeWithLlm
+                onAnalyze = viewModel::analyzeWithLlm,
+                onReanalyze = { viewModel.analyzeWithLlm(forceRefresh = true) }
             )
         }
     }
@@ -158,7 +164,8 @@ private fun EvaluationContent(
     llmAnalysis: LlmAnalysisState,
     onReevaluate: () -> Unit,
     onClear: () -> Unit,
-    onAnalyze: () -> Unit
+    onAnalyze: () -> Unit,
+    onReanalyze: () -> Unit
 ) {
     val counts = evaluated.groupBy { it.action }
     val aiComments = (llmAnalysis as? LlmAnalysisState.Success)?.analysis?.stockComments ?: emptyMap()
@@ -180,7 +187,8 @@ private fun EvaluationContent(
             LlmAnalysisSection(
                 state = llmAnalysis,
                 onAnalyze = onAnalyze,
-                onRetry = onAnalyze
+                onRetry = onAnalyze,
+                onReanalyze = onReanalyze
             )
         }
         // 按 action 优先级分组渲染
@@ -259,7 +267,7 @@ private fun SectionHeader(action: HoldingAction) {
 }
 
 @Composable
-private fun EvaluationCard(stock: EvaluatedStock, aiComment: String? = null) {
+private fun EvaluationCard(stock: EvaluatedStock, aiComment: StockLlmComment? = null) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -329,12 +337,28 @@ private fun EvaluationCard(stock: EvaluatedStock, aiComment: String? = null) {
                     )
                 }
             }
-            if (!aiComment.isNullOrEmpty()) {
+            if (aiComment != null && (aiComment.brief.isNotBlank() || aiComment.risks.isNotEmpty())) {
+                HorizontalDivider()
                 Text(
-                    "AI：$aiComment",
-                    style = MaterialTheme.typography.labelSmall,
+                    aiComment.brief,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
+                aiComment.risks.forEach { risk ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        Text(
+                            "•",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.padding(end = 4.dp))
+                        Text(
+                            risk,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
             }
         }
     }
@@ -389,16 +413,42 @@ private fun PortfolioSignalsSection(signals: PortfolioSignals) {
 private fun LlmAnalysisSection(
     state: LlmAnalysisState,
     onAnalyze: () -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onReanalyze: () -> Unit
 ) {
     when (state) {
         is LlmAnalysisState.Success -> {
             val a = state.analysis
             ElevatedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("✨ AI 解读", style = MaterialTheme.typography.titleSmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            buildString {
+                                append("✨ AI 解读")
+                                state.analyzedAt?.let {
+                                    append(" · ")
+                                    append(formatAnalysisTime(it))
+                                }
+                                if (state.fromCache) append(" · 缓存")
+                            },
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        TextButton(onClick = onReanalyze) { Text("重新分析") }
+                    }
                     Spacer(Modifier.height(4.dp))
                     Text(a.overview, style = MaterialTheme.typography.bodyMedium)
+                    state.notice?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                     if (a.risks.isNotEmpty()) {
                         Spacer(Modifier.height(6.dp))
                         a.risks.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
@@ -416,7 +466,7 @@ private fun LlmAnalysisSection(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("AI 分析中…")
+                Text("正在拉取深度数据并分析…")
             }
         }
         is LlmAnalysisState.Error -> {
@@ -452,3 +502,8 @@ private fun actionTone(a: HoldingAction) = when (a) {
     HoldingAction.SELL -> FinanceStatusTone.Negative
     HoldingAction.INSUFFICIENT_DATA -> FinanceStatusTone.Warning
 }
+
+private fun formatAnalysisTime(epochMillis: Long): String =
+    DateTimeFormatter.ofPattern("MM-dd HH:mm")
+        .withZone(ZoneId.systemDefault())
+        .format(Instant.ofEpochMilli(epochMillis))

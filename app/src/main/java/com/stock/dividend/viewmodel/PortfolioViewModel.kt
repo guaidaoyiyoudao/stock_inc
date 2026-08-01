@@ -13,8 +13,10 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.notification.NotificationCheckCoordinator
 import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendThresholds
 import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.HoldingAction
 import com.stock.dividend.data.repository.HoldingRecommendation
 import com.stock.dividend.data.repository.HoldingRecommender
@@ -25,15 +27,20 @@ import com.stock.dividend.data.repository.TradeStrategyRepository
 import com.stock.dividend.data.repository.toUserStrategyRef
 import com.stock.dividend.data.repository.LlmAnalysisState
 import com.stock.dividend.data.repository.PortfolioAdvisor
+import com.stock.dividend.data.repository.PortfolioLlmInput
+import com.stock.dividend.data.repository.PortfolioLlmStockDetail
 import com.stock.dividend.data.repository.PortfolioSignals
+import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.computeBuyThreshold
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -107,7 +114,9 @@ data class StockForecast(
     val actualYears: Int,
     val currentPrice: Double? = null,
     val marketValue: Double? = null,
-    val latestYearlyDividend: Double? = null
+    val latestYearlyDividend: Double? = null,
+    /** 1/3/5 年每股预测（组合级 LLM 深度数据用）；无足够股息数据时为 null。 */
+    val llmForecast: StockLlmInput.StockLlmForecast? = null
 )
 
 // EvaluatedStock 迁移至 data/repository/EvaluatedStock.kt（领域 DTO）
@@ -184,6 +193,8 @@ class PortfolioViewModel @Inject constructor(
     private val notificationRuleRepository: NotificationRuleRepository,
     private val llmAnalysisRepository: LlmAnalysisRepository,
     private val tradeStrategyRepository: TradeStrategyRepository,
+    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
+    private val bondYieldRepository: BondYieldRepository,
     @ApplicationContext context: Context
 ) : ViewModel() {
 
@@ -263,6 +274,19 @@ class PortfolioViewModel @Inject constructor(
                     val result = ForecastCalculator.calculateForecastIncome(
                         dividends, stock.shares, years
                     )
+                    // 1/3/5 年窗口（本地纯计算）；样本不足的窗口回退到首个可用值
+                    val llmForecast = listOf(1, 3, 5).mapNotNull { y ->
+                        ForecastCalculator.calculateForecastIncome(dividends, stock.shares, y)
+                            ?.let { y to it.avgCashPerShare }
+                    }.toMap().let { m ->
+                        val base = m.values.firstOrNull() ?: return@let null
+                        StockLlmInput.StockLlmForecast(
+                            avgCashPerShare1Y = m[1] ?: base,
+                            avgCashPerShare3Y = m[3] ?: base,
+                            avgCashPerShare5Y = m[5] ?: base,
+                            actualYears = result?.actualYears ?: 0
+                        )
+                    }
                     val forecast = result?.let {
                         StockForecast(
                             shares = stock.shares,
@@ -270,7 +294,8 @@ class PortfolioViewModel @Inject constructor(
                             // shares=0 的自选股 forecastIncome 恒为 0（shares * avg = 0），不计入合计
                             forecastIncome = stock.shares * it.avgCashPerShare,
                             actualYears = it.actualYears,
-                            latestYearlyDividend = ForecastCalculator.latestYearlyCashPerShare(dividends)
+                            latestYearlyDividend = ForecastCalculator.latestYearlyCashPerShare(dividends),
+                            llmForecast = llmForecast
                         )
                     } ?: StockForecast(
                         // 占位：result 为 null（shares<=0 或无足够股息记录）时仍要为自选卡保留槽位，
@@ -279,7 +304,8 @@ class PortfolioViewModel @Inject constructor(
                         avgCashPerShare = 0.0,
                         forecastIncome = 0.0,
                         actualYears = 0,
-                        latestYearlyDividend = ForecastCalculator.latestYearlyCashPerShare(dividends)
+                        latestYearlyDividend = ForecastCalculator.latestYearlyCashPerShare(dividends),
+                        llmForecast = llmForecast
                     )
                     stock.code to forecast
                 }
@@ -589,7 +615,8 @@ class PortfolioViewModel @Inject constructor(
     }
 
     /** 触发 LLM 解读（结果页"AI 解读"按钮）。 */
-    fun analyzeWithLlm() {
+    /** 触发 LLM 解读（结果页"AI 解读"按钮；重新分析传 forceRefresh=true）。 */
+    fun analyzeWithLlm(forceRefresh: Boolean = false) {
         val current = _uiState.value
         val evaluation = current.evaluation
         val signals = current.portfolioSignals
@@ -602,13 +629,70 @@ class PortfolioViewModel @Inject constructor(
             val userStrategies = runCatching {
                 tradeStrategyRepository.activeStrategies().map { toUserStrategyRef(it) }
             }.getOrDefault(emptyList())
-            val result = llmAnalysisRepository.analyze(evaluation, dailyBands, monthlyBands, signals, _evalThresholds.value, userStrategies)
+            // 每股深度数据：基本面（缓存优先）/ 预测（本地）/ 买入线（国债缓存 + 本地算）
+            val stockDetails = buildStockDetails(evaluation, forceRefresh)
+            val input = PortfolioLlmInput(
+                evaluation = evaluation,
+                dailyBands = dailyBands,
+                monthlyBands = monthlyBands,
+                signals = signals,
+                thresholds = _evalThresholds.value,
+                userStrategies = userStrategies,
+                stockDetails = stockDetails
+            )
+            val result = llmAnalysisRepository.analyze(input, forceRefresh)
             val state = when (result) {
-                is LlmAnalysisResult.Success -> LlmAnalysisState.Success(result.analysis)
+                is LlmAnalysisResult.Success -> LlmAnalysisState.Success(
+                    result.analysis, result.analyzedAt, result.fromCache, result.notice
+                )
                 LlmAnalysisResult.NotConfigured -> LlmAnalysisState.NotConfigured
                 is LlmAnalysisResult.Error -> LlmAnalysisState.Error(result.message)
             }
             _uiState.update { it.copy(llmAnalysis = state) }
+        }
+    }
+
+    /** 每股深度数据装配：基本面走缓存仓库，预测取本地快照，买入线本地计算。全部失败降级 null。 */
+    private suspend fun buildStockDetails(
+        evaluation: List<EvaluatedStock>,
+        forceRefresh: Boolean
+    ): Map<String, PortfolioLlmStockDetail> {
+        if (evaluation.isEmpty()) return emptyMap()
+        val bondYield = runCatching { bondYieldRepository.fetch10YBondYield(forceRefresh) }
+            .getOrDefault(BondYieldRepository.DEFAULT_YIELD)
+        val semaphore = Semaphore(3)
+        val forecasts = _uiState.value.stockForecasts
+        val multipliers = lastAllStocksSnapshot.associate { it.code to it.buyThresholdMultiplier }
+        return coroutineScope {
+            evaluation.map { stock ->
+                async {
+                    semaphore.withPermit {
+                        val fundamentals = runCatching {
+                            fundamentalsCacheRepository.getFundamentals(stock.code, forceRefresh)
+                        }.getOrNull()
+                        val forecast = forecasts[stock.code]?.llmForecast
+                        val multiplier = multipliers[stock.code] ?: StockEntity.DEFAULT_BUY_THRESHOLD_MULTIPLIER
+                        val latestDps = forecasts[stock.code]?.latestYearlyDividend
+                        val buyThreshold = computeBuyThreshold(
+                            bondYield10Y = bondYield,
+                            multiplier = multiplier,
+                            latestYearlyCashPerShare = latestDps,
+                            currentPrice = stock.currentPrice
+                        ).takeIf { it.targetYieldPercent > 0.0 }?.let {
+                            StockLlmInput.StockLlmBuyThreshold(
+                                targetYieldPercent = it.targetYieldPercent,
+                                currentYieldPercent = it.currentYieldPercent,
+                                reached = it.reached
+                            )
+                        }
+                        stock.code to PortfolioLlmStockDetail(
+                            fundamentals = fundamentals,
+                            forecast = forecast,
+                            buyThreshold = buyThreshold
+                        )
+                    }
+                }
+            }.awaitAll().toMap()
         }
     }
 

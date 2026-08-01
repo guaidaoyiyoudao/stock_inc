@@ -6,25 +6,21 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.remote.LlmApi
-import com.stock.dividend.data.remote.dto.LlmChatRequest
-import com.stock.dividend.data.remote.dto.LlmMessage
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.BuyThresholdStatus
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.Fundamentals
+import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.LlmAnalysisRepository
+import com.stock.dividend.data.repository.StockLlmAnalysisResult
+import com.stock.dividend.data.repository.StockLlmAnalysisState
+import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.TradeStrategyRepository
 import com.stock.dividend.data.repository.enrichPayoutRatio
 import com.stock.dividend.data.repository.toUserStrategyRef
-import com.stock.dividend.data.repository.LlmConfig
-import com.stock.dividend.data.repository.LlmConfigSource
-import com.stock.dividend.data.repository.StockLlmAnalysisParser
-import com.stock.dividend.data.repository.StockLlmAnalysisState
-import com.stock.dividend.data.repository.StockLlmInput
-import com.stock.dividend.data.repository.StockLlmPromptBuilder
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.computeBuyThreshold
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,10 +31,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import retrofit2.HttpException
 import javax.inject.Inject
 
 @Stable
@@ -79,8 +73,8 @@ class StockDetailViewModel @Inject constructor(
     private val stockRepository: StockRepository,
     private val dividendRepository: DividendRepository,
     private val bondYieldRepository: BondYieldRepository,
-    private val llmApi: LlmApi,
-    private val llmConfigSource: LlmConfigSource,
+    private val llmAnalysisRepository: LlmAnalysisRepository,
+    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
     private val tradeStrategyRepository: TradeStrategyRepository
 ) : ViewModel() {
 
@@ -152,11 +146,11 @@ class StockDetailViewModel @Inject constructor(
         loadFundamentals()
     }
 
-    /** 拉取单股基本面并补全派息率；失败降级为 null（红线 #2）。成功/失败均复位 fundamentalsLoading（红线 #3）。 */
+    /** 拉取单股基本面（走缓存仓库，非 forceRefresh）并补全派息率；失败降级为 null（红线 #2）。成功/失败均复位 fundamentalsLoading（红线 #3）。 */
     private fun loadFundamentals() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(fundamentalsLoading = true)
-            val result = runCatching { stockRepository.fetchFundamentals(stockCode) }.getOrNull()
+            val result = runCatching { fundamentalsCacheRepository.getFundamentals(stockCode) }.getOrNull()
             rawFundamentals = result
             recomputeFundamentals()
             _uiState.value = _uiState.value.copy(fundamentalsLoading = false)
@@ -176,9 +170,17 @@ class StockDetailViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(fundamentals = enriched)
     }
 
-    /** 手动刷新基本面（卡片「更新」入口调用）。 */
+    /** 手动刷新基本面（卡片「更新」入口调用，forceRefresh 绕过 7 天缓存）。 */
     fun refreshFundamentals() {
-        loadFundamentals()
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(fundamentalsLoading = true)
+            val result = runCatching {
+                fundamentalsCacheRepository.getFundamentals(stockCode, forceRefresh = true)
+            }.getOrNull()
+            rawFundamentals = result
+            recomputeFundamentals()
+            _uiState.value = _uiState.value.copy(fundamentalsLoading = false)
+        }
     }
 
     /**
@@ -278,10 +280,11 @@ class StockDetailViewModel @Inject constructor(
     }
 
     /**
-     * 触发个股 AI 解读：并发拉日/周/月 BOLL + 现价，组装 [StockLlmInput]，调用已配置的 LLM。
-     * 失败的周期/现价降级为 null（"—"），不阻塞分析。配置缺失返回 NotConfigured。
+     * 触发个股 AI 解读：并发拉日/周/月 BOLL + 现价，组装 [StockLlmInput]，
+     * 委托 [LlmAnalysisRepository.analyzeStock]（内部处理配置/缓存/错误）。
+     * 失败的周期/现价降级为 null（"—"），不阻塞分析。重新分析传 forceRefresh=true。
      */
-    fun analyzeWithLlm() {
+    fun analyzeWithLlm(forceRefresh: Boolean = false) {
         val state = _uiState.value
         val stock = state.stock ?: return
         if (state.dividends.isEmpty()) return
@@ -289,12 +292,6 @@ class StockDetailViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(llmAnalysis = StockLlmAnalysisState.Loading)
-
-            val config = llmConfigSource.observeConfig().first()
-            if (!config.isComplete) {
-                _uiState.value = _uiState.value.copy(llmAnalysis = StockLlmAnalysisState.NotConfigured)
-                return@launch
-            }
 
             // 并发拉三周期 BOLL（单股仅 3 请求，无需 Semaphore 限流）；失败降级 null
             val (dailyBand, weeklyBand, monthlyBand) = listOf(
@@ -313,29 +310,16 @@ class StockDetailViewModel @Inject constructor(
             val userStrategies = runCatching {
                 tradeStrategyRepository.activeStrategies().map { toUserStrategyRef(it) }
             }.getOrDefault(emptyList())
-            val prompt = StockLlmPromptBuilder.build(input, userStrategies)
-            val url = config.baseUrl.trimEnd('/') + "/chat/completions"
-            val request = LlmChatRequest(
-                model = config.model,
-                messages = listOf(
-                    LlmMessage("system", prompt.system),
-                    LlmMessage("user", prompt.user)
-                )
-            )
 
-            val result = try {
-                val content = llmApi.chatCompletions(url, "Bearer ${config.apiKey}", request).content
-                if (content.isNullOrBlank()) {
-                    StockLlmAnalysisState.Error("LLM 返回为空")
-                } else {
-                    StockLlmAnalysisState.Success(StockLlmAnalysisParser.parse(content))
-                }
-            } catch (e: HttpException) {
-                StockLlmAnalysisState.Error(mapLlmHttpError(e.code()))
-            } catch (_: Exception) {
-                StockLlmAnalysisState.Error("网络错误，请重试")
+            val result = llmAnalysisRepository.analyzeStock(input, userStrategies, forceRefresh)
+            val uiState = when (result) {
+                is StockLlmAnalysisResult.Success -> StockLlmAnalysisState.Success(
+                    result.analysis, result.analyzedAt, result.fromCache, result.notice
+                )
+                StockLlmAnalysisResult.NotConfigured -> StockLlmAnalysisState.NotConfigured
+                is StockLlmAnalysisResult.Error -> StockLlmAnalysisState.Error(result.message)
             }
-            _uiState.value = _uiState.value.copy(llmAnalysis = result)
+            _uiState.value = _uiState.value.copy(llmAnalysis = uiState)
         }
     }
 
@@ -404,9 +388,4 @@ class StockDetailViewModel @Inject constructor(
         return ((price - band.lower) / (band.upper - band.lower) * 100).toInt().coerceIn(0, 100)
     }
 
-    private fun mapLlmHttpError(code: Int): String = when (code) {
-        401, 403 -> "API key 无效"
-        429 -> "请求过频，稍后重试"
-        else -> "分析失败，请重试"
-    }
 }

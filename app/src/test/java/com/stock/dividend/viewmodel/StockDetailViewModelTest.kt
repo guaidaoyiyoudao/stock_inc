@@ -4,17 +4,16 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.remote.LlmApi
-import com.stock.dividend.data.remote.dto.LlmChatRequest
-import com.stock.dividend.data.remote.dto.LlmChatResponse
-import com.stock.dividend.data.remote.dto.LlmMessage
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.Fundamentals
+import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.KlinePeriod
-import com.stock.dividend.data.repository.LlmConfig
-import com.stock.dividend.data.repository.LlmConfigSource
+import com.stock.dividend.data.repository.LlmAnalysisRepository
+import com.stock.dividend.data.repository.StockLlmAnalysis
+import com.stock.dividend.data.repository.StockLlmAnalysisResult
 import com.stock.dividend.data.repository.StockLlmAnalysisState
+import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TradeStrategyRepository
 import io.mockk.coEvery
@@ -22,12 +21,9 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -36,8 +32,6 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
-import retrofit2.HttpException
-import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class StockDetailViewModelTest {
@@ -46,8 +40,14 @@ class StockDetailViewModelTest {
     private val stockRepository: StockRepository = mockk()
     private val dividendDao: DividendDao = mockk()
     private val bondYieldRepository: BondYieldRepository = mockk()
-    private val llmApi: LlmApi = mockk()
-    private val llmConfigSource: LlmConfigSource = mockk()
+    private val llmAnalysisRepository: LlmAnalysisRepository = mockk {
+        coEvery { analyzeStock(any(), any(), any()) } returns StockLlmAnalysisResult.Success(
+            StockLlmAnalysis("", "", "", emptyList())
+        )
+    }
+    private val fundamentalsCacheRepository: FundamentalsCacheRepository = mockk {
+        coEvery { getFundamentals(any(), any()) } returns null
+    }
     private val tradeStrategyRepository: TradeStrategyRepository = mockk {
         coEvery { activeStrategies() } returns emptyList()
     }
@@ -64,10 +64,6 @@ class StockDetailViewModelTest {
         coEvery { bondYieldRepository.fetch10YBondYield(any()) } returns BondYieldRepository.DEFAULT_YIELD
         coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
         coEvery { stockRepository.fetchBoll(any(), any()) } returns null
-        // 默认未配置 LLM，现有用例不受影响
-        every { llmConfigSource.observeConfig() } returns flowOf(LlmConfig("", "", ""))
-        // 默认基本面拉取返回 null（runCatching 兜底，现有用例不依赖基本面）
-        coEvery { stockRepository.fetchFundamentals(any()) } returns null
     }
 
     @After
@@ -89,8 +85,8 @@ class StockDetailViewModelTest {
             stockRepository = stockRepository,
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
-            llmApi = llmApi,
-            llmConfigSource = llmConfigSource,
+            llmAnalysisRepository = llmAnalysisRepository,
+            fundamentalsCacheRepository = fundamentalsCacheRepository,
         tradeStrategyRepository = tradeStrategyRepository
         )
 
@@ -107,8 +103,8 @@ class StockDetailViewModelTest {
             stockRepository = stockRepository,
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
-            llmApi = llmApi,
-            llmConfigSource = llmConfigSource,
+            llmAnalysisRepository = llmAnalysisRepository,
+            fundamentalsCacheRepository = fundamentalsCacheRepository,
         tradeStrategyRepository = tradeStrategyRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
@@ -137,8 +133,8 @@ class StockDetailViewModelTest {
             stockRepository = stockRepository,
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
-            llmApi = llmApi,
-            llmConfigSource = llmConfigSource,
+            llmAnalysisRepository = llmAnalysisRepository,
+            fundamentalsCacheRepository = fundamentalsCacheRepository,
         tradeStrategyRepository = tradeStrategyRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
@@ -157,8 +153,8 @@ class StockDetailViewModelTest {
             stockRepository = stockRepository,
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
-            llmApi = llmApi,
-            llmConfigSource = llmConfigSource,
+            llmAnalysisRepository = llmAnalysisRepository,
+            fundamentalsCacheRepository = fundamentalsCacheRepository,
         tradeStrategyRepository = tradeStrategyRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
@@ -173,8 +169,8 @@ class StockDetailViewModelTest {
             stockRepository = stockRepository,
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
-            llmApi = llmApi,
-            llmConfigSource = llmConfigSource,
+            llmAnalysisRepository = llmAnalysisRepository,
+            fundamentalsCacheRepository = fundamentalsCacheRepository,
         tradeStrategyRepository = tradeStrategyRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
@@ -190,8 +186,8 @@ class StockDetailViewModelTest {
             stockRepository = stockRepository,
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
-            llmApi = llmApi,
-            llmConfigSource = llmConfigSource,
+            llmAnalysisRepository = llmAnalysisRepository,
+            fundamentalsCacheRepository = fundamentalsCacheRepository,
         tradeStrategyRepository = tradeStrategyRepository
         )
 
@@ -209,8 +205,8 @@ class StockDetailViewModelTest {
             stockRepository = stockRepository,
             dividendRepository = repo,
             bondYieldRepository = bondYieldRepository,
-            llmApi = llmApi,
-            llmConfigSource = llmConfigSource,
+            llmAnalysisRepository = llmAnalysisRepository,
+            fundamentalsCacheRepository = fundamentalsCacheRepository,
         tradeStrategyRepository = tradeStrategyRepository
         )
     }
@@ -393,7 +389,7 @@ class StockDetailViewModelTest {
     }
 
     // endregion 原有用例
-    // region 个股 AI 解读（analyzeWithLlm）
+    // region 个股 AI 解读（analyzeWithLlm → LlmAnalysisRepository.analyzeStock）
 
     /** 与 [createViewModel] 类似，但同时填充 stockFlow，使 uiState.stock 非空（AI 解读的前置条件）。 */
     private fun createViewModelWithStock(
@@ -404,8 +400,8 @@ class StockDetailViewModelTest {
     }
 
     @Test
-    fun `analyzeWithLlm returns NotConfigured when config incomplete`() = runTest {
-        every { llmConfigSource.observeConfig() } returns flowOf(LlmConfig("", "", ""))
+    fun `analyzeWithLlm returns NotConfigured when repository reports it`() = runTest {
+        coEvery { llmAnalysisRepository.analyzeStock(any(), any(), any()) } returns StockLlmAnalysisResult.NotConfigured
         val viewModel = createViewModelWithStock()
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -416,13 +412,11 @@ class StockDetailViewModelTest {
     }
 
     @Test
-    fun `analyzeWithLlm maps success to Success state`() = runTest {
-        every { llmConfigSource.observeConfig() } returns
-            flowOf(LlmConfig("https://api.x.com/v1/", "key", "m"))
-        coEvery {
-            llmApi.chatCompletions(any(), any(), any())
-        } returns LlmChatResponse(
-            listOf(LlmChatResponse.Choice(LlmMessage("assistant", """{"valuation":"偏低","dividendSustainability":"稳","action":"可关注","risks":["波动"]}""")))
+    fun `analyzeWithLlm maps success to Success state with cache metadata`() = runTest {
+        coEvery { llmAnalysisRepository.analyzeStock(any(), any(), any()) } returns StockLlmAnalysisResult.Success(
+            StockLlmAnalysis("偏低", "稳", "可关注", listOf("波动")),
+            analyzedAt = 123L,
+            fromCache = true
         )
 
         val viewModel = createViewModelWithStock()
@@ -433,33 +427,22 @@ class StockDetailViewModelTest {
 
         val state = viewModel.uiState.value.llmAnalysis
         assertThat(state).isInstanceOf(StockLlmAnalysisState.Success::class.java)
-        val analysis = (state as StockLlmAnalysisState.Success).analysis
-        assertThat(analysis.valuation).isEqualTo("偏低")
-        assertThat(analysis.action).isEqualTo("可关注")
-        assertThat(analysis.risks).containsExactly("波动")
-
-        coVerify {
-            llmApi.chatCompletions(
-                "https://api.x.com/v1/chat/completions",
-                "Bearer key",
-                any<LlmChatRequest>()
-            )
-        }
+        val success = state as StockLlmAnalysisState.Success
+        assertThat(success.analysis.valuation).isEqualTo("偏低")
+        assertThat(success.analysis.action).isEqualTo("可关注")
+        assertThat(success.analysis.risks).containsExactly("波动")
+        assertThat(success.analyzedAt).isEqualTo(123L)
+        assertThat(success.fromCache).isTrue()
     }
 
     @Test
-    fun `analyzeWithLlm fetches three-period boll and passes positions to prompt`() = runTest {
-        every { llmConfigSource.observeConfig() } returns
-            flowOf(LlmConfig("https://api.x.com/v1/", "key", "m"))
+    fun `analyzeWithLlm fetches three-period boll before delegating`() = runTest {
         coEvery { stockRepository.fetchBoll("sz.000001", KlinePeriod.DAILY) } returns
             com.stock.dividend.data.repository.BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
         coEvery { stockRepository.fetchBoll("sz.000001", KlinePeriod.WEEKLY) } returns
             com.stock.dividend.data.repository.BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
         coEvery { stockRepository.fetchBoll("sz.000001", KlinePeriod.MONTHLY) } returns
             com.stock.dividend.data.repository.BollBand(middle = 12.0, upper = 14.0, lower = 10.0)
-        coEvery {
-            llmApi.chatCompletions(any(), any(), any())
-        } returns LlmChatResponse(listOf(LlmChatResponse.Choice(LlmMessage("assistant", """{"valuation":"ok"}"""))))
 
         val viewModel = createViewModelWithStock()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -471,15 +454,13 @@ class StockDetailViewModelTest {
         coVerify { stockRepository.fetchBoll("sz.000001", KlinePeriod.DAILY) }
         coVerify { stockRepository.fetchBoll("sz.000001", KlinePeriod.WEEKLY) }
         coVerify { stockRepository.fetchBoll("sz.000001", KlinePeriod.MONTHLY) }
+        coVerify { llmAnalysisRepository.analyzeStock(any(), any(), false) }
     }
 
     @Test
-    fun `analyzeWithLlm maps http 401 to api key invalid error`() = runTest {
-        every { llmConfigSource.observeConfig() } returns
-            flowOf(LlmConfig("https://api.x.com/v1/", "key", "m"))
-        coEvery {
-            llmApi.chatCompletions(any(), any(), any())
-        } throws httpException(401)
+    fun `analyzeWithLlm maps repository error to Error state`() = runTest {
+        coEvery { llmAnalysisRepository.analyzeStock(any(), any(), any()) } returns
+            StockLlmAnalysisResult.Error("API key 无效")
 
         val viewModel = createViewModelWithStock()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -494,12 +475,6 @@ class StockDetailViewModelTest {
 
     @Test
     fun `clearLlmAnalysis resets state to Idle`() = runTest {
-        every { llmConfigSource.observeConfig() } returns
-            flowOf(LlmConfig("https://api.x.com/v1/", "key", "m"))
-        coEvery {
-            llmApi.chatCompletions(any(), any(), any())
-        } returns LlmChatResponse(listOf(LlmChatResponse.Choice(LlmMessage("assistant", """{"valuation":"x"}"""))))
-
         val viewModel = createViewModelWithStock()
         testDispatcher.scheduler.advanceUntilIdle()
         viewModel.analyzeWithLlm()
@@ -512,29 +487,20 @@ class StockDetailViewModelTest {
     }
 
     @Test
-    fun `analyzeWithLlm early returns without calling api when no dividends`() = runTest {
-        every { llmConfigSource.observeConfig() } returns
-            flowOf(LlmConfig("https://api.x.com/v1/", "key", "m"))
+    fun `analyzeWithLlm early returns without delegating when no dividends`() = runTest {
         val viewModel = createViewModelWithStock(dividends = emptyList())
         testDispatcher.scheduler.advanceUntilIdle()
 
         viewModel.analyzeWithLlm()
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // 无分红 → 早返回，未进入 Loading/调用 api，状态保持 Idle
         assertThat(viewModel.uiState.value.llmAnalysis).isEqualTo(StockLlmAnalysisState.Idle)
-        coVerify(exactly = 0) { llmApi.chatCompletions(any(), any(), any()) }
+        coVerify(exactly = 0) { llmAnalysisRepository.analyzeStock(any(), any(), any()) }
     }
 
     @Test
     fun `analyzeWithLlm degrades missing boll periods without blocking`() = runTest {
-        every { llmConfigSource.observeConfig() } returns
-            flowOf(LlmConfig("https://api.x.com/v1/", "key", "m"))
-        // 三周期全失败（setUp 默认 fetchBoll 返回 null）
-        coEvery {
-            llmApi.chatCompletions(any(), any(), any())
-        } returns LlmChatResponse(listOf(LlmChatResponse.Choice(LlmMessage("assistant", """{"valuation":"ok"}"""))))
-
+        // 三周期全失败（setUp 默认 fetchBoll 返回 null）；repository 默认返回 Success
         val viewModel = createViewModelWithStock()
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -544,20 +510,28 @@ class StockDetailViewModelTest {
         assertThat(viewModel.uiState.value.llmAnalysis).isInstanceOf(StockLlmAnalysisState.Success::class.java)
         assertThat(
             (viewModel.uiState.value.llmAnalysis as StockLlmAnalysisState.Success).analysis.valuation
-        ).isEqualTo("ok")
+        ).isEqualTo("")
     }
 
-    private fun httpException(code: Int): HttpException =
-        HttpException(Response.error<Any>(code, "".toResponseBody("application/json".toMediaTypeOrNull())))
+    @Test
+    fun `analyzeWithLlm passes forceRefresh to repository`() = runTest {
+        val viewModel = createViewModelWithStock()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.analyzeWithLlm(forceRefresh = true)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify { llmAnalysisRepository.analyzeStock(any(), any(), true) }
+    }
 
     // endregion
 
-    // region 基本面加载与派息率补全
+    // region 基本面加载与派息率补全（经 FundamentalsCacheRepository）
 
     @Test
     fun `fundamentals load and payout ratio enriched from dividends`() = runTest {
-        // 原始基本面（payoutRatio=null，basicEps=1.20）
-        coEvery { stockRepository.fetchFundamentals("sz.000001") } returns Fundamentals(
+        // 原始基本面（payoutRatio=null，basicEps=1.20）——经缓存仓库返回
+        coEvery { fundamentalsCacheRepository.getFundamentals("sz.000001", false) } returns Fundamentals(
             periods = listOf(
                 Fundamentals.Period("2024-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = 1.20, payoutRatio = null)
             )
@@ -581,8 +555,8 @@ class StockDetailViewModelTest {
     }
 
     @Test
-    fun `fundamentals degrade to null when repository throws and loading flag resets`() = runTest {
-        coEvery { stockRepository.fetchFundamentals("sz.000001") } throws RuntimeException("network")
+    fun `fundamentals degrade to null when cache repository throws and loading flag resets`() = runTest {
+        coEvery { fundamentalsCacheRepository.getFundamentals(any(), any()) } throws RuntimeException("network")
 
         val viewModel = createViewModelWithStock()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -593,23 +567,24 @@ class StockDetailViewModelTest {
     }
 
     @Test
-    fun `refreshFundamentals reloads fundamentals`() = runTest {
-        coEvery { stockRepository.fetchFundamentals("sz.000001") } returns Fundamentals(
+    fun `refreshFundamentals forces refresh through cache repository`() = runTest {
+        coEvery { fundamentalsCacheRepository.getFundamentals("sz.000001", false) } returns Fundamentals(
             periods = listOf(Fundamentals.Period("2024-12-31", 12.0, 60.0, 8.0, 5.0, basicEps = 1.0, payoutRatio = null))
+        )
+        coEvery { fundamentalsCacheRepository.getFundamentals("sz.000001", true) } returns Fundamentals(
+            periods = listOf(Fundamentals.Period("2025-03-31", 11.0, 61.0, 6.0, 4.0, basicEps = 1.0, payoutRatio = null))
         )
 
         val viewModel = createViewModelWithStock()
         testDispatcher.scheduler.advanceUntilIdle()
         val before = viewModel.uiState.value.fundamentals
 
-        coEvery { stockRepository.fetchFundamentals("sz.000001") } returns Fundamentals(
-            periods = listOf(Fundamentals.Period("2025-03-31", 11.0, 61.0, 6.0, 4.0, basicEps = 1.0, payoutRatio = null))
-        )
         viewModel.refreshFundamentals()
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.fundamentals).isNotEqualTo(before)
         assertThat(viewModel.uiState.value.fundamentals!!.periods[0].reportDate).isEqualTo("2025-03-31")
+        coVerify { fundamentalsCacheRepository.getFundamentals("sz.000001", true) }
     }
 
     // endregion
@@ -618,10 +593,9 @@ class StockDetailViewModelTest {
 
     @Test
     fun `latest dividend yield sums multiple dividends in the same year for prompt`() = runTest {
-        every { llmConfigSource.observeConfig() } returns
-            flowOf(LlmConfig("https://api.x.com/v1/", "key", "m"))
-        coEvery { llmApi.chatCompletions(any(), any(), any()) } returns
-            LlmChatResponse(listOf(LlmChatResponse.Choice(LlmMessage("assistant", """{"valuation":"ok"}"""))))
+        val inputSlot = slot<StockLlmInput>()
+        coEvery { llmAnalysisRepository.analyzeStock(capture(inputSlot), any(), any()) } returns
+            StockLlmAnalysisResult.Success(StockLlmAnalysis("ok", "", "", emptyList()))
 
         // 同一年（2024）两笔分红：2.0% + 3.0% = 5.0%（累计股息率）
         val dividends = listOf(
@@ -638,16 +612,11 @@ class StockDetailViewModelTest {
         val viewModel = createViewModelWithStock(dividends = dividends)
         testDispatcher.scheduler.advanceUntilIdle()
 
-        val requestSlot = slot<LlmChatRequest>()
-        coEvery { llmApi.chatCompletions(any(), any(), capture(requestSlot)) } returns
-            LlmChatResponse(listOf(LlmChatResponse.Choice(LlmMessage("assistant", """{"valuation":"ok"}"""))))
-
         viewModel.analyzeWithLlm()
         testDispatcher.scheduler.advanceUntilIdle()
 
-        // 喂给 LLM 的 user prompt 应为当年累计 5.0%，而非单笔 2.0% 或 3.0%
-        val userPrompt = requestSlot.captured.messages[1].content
-        assertThat(userPrompt).contains("【最新股息率】5.0%")
+        // 喂给仓库的输入快照应为当年累计 5.0%，而非单笔 2.0% 或 3.0%
+        assertThat(inputSlot.captured.latestDividendYield).isEqualTo(5.0)
     }
 
     // endregion
