@@ -15,6 +15,7 @@ import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.StockTagDao
+import com.stock.dividend.data.local.dao.TradeStrategyDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
@@ -27,6 +28,7 @@ import com.stock.dividend.data.local.entity.PriceCacheEntity
 import com.stock.dividend.data.local.entity.SearchCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.StockTagEntity
+import com.stock.dividend.data.local.entity.TradeStrategyEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 
 @Database(
@@ -42,9 +44,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         IndustryTargetEntity::class,
         PriceCacheEntity::class,
         SearchCacheEntity::class,
-        StockTagEntity::class
+        StockTagEntity::class,
+        TradeStrategyEntity::class
     ],
-    version = 14,
+    version = 16,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -60,6 +63,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun priceCacheDao(): PriceCacheDao
     abstract fun searchCacheDao(): SearchCacheDao
     abstract fun stockTagDao(): StockTagDao
+    abstract fun tradeStrategyDao(): TradeStrategyDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -248,6 +252,35 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_stock_tags_tag` " +
                             "ON `stock_tags`(`tag`)"
+                )
+            }
+        }
+
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 买入阈值倍数：股息率达到「10Y 国债 × 该倍数」时提示买入
+                db.execSQL(
+                    "ALTER TABLE stocks ADD COLUMN buyThresholdMultiplier REAL NOT NULL DEFAULT 2.5"
+                )
+            }
+        }
+
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 截图策略分析产出的全局买卖策略（不绑定个股，无 stockCode）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `trade_strategies` (" +
+                        "`id` TEXT NOT NULL PRIMARY KEY, " +
+                        "`targetText` TEXT NOT NULL, " +
+                        "`direction` TEXT NOT NULL, " +
+                        "`reasoning` TEXT NOT NULL, " +
+                        "`risks` TEXT NOT NULL, " +
+                        "`validUntil` TEXT, " +
+                        "`sourceNote` TEXT, " +
+                        "`rawOcrText` TEXT NOT NULL, " +
+                        "`status` TEXT NOT NULL DEFAULT 'ACTIVE', " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL)"
                 )
             }
         }
