@@ -123,8 +123,17 @@ docs/superpowers/                 # 设计文档（design + plan，superpowers �
 
 ### 4.5 UI / Compose 约定
 
-- 设计系统集中在 `ui/component/DesignSystem.kt`：`AppCardDefaults`（统一 padding/spacing）、`SectionHeader`、`FinanceMetric`、`StatusPill`（`FinanceStatusTone` 四态色）。**新组件优先复用这些**。
-- 财务正负色：`FinanceGreen` / `FinanceRed`（`ui/theme/Color.kt`）。
+> **完整设计系统文档见 [`DESIGN.md`](DESIGN.md)**（双主题/Inter 字体/核心组件/格式化器/迁移指南）。动 UI 前必读。
+
+- 设计系统双层：
+  - **新组件层**（`ui/component/AppComponents.kt`）：`AppCard`（三态）/ `AmountText`（金融专用，tnum+正负色）/ `PercentText` / `AppButton` / `FinanceMetricRow` —— **新代码优先用这些**。
+  - **历史组件层**（`ui/component/DesignSystem.kt`）：`AppCardDefaults` / `SectionHeader` / `FinanceMetric` / `StatusPill`，保留兼容。
+- **财务正负色走 `LocalExtendedColors.current.positive/negative`**（`ui/theme/Gradient.kt`），跟随深浅色；旧的裸 `FinanceGreen`/`FinanceRed` 常量仅历史代码兼容，**新代码不要 import**。
+- **金额/百分比一律用 `MoneyFormatter` / `PercentFormatter`**（`data/repository/Formatters.kt`，纯函数 + 单测），禁止再写私有 `formatXxx`。
+- **等宽数字**：金额/百分比展示加 `tabularNumberStyle`（`ui/theme/Type.kt`），或直接用 `AmountText`/`PercentText`（已内置）。
+- **圆角走 `MaterialTheme.shapes`**（`Shape.kt`：6/10/14/20/28dp），禁止硬编码 `RoundedCornerShape(N.dp)`。
+- 双主题：`StockDividendTheme` 跟随系统深浅色（亮色温润近白，暗色带蓝调近黑）。
+- 字体：Inter 可变字体（`res/font/inter.ttf`，已子集化 latin+tnum）。
 - 所有面向用户的文本**必须中文**（宪法 Design Standards）。
 - 空状态用 `EmptyStateView`，汇总数据置顶，列表用 Card 区分，刷新用下拉刷新，新增入口用 FAB。
 
@@ -229,7 +238,7 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 | 加一张数据表 | `data/local/AppDatabase.kt`（Migration）+ `dao/` + `entity/` + `di/DatabaseModule.kt` |
 | 加一个网络接口 | `data/remote/*Api.kt` + `dto/` + `di/NetworkModule.kt` |
 | 加一个页面 | `ui/screen/XxxScreen.kt` + `viewmodel/XxxViewModel.kt` + 注册到 `AppNavigation.kt` |
-| 复用 UI 样式 | `ui/component/DesignSystem.kt` + `ui/theme/` |
+| 复用 UI 样式 | [`DESIGN.md`](DESIGN.md) + `ui/component/AppComponents.kt`（新组件）/ `DesignSystem.kt`（历史）+ `ui/theme/` |
 | 通知/后台 | `data/notification/` + `StockDividendApp.kt`（WorkManager） |
 
 ---
@@ -237,3 +246,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 ## 10. 变更记录
 
 - 2026-07-29：重写本文件，从自动生成的稀薄摘要升级为面向 AI agent 的完整开发指南（技术栈/架构/约定/命令/测试/红线/速查）；移除 spec-kit 工作流章节及所有相关引用。
+- 2026-08-01：新增 `DESIGN.md` 设计系统文档（双主题/Inter 字体/核心组件/格式化器）；§4.5 改为引用该文档；落地基建：`AppComponents.kt`（AppCard/AmountText/PercentText 等）+ `Formatters.kt`（MoneyFormatter/PercentFormatter + 26 单测）+ `Gradient.kt`（CompositionLocal 扩展主题）+ 双主题（亮/暗）+ Inter 可变字体（子集化 210KB，含 tnum）。
