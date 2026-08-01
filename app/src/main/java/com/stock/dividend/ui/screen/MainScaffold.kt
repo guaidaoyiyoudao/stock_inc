@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -43,7 +42,6 @@ internal val bottomNavItems = listOf(
     BottomNavItem("portfolio", "持仓", Icons.Filled.AccountBalance),
     BottomNavItem("income", "股息收入", Icons.AutoMirrored.Filled.TrendingUp),
     BottomNavItem("ai", "AI", Icons.Filled.SmartToy),
-    BottomNavItem("calendar", "日历", Icons.Filled.DateRange),
     BottomNavItem("achievements", "成就", Icons.Filled.EmojiEvents),
     BottomNavItem("settings", "设置", Icons.Filled.Settings)
 )
@@ -174,9 +172,6 @@ fun MainScaffold(
                         }
                     }
                 )
-            }
-            composable("calendar") {
-                DividendCalendarScreen()
             }
             composable("achievements") {
                 AchievementScreen()

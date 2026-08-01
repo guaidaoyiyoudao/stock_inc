@@ -28,7 +28,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -71,18 +70,18 @@ fun DividendCalendarScreen(
         isRefreshing = state.isRefreshing
     )
 
-    Scaffold { padding ->
-        DividendCalendarContent(
-            state = state,
-            onFilterChanged = viewModel::onFilterChanged,
-            onPreviousMonth = viewModel::showPreviousMonth,
-            onNextMonth = viewModel::showNextMonth,
-            onDateSelected = viewModel::onDateSelected,
-            onVisibleMonthChanged = viewModel::onVisibleMonthChanged,
-            onGoToToday = viewModel::goToToday,
-            modifier = Modifier.padding(padding)
-        )
-    }
+    // 嵌入「股息收入」二级 Tab 后，外层 MainScaffold 已提供 content padding，
+    // 这里直接渲染内容，避免嵌套 Scaffold 造成顶部 inset 重复叠加。
+    DividendCalendarContent(
+        state = state,
+        onFilterChanged = viewModel::onFilterChanged,
+        onPreviousMonth = viewModel::showPreviousMonth,
+        onNextMonth = viewModel::showNextMonth,
+        onDateSelected = viewModel::onDateSelected,
+        onVisibleMonthChanged = viewModel::onVisibleMonthChanged,
+        onGoToToday = viewModel::goToToday,
+        modifier = Modifier.fillMaxSize()
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

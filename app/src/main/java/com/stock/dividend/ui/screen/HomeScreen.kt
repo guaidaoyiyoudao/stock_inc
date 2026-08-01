@@ -18,10 +18,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,12 +59,33 @@ fun IncomeScreen(
     var showCorrectDialog by remember { mutableStateOf(false) }
     var correctAmount by remember { mutableStateOf("") }
     var correctNote by remember { mutableStateOf("") }
+    // 二级 Tab：0 = 收入记录，1 = 分红日历（原「日历」tab 合并至此）
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val incomeTabs = listOf("收入", "日历")
 
-    IncomeTabContent(
-        state = state,
-        viewModel = viewModel,
-        onAddIncomeClick = { showAddIncomeDialog = true }
-    )
+    Column(modifier = Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = selectedTab) {
+            incomeTabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = selectedTab == index,
+                    onClick = { selectedTab = index },
+                    text = { Text(title) }
+                )
+            }
+        }
+
+        if (selectedTab == 0) {
+            IncomeTabContent(
+                state = state,
+                viewModel = viewModel,
+                onAddIncomeClick = { showAddIncomeDialog = true }
+            )
+        } else {
+            // 原独立「日历」tab 内容；其内部的 registerTabRefresh 会在该视图激活时
+            // 自动让悬浮刷新按钮显示。
+            DividendCalendarScreen()
+        }
+    }
 
     if (showAddIncomeDialog) {
             AddIncomeDialog(
