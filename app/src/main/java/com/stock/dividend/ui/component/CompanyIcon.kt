@@ -21,7 +21,6 @@ import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
-import coil3.svg.SvgDecoder
 
 private val logoUrlByCode = mapOf(
     "BABA" to "https://svglogo.top/library/alibaba.svg",
@@ -62,7 +61,6 @@ fun CompanyIcon(
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(logoUrl)
-                    .decoderFactory(SvgDecoder.Factory())
                     .memoryCacheKey("company-logo-$normalizedCode")
                     .diskCacheKey("company-logo-$normalizedCode")
                     .memoryCachePolicy(CachePolicy.ENABLED)

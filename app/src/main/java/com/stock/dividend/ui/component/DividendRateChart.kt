@@ -31,17 +31,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.components.LimitLine
 import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.formatter.ValueFormatter
+import com.stock.dividend.data.repository.BuyThresholdStatus
 import com.stock.dividend.viewmodel.DividendRatePoint
 
 @Composable
 fun DividendRateChart(
     points: List<DividendRatePoint>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    buyThreshold: BuyThresholdStatus? = null
 ) {
     if (points.size < 2) return
 
@@ -54,6 +57,9 @@ fun DividendRateChart(
     val grid = MaterialTheme.colorScheme.outlineVariant.toArgb()
     val fill = MaterialTheme.colorScheme.primaryContainer.toArgb()
     val surface = MaterialTheme.colorScheme.surface.toArgb()
+    // 买入阈值线颜色：达标用 success(tertiary 容器) 强调，否则用 outline 弱化
+    val thresholdColor = MaterialTheme.colorScheme.tertiary.toArgb()
+    val reachedColor = MaterialTheme.colorScheme.primary.toArgb()
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -96,6 +102,8 @@ fun DividendRateChart(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+
+            buyThreshold?.let { BuyThresholdPrompt(it) }
 
             AndroidView(
                 modifier = Modifier
@@ -147,6 +155,21 @@ fun DividendRateChart(
                     chart.data = LineData(createDividendRateDataSet(points, primary, fill))
                     chart.data.setValueTextColor(onSurface)
                     chart.data.setValueTextSize(10f)
+                    // 买入阈值线：国债收益率 × 倍数
+                    chart.axisLeft.removeAllLimitLines()
+                    val target = buyThreshold?.takeIf { it.targetYieldPercent > 0f }?.targetYieldPercent
+                    if (target != null) {
+                        val lineColor = if (buyThreshold?.reached == true) reachedColor else thresholdColor
+                        val limitLine = LimitLine(target.toFloat(), "买入线 ${formatPercent(target)}").apply {
+                            enableDashedLine(12f, 8f, 0f)
+                            labelPosition = LimitLine.LimitLabelPosition.RIGHT_TOP
+                        }
+                        limitLine.lineColor = lineColor
+                        limitLine.lineWidth = 1.4f
+                        limitLine.textColor = lineColor
+                        limitLine.textSize = 10f
+                        chart.axisLeft.addLimitLine(limitLine)
+                    }
                     chart.setVisibleXRangeMaximum(CHART_VISIBLE_YEAR_COUNT)
                     chart.setVisibleXRangeMinimum(2f)
                     if (points.size > CHART_VISIBLE_YEAR_COUNT) {
@@ -312,3 +335,55 @@ private class PercentValueFormatter : ValueFormatter() {
 private const val CHART_VISIBLE_YEAR_COUNT = 6f
 
 private fun formatPercent(value: Double): String = "${"%.2f".format(value)}%"
+
+/**
+ * 买入阈值提示：基于「10Y 国债收益率 × 倍数」的目标买入股息率。
+ * - 已达：绿色 chip「✓ 达到买入线 X% · 建议买入」
+ * - 未达：弱化文字「当前 X% · 买入线 Y%（国债 a% × n）未达」
+ * - 数据不全：仅展示「买入线 Y%（国债 a% × n）」
+ */
+@Composable
+private fun BuyThresholdPrompt(status: BuyThresholdStatus) {
+    val reached = status.reached
+    val containerColor = MaterialTheme.colorScheme.primaryContainer
+    val onContainerColor = MaterialTheme.colorScheme.onPrimaryContainer
+    val secondaryContainer = MaterialTheme.colorScheme.secondaryContainer
+    val onSecondaryContainer = MaterialTheme.colorScheme.onSecondaryContainer
+
+    val (text, bg, fg) = when {
+        reached == true -> Triple(
+            "✓ 达到买入线 ${formatPercent(status.targetYieldPercent)} · 建议买入",
+            containerColor,
+            onContainerColor
+        )
+        reached == false -> Triple(
+            "当前 ${status.currentYieldPercent?.let { formatPercent(it) } ?: "--"} · " +
+                    "买入线 ${formatPercent(status.targetYieldPercent)} " +
+                    "（国债 ${formatPercent(status.bondYield10Y)} × ${"%.1f".format(status.multiplier)}）未达",
+            secondaryContainer,
+            onSecondaryContainer
+        )
+        else -> Triple(
+            "买入线 ${formatPercent(status.targetYieldPercent)} " +
+                    "（国债 ${formatPercent(status.bondYield10Y)} × ${"%.1f".format(status.multiplier)}）",
+            secondaryContainer,
+            onSecondaryContainer
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(bg, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = fg,
+            fontWeight = if (reached == true) FontWeight.SemiBold else FontWeight.Normal
+        )
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+}

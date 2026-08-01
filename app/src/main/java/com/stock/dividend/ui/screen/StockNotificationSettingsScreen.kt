@@ -138,15 +138,17 @@ private fun StockNotificationRuleCard(
                     onCheckedChange = onEnabledChange
                 )
             }
-            OutlinedTextField(
-                value = rule.thresholdInput,
-                onValueChange = onThresholdChange,
-                label = { Text(rule.thresholdLabel) },
-                singleLine = true,
-                isError = rule.thresholdError != null,
-                supportingText = { Text(rule.thresholdError ?: "启用后按该阈值判断") },
-                modifier = Modifier.fillMaxWidth()
-            )
+            if (rule.thresholdLabel.isNotEmpty()) {
+                OutlinedTextField(
+                    value = rule.thresholdInput,
+                    onValueChange = onThresholdChange,
+                    label = { Text(rule.thresholdLabel) },
+                    singleLine = true,
+                    isError = rule.thresholdError != null,
+                    supportingText = { Text(rule.thresholdError ?: "启用后按该阈值判断") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

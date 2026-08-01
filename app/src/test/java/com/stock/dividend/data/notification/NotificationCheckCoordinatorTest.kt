@@ -2,10 +2,12 @@ package com.stock.dividend.data.notification
 
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
 import io.mockk.coEvery
@@ -116,6 +118,69 @@ class NotificationCheckCoordinatorTest {
                 checkedAt = 1000L,
                 triggeredAt = 1000L
             )
+        }
+    }
+
+    @Test
+    fun `sends boll upper notification with band upper as threshold when price crosses`() = runTest {
+        val stock = StockEntity("sz.000001", "平安银行", "0", shares = 100)
+        val rule = rule(
+            type = NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER,
+            lastWasAboveThreshold = false,
+            thresholdPercent = 0.0
+        )
+        coEvery { ruleRepository.getEffectiveDividendYieldRules(listOf(stock.code)) } returns emptyMap()
+        coEvery { ruleRepository.getEnabledStockRules(listOf(stock.code)) } returns mapOf(stock.code to listOf(rule))
+        coEvery { dividendDao.getByStock(stock.code) } returns emptyList()
+        coEvery { notifier.canNotify() } returns true
+        coEvery { stockRepository.fetchBoll(stock.code) } returns BollBand(middle = 11.0, upper = 12.0, lower = 10.0)
+
+        coordinator.checkWithPrices(
+            stocks = listOf(stock),
+            prices = mapOf(stock.code to 12.5)
+        )
+
+        coVerify {
+            notifier.sendNotificationRuleAlert(
+                stockCode = stock.code,
+                stockName = stock.name,
+                ruleType = NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER,
+                metricValue = 12.5,
+                thresholdValue = 12.0
+            )
+            ruleRepository.updateRuleEvaluationState(
+                rule = rule,
+                lastWasAboveThreshold = true,
+                checkedAt = 1000L,
+                triggeredAt = 1000L
+            )
+        }
+    }
+
+    @Test
+    fun `skips boll rule without notification when band is unavailable`() = runTest {
+        val stock = StockEntity("sz.000001", "平安银行", "0", shares = 100)
+        val rule = rule(
+            type = NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER,
+            lastWasAboveThreshold = false,
+            thresholdPercent = 0.0
+        )
+        coEvery { ruleRepository.getEffectiveDividendYieldRules(listOf(stock.code)) } returns emptyMap()
+        coEvery { ruleRepository.getEnabledStockRules(listOf(stock.code)) } returns mapOf(stock.code to listOf(rule))
+        coEvery { dividendDao.getByStock(stock.code) } returns emptyList()
+        coEvery { notifier.canNotify() } returns true
+        coEvery { stockRepository.fetchBoll(stock.code) } returns null
+
+        coordinator.checkWithPrices(
+            stocks = listOf(stock),
+            prices = mapOf(stock.code to 12.5)
+        )
+
+        coVerify(exactly = 0) {
+            notifier.sendNotificationRuleAlert(any(), any(), any(), any(), any())
+        }
+        coVerify(exactly = 0) {
+            ruleRepository.updateRuleEvaluationState(any(), any(), any(), any())
         }
     }
 

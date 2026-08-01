@@ -14,15 +14,12 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Analytics
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.platform.LocalDensity
@@ -162,7 +159,8 @@ fun PortfolioScreen(
             item {
                 DividendSummaryCard(
                     totalAmount = uiState.forecastTotal,
-                    totalMarketValue = uiState.holdingsMarketValue
+                    totalMarketValue = uiState.holdingsMarketValue,
+                    costDividendYield = uiState.costDividendYield
                 )
             }
             // FIRE 进度（来自原自选 tab）
@@ -781,54 +779,81 @@ private fun SwipeToDismissHoldingItem(
     onLoadBoll: () -> Unit
 ) {
     var showConfirmDialog by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { false })
+    val density = LocalDensity.current
+    val revealPx = with(density) { ActionRevealWidth.toPx() }
 
-    SwipeToDismissBox(
-        state = dismissState,
-        backgroundContent = {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 16.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    HoldingActionButton(
-                        label = "编辑",
-                        icon = Icons.Default.Edit,
-                        color = MaterialTheme.colorScheme.primary,
-                        onClick = {
-                            scope.launch { dismissState.reset() }
-                            onEditStock()
-                        }
-                    )
-                    HoldingActionButton(
-                        label = "删除",
-                        icon = Icons.Default.Delete,
-                        color = MaterialTheme.colorScheme.error,
-                        onClick = {
-                            scope.launch { dismissState.reset() }
-                            showConfirmDialog = true
-                        }
-                    )
-                }
+    val state = remember(revealPx) {
+        AnchoredDraggableState(
+            initialValue = SwipeAnchor.Closed,
+            anchors = DraggableAnchors {
+                SwipeAnchor.Closed at 0f
+                SwipeAnchor.Open at -revealPx
             }
-        },
-        enableDismissFromStartToEnd = false
-    ) {
-        PortfolioHoldingCard(
-            item = item,
-            onClick = onClick,
-            onEditWeight = onEditWeight,
-            latestYearlyDividend = latestYearlyDividend,
-            bollBand = bollBand,
-            onLoadBoll = onLoadBoll
         )
+    }
+
+    var isOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(isOpen) {
+        if (!isOpen && state.settledValue == SwipeAnchor.Open) {
+            state.animateTo(SwipeAnchor.Closed)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(end = 16.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HoldingActionButton(
+                label = "编辑",
+                icon = Icons.Default.Edit,
+                color = MaterialTheme.colorScheme.primary,
+                onClick = {
+                    isOpen = false
+                    onEditStock()
+                }
+            )
+            HoldingActionButton(
+                label = "删除",
+                icon = Icons.Default.Delete,
+                color = MaterialTheme.colorScheme.error,
+                onClick = {
+                    isOpen = false
+                    showConfirmDialog = true
+                }
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(state.offset.toInt(), 0) }
+                .anchoredDraggable(
+                    state = state,
+                    orientation = Orientation.Horizontal
+                )
+        ) {
+            PortfolioHoldingCard(
+                item = item,
+                onClick = onClick,
+                onEditWeight = onEditWeight,
+                latestYearlyDividend = latestYearlyDividend,
+                bollBand = bollBand,
+                onLoadBoll = onLoadBoll
+            )
+        }
+
+        LaunchedEffect(state.settledValue) {
+            val nowOpen = state.settledValue == SwipeAnchor.Open
+            if (nowOpen != isOpen) isOpen = nowOpen
+        }
     }
 
     if (showConfirmDialog) {

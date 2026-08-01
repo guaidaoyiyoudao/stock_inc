@@ -1,6 +1,7 @@
 package com.stock.dividend.data.notification
 
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
@@ -23,9 +24,12 @@ class NotificationRuleEvaluator @Inject constructor() {
         rule: NotificationRuleEntity,
         dividends: List<DividendEntity>,
         currentPrice: Double?,
-        checkedAt: Long
+        checkedAt: Long,
+        bollUpper: Double? = null
     ): NotificationRuleEvaluation {
         return when (rule.type) {
+            NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER ->
+                evaluatePriceRule(rule, currentPrice, checkedAt, dynamicThreshold = bollUpper)
             NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
             NOTIFICATION_RULE_TYPE_PRICE_BELOW -> evaluatePriceRule(rule, currentPrice, checkedAt)
             NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
@@ -76,13 +80,16 @@ class NotificationRuleEvaluator @Inject constructor() {
     private fun evaluatePriceRule(
         rule: NotificationRuleEntity,
         currentPrice: Double?,
-        checkedAt: Long
+        checkedAt: Long,
+        dynamicThreshold: Double? = null
     ): NotificationRuleEvaluation {
-        if (currentPrice == null || currentPrice <= 0.0 || rule.thresholdPercent <= 0.0) {
+        // BOLL 上轨是动态阈值（每次检查都变），用 dynamicThreshold 代替固定 thresholdPercent
+        val threshold = dynamicThreshold ?: rule.thresholdPercent
+        if (currentPrice == null || currentPrice <= 0.0 || threshold <= 0.0) {
             return NotificationRuleEvaluation(isComparable = false, checkedAt = checkedAt)
         }
 
-        val currentAbove = currentPrice >= rule.thresholdPercent
+        val currentAbove = currentPrice >= threshold
         val shouldNotify = when (rule.type) {
             NOTIFICATION_RULE_TYPE_PRICE_BELOW -> rule.lastWasAboveThreshold == true && !currentAbove
             else -> rule.lastWasAboveThreshold == false && currentAbove

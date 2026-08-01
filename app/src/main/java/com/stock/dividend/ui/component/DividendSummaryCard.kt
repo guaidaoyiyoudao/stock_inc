@@ -31,6 +31,8 @@ import java.util.Locale
 fun DividendSummaryCard(
     totalAmount: Double,
     totalMarketValue: Double? = null,
+    /** 总成本息率（基于持仓成本，非市值）。无成本或无股息数据时为 null。 */
+    costDividendYield: Double? = null,
     modifier: Modifier = Modifier
 ) {
     val annualYield = totalMarketValue
@@ -60,13 +62,24 @@ fun DividendSummaryCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                annualYield?.let {
-                    Text(
-                        text = "股息率 %.2f%%".format(Locale.US, it),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    costDividendYield?.let {
+                        Text(
+                            text = "成本息率 %.2f%%".format(Locale.US, it * 100),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (annualYield != null) Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    annualYield?.let {
+                        Text(
+                            text = "股息率 %.2f%%".format(Locale.US, it),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
                 }
             }
 

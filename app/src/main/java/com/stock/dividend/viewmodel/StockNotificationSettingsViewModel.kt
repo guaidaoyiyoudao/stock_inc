@@ -3,6 +3,7 @@ package com.stock.dividend.viewmodel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
@@ -20,7 +21,8 @@ val stockCustomNotificationRuleTypes = listOf(
     NOTIFICATION_RULE_TYPE_PRICE_ABOVE,
     NOTIFICATION_RULE_TYPE_PRICE_BELOW,
     NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD,
-    NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD
+    NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD,
+    NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER
 )
 
 data class StockNotificationRuleSettingUiState(
@@ -69,11 +71,16 @@ class StockNotificationSettingsViewModel @Inject constructor(
     fun save() {
         val state = _uiState.value
         val validatedRules = state.rules.map { rule ->
-            val threshold = rule.thresholdInput.toDoubleOrNull()
-            if (rule.enabled && (threshold == null || threshold <= 0.0)) {
-                rule.copy(thresholdError = "请输入大于 0 的阈值")
-            } else {
+            // BOLL 上轨规则阈值由系统按周线布林带自动计算，无需用户输入，跳过阈值校验
+            if (rule.type == NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER) {
                 rule.copy(thresholdError = null)
+            } else {
+                val threshold = rule.thresholdInput.toDoubleOrNull()
+                if (rule.enabled && (threshold == null || threshold <= 0.0)) {
+                    rule.copy(thresholdError = "请输入大于 0 的阈值")
+                } else {
+                    rule.copy(thresholdError = null)
+                }
             }
         }
         if (validatedRules.any { it.thresholdError != null }) {
@@ -147,6 +154,13 @@ fun defaultStockRuleSettings(): List<StockNotificationRuleSettingUiState> = list
         description = "股息率从高位跌破目标百分比时通知",
         thresholdLabel = "目标股息率 (%)",
         thresholdInput = "3.0"
+    ),
+    StockNotificationRuleSettingUiState(
+        type = NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER,
+        title = "股价触及周BOLL上轨",
+        description = "当前价格上穿周线布林带上轨时通知，阈值按周线自动计算",
+        thresholdLabel = "",
+        thresholdInput = "0.0"
     )
 )
 

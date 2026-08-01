@@ -48,12 +48,15 @@ data class HoldingRecommendation(
  * 持仓评估纯函数（无 Android 依赖）。
  *
  * 决策步骤：
- * 1. band/price 无效 → [HoldingAction.INSUFFICIENT_DATA]；
- * 2. 基础 tone 由 [bollTone] 决定（沿用 BollPriceScale 既有逻辑）；
- * 3. 股息率软门槛（仅当 latestYearlyDividend 非空时应用）：
- *    - tone=Buy 且 yield < minYield → 降级 HOLD；
- *    - tone=Current 且 yield ≥ boostYield → 升级 BUY；
- *    - SELL 不受股息率影响。
+ * 1. weekly band/price 无效 → [HoldingAction.INSUFFICIENT_DATA]；
+ * 2. SELL：周线 tone=Sell（价格在上轨附近）→ 直接卖，不受股息率/多周期影响；
+ * 3. BUY：三周期共振 —— 日下轨 + 周下轨 + 月中轨及以下 同时成立
+ *    （price ≤ daily.lower 且 price ≤ weekly.lower 且 price ≤ monthly.middle），
+ *    且股息率达 minYield（若提供股息数据）；不满足共振或股息率偏低则按周线 tone 落到持有/观望；
+ * 4. 其余（中轨、仅单一周期在下轨等）→ HOLD。
+ *
+ * 注意：周线 tone 仍用于 UI 卡片落点高亮（[bollTone] / [BollPriceScale]），
+ * 但 BUY/SELL 动作已由上面的多周期规则接管。
  */
 object HoldingRecommender {
 
@@ -61,8 +64,13 @@ object HoldingRecommender {
         price: Double,
         band: BollBand?,
         latestYearlyDividend: Double?,
-        thresholds: DividendThresholds = DividendThresholds()
+        thresholds: DividendThresholds = DividendThresholds(),
+        /** 日线 BOLL（一键评估时一并拉取）。null 表示未提供/数据不足。 */
+        dailyBand: BollBand? = null,
+        /** 月线 BOLL（一键评估时一并拉取）。null 表示未提供/数据不足。 */
+        monthlyBand: BollBand? = null
     ): HoldingRecommendation {
+        // 周线 band 是评估基准，缺失直接判数据不足（与历史行为一致）
         if (band == null || !price.isFinite() || price <= 0.0) {
             return HoldingRecommendation(
                 action = HoldingAction.INSUFFICIENT_DATA,
@@ -82,27 +90,49 @@ object HoldingRecommender {
         val reasons = mutableListOf<String>()
         reasons += bollPositionReason(tone, priceVsLower)
 
-        var action = when (tone) {
-            BollTone.Buy -> HoldingAction.BUY
-            BollTone.Sell -> HoldingAction.SELL
-            BollTone.Current -> HoldingAction.HOLD
+        // 卖出：周线上轨附近，最高优先级，不受股息率/多周期影响
+        if (tone == BollTone.Sell) {
+            return HoldingRecommendation(
+                action = HoldingAction.SELL,
+                bollTone = tone,
+                priceVsLower = priceVsLower,
+                dividendYield = yieldPct,
+                reasons = reasons
+            )
         }
 
-        if (yieldPct != null) {
-            // 降级：在下轨但股息率偏低
-            if (tone == BollTone.Buy && yieldPct < thresholds.minYieldPercent) {
-                action = HoldingAction.HOLD
-                reasons += "股息率偏低 (${formatYield(yieldPct)}%)"
+        // 买入：日下轨 + 周下轨 + 月中轨及以下 共振
+        val dailyAtLower = dailyBand != null && price <= dailyBand.lower
+        val weeklyAtLower = price <= band.lower
+        val monthlyAtOrBelowMiddle = monthlyBand != null && price <= monthlyBand.middle
+        // 共振三条件中「周下轨」已由 price<=band.lower 给出；日/月任一缺失则视为该周期不成立
+        val resonant = dailyAtLower && weeklyAtLower && monthlyAtOrBelowMiddle
+
+        when {
+            resonant && yieldPct != null && yieldPct < thresholds.minYieldPercent -> {
+                reasons += "三周期共振但股息率偏低 (${formatYield(yieldPct)}%)"
             }
-            // 升级：中轨附近但股息率较高
-            else if (tone == BollTone.Current && yieldPct >= thresholds.boostYieldPercent) {
-                action = HoldingAction.BUY
-                reasons += "股息率较高 (${formatYield(yieldPct)}%)"
+            resonant -> {
+                reasons += "日下轨+周下轨+月中轨及以下 三周期共振"
+                return HoldingRecommendation(
+                    action = HoldingAction.BUY,
+                    bollTone = tone,
+                    priceVsLower = priceVsLower,
+                    dividendYield = yieldPct,
+                    reasons = reasons
+                )
+            }
+            // 价格已偏低（周下轨）但日/月未共振 → 提示数据不足或未到共振
+            tone == BollTone.Buy && (dailyBand == null || monthlyBand == null) -> {
+                reasons += "周线已偏低，但日/月数据不足，暂不给买"
+            }
+            tone == BollTone.Buy -> {
+                reasons += "仅单一周期偏低，未达三周期共振"
             }
         }
 
         return HoldingRecommendation(
-            action = action,
+            action = HoldingAction.HOLD,
             bollTone = tone,
             priceVsLower = priceVsLower,
             dividendYield = yieldPct,
