@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,24 +28,19 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -59,8 +53,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.CompactTopAppBar
+import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.viewmodel.EditHoldingViewModel
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppOutlinedButton
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,17 +78,13 @@ fun EditHoldingScreen(
                 title = "编辑持仓",
                 onBack = onBack,
                 actions = {
-                    TextButton(
+                    AppTextButton(
                         onClick = {
                             viewModel.saveHolding()
                             onBack()
-                        }
-                    ) {
-                        Text(
-                            "保存",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
+                        },
+                        text = "保存",
+                    )
                 }
             )
         }
@@ -104,7 +101,6 @@ fun EditHoldingScreen(
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.secondaryContainer
@@ -120,7 +116,7 @@ fun EditHoldingScreen(
                             Box(
                                 modifier = Modifier
                                     .size(48.dp)
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(MaterialTheme.shapes.medium)
                                     .background(MaterialTheme.colorScheme.primary),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -149,13 +145,9 @@ fun EditHoldingScreen(
                 }
 
                 item {
-                    Card(
+                    AppCard(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
                     ) {
                         Column(modifier = Modifier.padding(18.dp)) {
                             Row(
@@ -184,8 +176,8 @@ fun EditHoldingScreen(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "¥${"%.2f".format(uiState.avgCostPerShare)}",
-                                        style = MaterialTheme.typography.titleLarge,
+                                        text = MoneyFormatter.withSymbol(uiState.avgCostPerShare),
+                                        style = MaterialTheme.typography.titleLarge.merge(tabularNumberStyle),
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -200,19 +192,17 @@ fun EditHoldingScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Button(
+                        AppButton(
                             onClick = { viewModel.showAddBuyDialog() },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("添加买入")
                         }
-                        OutlinedButton(
+                        AppOutlinedButton(
                             onClick = { viewModel.showAddSellDialog() },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -352,13 +342,9 @@ private fun TransactionCard(
     val typeLabel = if (isBuy) "买入" else "卖出"
     val typeColor = if (isBuy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
 
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
     ) {
         Row(
             modifier = Modifier
@@ -369,7 +355,7 @@ private fun TransactionCard(
             Box(
                 modifier = Modifier
                     .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(MaterialTheme.shapes.small)
                     .background(typeColor.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -392,8 +378,8 @@ private fun TransactionCard(
                 )
                 if (transaction.price > 0) {
                     Text(
-                        text = "@ ¥${"%.2f".format(transaction.price)}/股",
-                        style = MaterialTheme.typography.bodySmall,
+                        text = "@ ${MoneyFormatter.withSymbol(transaction.price)}/股",
+                        style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                 }
@@ -446,38 +432,35 @@ private fun AddTransactionDialog(
         },
         text = {
             Column {
-                OutlinedTextField(
+                AppTextField(
                     value = sharesInput,
                     onValueChange = onSharesChanged,
                     label = { Text("股数") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    shape = RoundedCornerShape(12.dp)
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
+                AppTextField(
                     value = priceInput,
                     onValueChange = onPriceChanged,
                     label = { Text(if (isBuy) "买入价格（元/股）" else "卖出价格（元/股，选填）") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    shape = RoundedCornerShape(12.dp)
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
+                AppTextField(
                     value = dateInput,
                     onValueChange = onDateChanged,
                     label = { Text("日期（YYYY-MM-DD）") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                    shape = RoundedCornerShape(12.dp)
                 )
 
                 if (error != null) {
@@ -491,14 +474,16 @@ private fun AddTransactionDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm) {
-                Text("确认")
-            }
+            AppButton(
+                onClick = onConfirm,
+                text = "确认",
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
+            AppTextButton(
+                onClick = onDismiss,
+                text = "取消",
+            )
         }
     )
 }
@@ -510,11 +495,9 @@ private fun StockTagsCard(
     onAddClick: () -> Unit,
     onRemoveClick: (String) -> Unit
 ) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
             Text(
@@ -579,13 +562,12 @@ private fun AddTagDialog(
         title = { Text("添加标签", fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
-                OutlinedTextField(
+                AppTextField(
                     value = input,
                     onValueChange = onInputChange,
                     label = { Text("标签名（最长 20 字）") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
                 )
                 if (suggestions.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(12.dp))
@@ -618,10 +600,16 @@ private fun AddTagDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm) { Text("添加") }
+            AppButton(
+                onClick = onConfirm,
+                text = "添加",
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppTextButton(
+                onClick = onDismiss,
+                text = "取消",
+            )
         }
     )
 }

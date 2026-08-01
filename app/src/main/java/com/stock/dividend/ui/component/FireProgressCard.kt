@@ -12,9 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,7 +22,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.stock.dividend.ui.theme.FinanceGreen
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.PercentFormatter
+import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.tabularNumberStyle
 
 @Composable
 fun FireProgressCard(
@@ -35,21 +35,21 @@ fun FireProgressCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val ext = LocalExtendedColors.current
     val coveragePercent = (progress ?: 0f).coerceIn(0f, 999f)
     val coverageProgress = (coveragePercent / 100f).coerceIn(0f, 1f)
     val coveredAmount = (targetAmount ?: 0.0) * coverageProgress
     val gapAmount = ((targetAmount ?: 0.0) - coveredAmount).coerceAtLeast(0.0)
+    val achieved = coveragePercent >= 100f
+    val cardBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
 
     if (targetAmount == null || progress == null) {
-        Card(
+        AppCard(
             modifier = modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            )
+            tone = AppCardTone.Surface,
+            border = cardBorder,
         ) {
             Row(
                 modifier = Modifier
@@ -61,7 +61,7 @@ fun FireProgressCard(
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(MaterialTheme.shapes.small)
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
@@ -89,15 +89,12 @@ fun FireProgressCard(
             }
         }
     } else {
-        Card(
+        AppCard(
             modifier = modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            )
+            tone = AppCardTone.Surface,
+            border = cardBorder,
         ) {
             Column(
                 modifier = Modifier
@@ -115,14 +112,10 @@ fun FireProgressCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "%.1f%%".format(coveragePercent),
-                        style = MaterialTheme.typography.titleMedium,
+                        text = PercentFormatter.percent(coveragePercent.toDouble(), decimals = 1),
+                        style = MaterialTheme.typography.titleMedium.merge(tabularNumberStyle),
                         fontWeight = FontWeight.Bold,
-                        color = if (coveragePercent >= 100f) {
-                            FinanceGreen
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        }
+                        color = if (achieved) ext.positive else MaterialTheme.colorScheme.onSurface
                     )
                 }
 
@@ -133,12 +126,8 @@ fun FireProgressCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    color = if (coveragePercent >= 100f) {
-                        FinanceGreen
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
+                        .clip(MaterialTheme.shapes.extraSmall),
+                    color = if (achieved) ext.positive else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     strokeCap = StrokeCap.Round
                 )
@@ -150,17 +139,17 @@ fun FireProgressCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "已覆盖 ${formatAmount(coveredAmount)}",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "已覆盖 ${MoneyFormatter.compact(coveredAmount)}",
+                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = if (gapAmount > 0.0) "差 ${formatAmount(gapAmount)}" else "已覆盖",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = if (gapAmount > 0.0) "差 ${MoneyFormatter.compact(gapAmount)}" else "已覆盖",
+                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                         color = if (gapAmount > 0.0) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
-                            FinanceGreen
+                            ext.positive
                         }
                     )
                 }
@@ -178,8 +167,8 @@ fun FireProgressCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = formatAmount(forecastTotal),
-                            style = MaterialTheme.typography.titleSmall,
+                            text = MoneyFormatter.compact(forecastTotal),
+                            style = MaterialTheme.typography.titleSmall.merge(tabularNumberStyle),
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -191,8 +180,8 @@ fun FireProgressCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = formatAmount(targetAmount),
-                            style = MaterialTheme.typography.titleSmall,
+                            text = MoneyFormatter.compact(targetAmount),
+                            style = MaterialTheme.typography.titleSmall.merge(tabularNumberStyle),
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -200,13 +189,5 @@ fun FireProgressCard(
                 }
             }
         }
-    }
-}
-
-private fun formatAmount(amount: Double): String {
-    return when {
-        amount >= 100_000_000 -> "¥%.2f亿".format(amount / 100_000_000)
-        amount >= 10_000 -> "¥%.2f万".format(amount / 10_000)
-        else -> "¥%.2f".format(amount)
     }
 }

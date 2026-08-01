@@ -24,9 +24,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -35,7 +32,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +44,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.ui.component.AppCard
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.viewmodel.AiChatUiState
 import com.stock.dividend.viewmodel.AiChatViewModel
@@ -58,6 +56,9 @@ import com.stock.dividend.viewmodel.canRenderMarkdown
 import java.text.DateFormat
 import java.util.Date
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppTextField
 
 private val SUGGESTIONS = listOf(
     "我的持仓怎么样？",
@@ -95,9 +96,10 @@ fun AiChatScreen(
                 modifier = Modifier.padding(horizontal = 32.dp)
             )
             Spacer(Modifier.size(16.dp))
-            Button(onClick = onGoSettings) {
-                Text("去设置配置 LLM")
-            }
+            AppButton(
+                onClick = onGoSettings,
+                text = "去设置配置 LLM",
+            )
         }
         return
     }
@@ -242,16 +244,14 @@ private fun SessionSheet(
                     }
                 }
             }
-            TextButton(
+            AppTextButton(
                 onClick = onNewSession,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = null)
-                Spacer(Modifier.width(4.dp))
-                Text("新建会话")
-            }
+                    .padding(horizontal = 12.dp),
+                text = "新建会话",
+                leadingIcon = Icons.Filled.Add,
+            )
         }
     }
 }
@@ -281,7 +281,6 @@ private fun ChatGreeting(onSuggestionClick: (String) -> Unit) {
         )
         SUGGESTIONS.forEach { suggestion ->
             Surface(
-                shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 onClick = { onSuggestionClick(suggestion) }
             ) {
@@ -300,7 +299,6 @@ private fun MessageBubble(message: ChatMessageUi) {
     when (message.role) {
         ChatRole.USER -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Surface(
-                shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
                 color = MaterialTheme.colorScheme.primaryContainer
             ) {
                 Text(
@@ -312,7 +310,6 @@ private fun MessageBubble(message: ChatMessageUi) {
         }
         ChatRole.AGENT -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
             Surface(
-                shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant
             ) {
                 // 流式半成品或语法不完整的 Markdown 只显示纯文本，完整后再渲染
@@ -347,11 +344,12 @@ private fun ConfirmationCard(
     onReject: () -> Unit,
     confirmBusy: Boolean,
 ) {
-    Card(
+    AppCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
@@ -365,13 +363,17 @@ private fun ConfirmationCard(
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onReject, enabled = !confirmBusy) {
-                    Text("取消")
-                }
+                AppTextButton(
+                    onClick = onReject,
+                    enabled = !confirmBusy,
+                    text = "取消",
+                )
                 Spacer(Modifier.width(4.dp))
-                Button(onClick = onConfirm, enabled = !confirmBusy) {
-                    Text("确认")
-                }
+                AppButton(
+                    onClick = onConfirm,
+                    enabled = !confirmBusy,
+                    text = "确认",
+                )
             }
         }
     }
@@ -390,7 +392,7 @@ private fun ChatInputBar(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        OutlinedTextField(
+        AppTextField(
             value = input,
             onValueChange = onInputChanged,
             modifier = Modifier.weight(1f),

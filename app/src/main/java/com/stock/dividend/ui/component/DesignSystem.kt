@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -23,8 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.stock.dividend.ui.theme.FinanceGreen
-import com.stock.dividend.ui.theme.FinanceRed
+import com.stock.dividend.ui.theme.LocalExtendedColors
 
 object AppCardDefaults {
     val ListPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
@@ -121,16 +119,17 @@ fun StatusPill(
     tone: FinanceStatusTone,
     modifier: Modifier = Modifier
 ) {
+    val ext = LocalExtendedColors.current
     val color = when (tone) {
-        FinanceStatusTone.Positive -> FinanceGreen
+        FinanceStatusTone.Positive -> ext.positive
         FinanceStatusTone.Warning -> MaterialTheme.colorScheme.tertiary
-        FinanceStatusTone.Negative -> FinanceRed
+        FinanceStatusTone.Negative -> ext.negative
         FinanceStatusTone.Neutral -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(6.dp),
+        shape = MaterialTheme.shapes.extraSmall,
         color = color.copy(alpha = 0.12f)
     ) {
         Text(

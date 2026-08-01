@@ -20,13 +20,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Event
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -46,16 +44,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.ui.component.FinanceMetric
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
+import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.viewmodel.DividendCalendarEvent
 import com.stock.dividend.viewmodel.DividendCalendarDay
 import com.stock.dividend.viewmodel.DividendCalendarFilter
 import com.stock.dividend.viewmodel.DividendCalendarUiState
 import com.stock.dividend.viewmodel.DividendCalendarViewModel
 import java.time.YearMonth
+import com.stock.dividend.ui.component.AppTextButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -166,10 +169,9 @@ private fun DividendCalendarContent(
 private fun CalendarSummaryCard(
     state: DividendCalendarUiState
 ) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = AppCardDefaults.summaryCardColors(),
+        tone = AppCardTone.Summary,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
@@ -212,10 +214,8 @@ private fun CalendarMonthCard(
 ) {
     var showMonthPicker by remember { mutableStateOf(false) }
 
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = AppCardDefaults.listCardColors(),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
@@ -239,16 +239,17 @@ private fun CalendarMonthCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    TextButton(onClick = { showMonthPicker = true }) {
+                    AppTextButton(onClick = { showMonthPicker = true }) {
                         Text(
                             text = state.visibleMonthLabel,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
-                    TextButton(onClick = onGoToToday) {
-                        Text("今天")
-                    }
+                    AppTextButton(
+                        onClick = onGoToToday,
+                        text = "今天",
+                    )
                 }
                 IconButton(onClick = onNextMonth) {
                     Icon(
@@ -326,7 +327,7 @@ private fun MonthYearPickerDialog(
                         ) {
                             rowMonths.forEach { month ->
                                 val selected = selectedMonth == month
-                                TextButton(
+                                AppTextButton(
                                     onClick = { selectedMonth = month },
                                     modifier = Modifier.weight(1f)
                                 ) {
@@ -347,18 +348,18 @@ private fun MonthYearPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            AppTextButton(
                 onClick = {
                     onConfirm("%04d-%02d".format(selectedYear, selectedMonth))
-                }
-            ) {
-                Text("确认")
-            }
+                },
+                text = "确认",
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
+            AppTextButton(
+                onClick = onDismiss,
+                text = "取消",
+            )
         }
     )
 }
@@ -494,10 +495,8 @@ private fun EmptyEventListCard(filter: DividendCalendarFilter) {
         "当天没有分红事件"
     }
 
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = AppCardDefaults.listCardColors(),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Text(
@@ -514,10 +513,8 @@ private fun EmptyEventListCard(filter: DividendCalendarFilter) {
 
 @Composable
 private fun DividendCalendarEventCard(event: DividendCalendarEvent) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = AppCardDefaults.listCardColors(),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
@@ -559,7 +556,7 @@ private fun DividendCalendarEventCard(event: DividendCalendarEvent) {
                     )
                     Text(
                         text = formatAmount(event.estimatedAmount),
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleSmall.merge(tabularNumberStyle),
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -580,7 +577,7 @@ private fun DividendCalendarEventCard(event: DividendCalendarEvent) {
                     }
                     Text(
                         text = "每股 ${formatAmount(event.cashPerShare)} · ${event.shares} 股",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -589,4 +586,5 @@ private fun DividendCalendarEventCard(event: DividendCalendarEvent) {
     }
 }
 
-private fun formatAmount(value: Double): String = "¥%.2f".format(value)
+// 统一走 MoneyFormatter（千分位 + Locale.US），修复旧实现无千分位的不一致
+private fun formatAmount(value: Double): String = MoneyFormatter.withSymbol(value)

@@ -20,7 +20,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -39,10 +38,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.viewmodel.OcrDebugViewModel
 import com.stock.dividend.viewmodel.PreprocessMode
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppOutlinedButton
+import com.stock.dividend.ui.component.AppButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,10 +86,16 @@ fun OcrDebugScreen(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = { launchPicker() }, modifier = Modifier.weight(1f)) { Text("选图识别") }
-                OutlinedButton(onClick = { viewModel.rerun() }, modifier = Modifier.weight(1f)) {
-                    Text("重跑当前图")
-                }
+                AppButton(
+                    onClick = { launchPicker() },
+                    modifier = Modifier.weight(1f),
+                    text = "选图识别",
+                )
+                AppOutlinedButton(
+                    onClick = { viewModel.rerun() },
+                    modifier = Modifier.weight(1f),
+                    text = "重跑当前图",
+                )
             }
 
             if (state.processedPreview != null) {
@@ -114,7 +123,7 @@ fun OcrDebugScreen(
             state.error?.let { err -> Text("错误：$err", color = MaterialTheme.colorScheme.error) }
 
             state.rawText?.let { txt ->
-                Card(modifier = Modifier.fillMaxWidth()) {
+                AppCard(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -123,10 +132,13 @@ fun OcrDebugScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             val context = LocalContext.current
-                            TextButton(onClick = {
+                            AppTextButton(
+                                onClick = {
                                 val cm = context.getSystemService(android.content.ClipboardManager::class.java)
                                 cm?.setPrimaryClip(android.content.ClipData.newPlainText("OCR 原始文本", txt))
-                            }) { Text("复制") }
+                            },
+                                text = "复制",
+                            )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         SelectionContainer {

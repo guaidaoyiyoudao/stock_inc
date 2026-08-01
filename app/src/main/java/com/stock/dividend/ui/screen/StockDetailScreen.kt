@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
@@ -40,11 +39,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -68,8 +65,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.StockLlmAnalysisState
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.PercentFormatter
 import com.stock.dividend.data.repository.formatFundamentalsPeriod
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.component.DividendRateChart
@@ -81,8 +82,11 @@ import com.stock.dividend.ui.component.SectionHeader
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.viewmodel.ForecastDetail
 import com.stock.dividend.viewmodel.StockDetailViewModel
-import com.stock.dividend.ui.theme.FinanceGreen
-import com.stock.dividend.ui.theme.FinanceRed
+import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.tabularNumberStyle
+import com.stock.dividend.ui.component.AppOutlinedButton
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,12 +113,7 @@ fun StockDetailScreen(
                         isRefreshing = uiState.isRefreshing,
                         onClick = { viewModel.refreshDividends() }
                     )
-                    TextButton(onClick = { onOpenDividendValuation(stockCode) }) {
-                        Text(
-                            text = "估值",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
+                    AppTextButton(onClick = { onOpenDividendValuation(stockCode) }, text = "估值")
                     IconButton(onClick = { onOpenNotificationSettings(stockCode) }) {
                         Icon(
                             imageVector = Icons.Filled.Notifications,
@@ -299,15 +298,11 @@ fun StockDetailScreen(
 
                     if (uiState.visibleCount < uiState.dividends.size) {
                         item {
-                            TextButton(
+                            AppTextButton(
                                 onClick = { viewModel.loadMoreDividends() },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "加载更多 (${uiState.dividends.size - uiState.visibleCount} 条)",
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
+                                modifier = Modifier.fillMaxWidth(),
+                                text = "加载更多 (${uiState.dividends.size - uiState.visibleCount} 条)",
+                            )
                         }
                     }
                 }
@@ -354,7 +349,7 @@ private fun BuyThresholdMultiplierDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = input,
                     onValueChange = { input = it.filter { ch -> ch.isDigit() || ch == '.' } },
                     singleLine = true,
@@ -368,24 +363,26 @@ private fun BuyThresholdMultiplierDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            AppTextButton(
                 onClick = { input.toDoubleOrNull()?.let(onConfirm) },
-                enabled = error == null
-            ) { Text("确定") }
+                enabled = error == null,
+                text = "确定",
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppTextButton(
+                onClick = onDismiss,
+                text = "取消",
+            )
         }
     )
 }
 
 @Composable
 private fun DividendValuationEntryCard(onClick: () -> Unit) {
-    Card(
+    AppCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = AppCardDefaults.listCardColors(),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
@@ -410,19 +407,19 @@ private fun DividendValuationEntryCard(onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            TextButton(onClick = onClick) {
-                Text("查看")
-            }
+            AppTextButton(
+                onClick = onClick,
+                text = "查看",
+            )
         }
     }
 }
 
 @Composable
 private fun HoldingInfoBanner(shares: Int, stockName: String, stockCode: String) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = AppCardDefaults.summaryCardColors(),
+        tone = AppCardTone.Summary,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
@@ -484,10 +481,9 @@ private fun HoldingInfoBanner(shares: Int, stockName: String, stockCode: String)
 
 @Composable
 private fun ForecastMainCard(forecast: ForecastDetail, selectedPeriod: String) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = AppCardDefaults.summaryCardColors(),
+        tone = AppCardTone.Summary,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
@@ -500,7 +496,7 @@ private fun ForecastMainCard(forecast: ForecastDetail, selectedPeriod: String) {
             ) {
                 FinanceMetric(
                     label = "${selectedPeriod}年平均预测",
-                    value = "¥%.2f".format(forecast.forecastIncome),
+                    value = MoneyFormatter.withSymbol(forecast.forecastIncome),
                     valueColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 )
@@ -529,10 +525,8 @@ private fun DividendRecordCard(
     dividend: DividendEntity,
     shares: Int
 ) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = AppCardDefaults.listCardColors(),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
@@ -560,8 +554,8 @@ private fun DividendRecordCard(
                 )
                 dividend.dividendYield?.let { yield ->
                     Text(
-                        text = "${"%.2f".format(yield)}%",
-                        style = MaterialTheme.typography.titleSmall,
+                        text = PercentFormatter.percent(yield),
+                        style = MaterialTheme.typography.titleSmall.merge(tabularNumberStyle),
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -574,7 +568,7 @@ private fun DividendRecordCard(
             ) {
                 FinanceMetric(
                     label = "每股派息",
-                    value = "¥${"%.4f".format(dividend.cashPerShare)}",
+                    value = MoneyFormatter.withSymbol(dividend.cashPerShare, decimals = 4),
                     valueColor = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
@@ -582,7 +576,7 @@ private fun DividendRecordCard(
                     val total = dividend.cashPerShare * shares
                     FinanceMetric(
                         label = "预计到账",
-                        value = "¥${"%.2f".format(total)}",
+                        value = MoneyFormatter.withSymbol(total),
                         valueColor = MaterialTheme.colorScheme.primary,
                         textAlign = TextAlign.End,
                         modifier = Modifier.weight(1f)
@@ -670,7 +664,10 @@ private fun StockLlmAnalysisSection(
                             },
                             style = MaterialTheme.typography.titleSmall
                         )
-                        TextButton(onClick = onReanalyze) { Text("重新分析") }
+                        AppTextButton(
+                            onClick = onReanalyze,
+                            text = "重新分析",
+                        )
                     }
                     if (a.valuation.isNotBlank()) {
                         Spacer(modifier = Modifier.height(4.dp))
@@ -723,13 +720,16 @@ private fun StockLlmAnalysisSection(
             Column {
                 Text(state.message, color = MaterialTheme.colorScheme.error)
                 Spacer(modifier = Modifier.height(4.dp))
-                TextButton(onClick = onRetry) { Text("重试") }
+                AppTextButton(
+                    onClick = onRetry,
+                    text = "重试",
+                )
             }
         }
 
         StockLlmAnalysisState.NotConfigured -> {
             Column {
-                OutlinedButton(onClick = onAnalyze, enabled = false) {
+                AppOutlinedButton(onClick = onAnalyze, enabled = false) {
                     Icon(Icons.Filled.AutoAwesome, contentDescription = null)
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("AI 解读")
@@ -743,7 +743,7 @@ private fun StockLlmAnalysisSection(
         }
 
         StockLlmAnalysisState.Idle -> {
-            OutlinedButton(onClick = onAnalyze, enabled = hasDividends) {
+            AppOutlinedButton(onClick = onAnalyze, enabled = hasDividends) {
                 Icon(Icons.Filled.AutoAwesome, contentDescription = null)
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("AI 解读")
@@ -778,9 +778,8 @@ private fun FundamentalsSection(
 
 @Composable
 private fun FundamentalsLoadingCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = AppCardDefaults.listCardColors()
+    AppCard(
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
@@ -804,9 +803,8 @@ private fun FundamentalsLoadingCard() {
 
 @Composable
 private fun FundamentalsEmptyCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = AppCardDefaults.listCardColors()
+    AppCard(
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
             Text(
@@ -838,9 +836,8 @@ private fun FundamentalsCard(fundamentals: Fundamentals) {
     }
     val canToggle = periods.size > 3
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = AppCardDefaults.listCardColors()
+    AppCard(
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
             // 最新期突出行
@@ -856,7 +853,7 @@ private fun FundamentalsCard(fundamentals: Fundamentals) {
                     )
                     FinanceMetric(
                         label = "ROE",
-                        value = latest.roe?.let { "%.1f%%".format(it) } ?: "—"
+                        value = latest.roe?.let { PercentFormatter.percent(it, decimals = 1) } ?: "—"
                     )
                     FinanceMetric(
                         label = "负债率",
@@ -884,7 +881,7 @@ private fun FundamentalsCard(fundamentals: Fundamentals) {
                     )
                     FinanceMetric(
                         label = "公告股息率",
-                        value = latest.announceYield?.let { "%.2f%%".format(it) } ?: "—"
+                        value = latest.announceYield?.let { PercentFormatter.percent(it) } ?: "—"
                     )
                 }
                 // 最新期分红方案（整行，缺失不展示）
@@ -921,7 +918,7 @@ private fun FundamentalsCard(fundamentals: Fundamentals) {
                             .padding(top = 4.dp),
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        TextButton(onClick = { expanded = !expanded }) {
+                        AppTextButton(onClick = { expanded = !expanded }) {
                             Icon(
                                 imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                                 contentDescription = null
@@ -969,7 +966,7 @@ private fun FundamentalsTrendRow(period: Fundamentals.Period, isLatest: Boolean)
             color = if (isLatest) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             fontWeight = if (isLatest) FontWeight.SemiBold else FontWeight.Normal
         )
-        Text(period.roe?.let { "%.1f%%".format(it) } ?: "—", modifier = cellWeight(), style = trendCellStyle())
+        Text(period.roe?.let { PercentFormatter.percent(it, decimals = 1) } ?: "—", modifier = cellWeight(), style = trendCellStyle())
         Text(period.debtToAssetRatio?.let { "%.0f%%".format(it) } ?: "—", modifier = cellWeight(), style = trendCellStyle())
         Text(
             formatYoy(period.revenueYoy),
@@ -1002,7 +999,7 @@ private fun trendCellStyle() = MaterialTheme.typography.labelMedium.copy(
 /** 同比%渲染：带正负号。 */
 private fun formatYoy(value: Double?): String = when {
     value == null || !value.isFinite() -> "—"
-    else -> "${if (value >= 0) "+" else ""}${"%.1f".format(value)}%"
+    else -> PercentFormatter.withSign(value, decimals = 1)
 }
 
 /** 同比正负色：正→绿，负→红，缺失/0→中性。 */
@@ -1010,9 +1007,10 @@ private fun formatYoy(value: Double?): String = when {
 private fun yoyColor(value: Double?): androidx.compose.ui.graphics.Color {
     val unspecified = MaterialTheme.colorScheme.onSurface
     if (value == null || !value.isFinite()) return unspecified
+    val ext = LocalExtendedColors.current
     return when {
-        value > 0 -> FinanceGreen
-        value < 0 -> FinanceRed
+        value > 0 -> ext.positive
+        value < 0 -> ext.negative
         else -> unspecified
     }
 }

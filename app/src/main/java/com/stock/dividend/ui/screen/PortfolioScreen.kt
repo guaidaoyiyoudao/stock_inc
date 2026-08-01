@@ -50,8 +50,6 @@ import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,7 +63,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -78,7 +75,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
+import com.stock.dividend.ui.component.AppOutlinedButton
 import com.stock.dividend.ui.component.BollPriceScale
 import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.DividendPriceScale
@@ -88,14 +87,17 @@ import com.stock.dividend.ui.component.FireProgressCard
 import com.stock.dividend.ui.component.StockCard
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
-import com.stock.dividend.ui.theme.FinanceGreen
-import com.stock.dividend.ui.theme.FinanceRed
+import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.PercentFormatter
 import com.stock.dividend.viewmodel.PortfolioItem
 import com.stock.dividend.viewmodel.PortfolioUiState
 import com.stock.dividend.viewmodel.PortfolioViewModel
-import java.util.Locale
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -249,7 +251,7 @@ fun PortfolioScreen(
                         modifier = Modifier.weight(1f)
                     )
                     // 一键评估入口
-                    TextButton(
+                    AppTextButton(
                         onClick = {
                             viewModel.evaluateVisibleHoldings()
                             onNavigateToEvaluation()
@@ -267,7 +269,7 @@ fun PortfolioScreen(
                         )
                     }
                     // 添加股票入口（来自原自选 tab）
-                    TextButton(onClick = onAddStockClick) {
+                    AppTextButton(onClick = onAddStockClick) {
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = null
@@ -365,11 +367,9 @@ private fun PortfolioSummaryCard(
 ) {
     val pnlColor = pnlColor(totalPnl)
 
-    Card(
+    AppCard(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Row(
@@ -456,12 +456,11 @@ private fun PortfolioSummaryCard(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-            androidx.compose.material3.OutlinedButton(
+            AppOutlinedButton(
                 onClick = onImportFromScreenshot,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("📷 从截图导入持仓")
-            }
+                modifier = Modifier.fillMaxWidth(),
+                text = "📷 从截图导入持仓",
+            )
         }
     }
 }
@@ -483,7 +482,7 @@ private fun PortfolioHoldingCard(
     LaunchedEffect(showBoll) {
         if (showBoll) onLoadBoll()
     }
-    Card(
+    AppCard(
         modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
@@ -493,9 +492,7 @@ private fun PortfolioHoldingCard(
                     onEditWeight()
                 }
             ),
-        shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
             Row(
@@ -547,14 +544,14 @@ private fun PortfolioHoldingCard(
             ) {
                 Column {
                     Text(
-                        text = "成本 ¥${"%.2f".format(Locale.US, item.costPerShare)}",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "成本 ${MoneyFormatter.withSymbol(item.costPerShare)}",
+                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "现价 ${item.currentPrice?.let { "¥" + "%.2f".format(Locale.US, it) } ?: "—"}",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "现价 ${item.currentPrice?.let { MoneyFormatter.withSymbol(it) } ?: "—"}",
+                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -673,7 +670,7 @@ private fun EditWeightDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = weightInput,
                     onValueChange = onInputChange,
                     label = { Text("目标权重 (%)") },
@@ -685,10 +682,16 @@ private fun EditWeightDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("保存") }
+            AppTextButton(
+                onClick = onConfirm,
+                text = "保存",
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppTextButton(
+                onClick = onDismiss,
+                text = "取消",
+            )
         }
     )
 }
@@ -712,7 +715,7 @@ private fun EditTotalAssetsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = input,
                     onValueChange = onInputChange,
                     label = { Text("总资产 (元)") },
@@ -724,10 +727,16 @@ private fun EditTotalAssetsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("保存") }
+            AppTextButton(
+                onClick = onConfirm,
+                text = "保存",
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppTextButton(
+                onClick = onDismiss,
+                text = "取消",
+            )
         }
     )
 }
@@ -738,10 +747,13 @@ private fun weightRow(item: PortfolioItem): String {
 }
 
 @Composable
-private fun pnlColor(value: Double): androidx.compose.ui.graphics.Color = when {
-    value > 0.0 -> FinanceGreen
-    value < 0.0 -> FinanceRed
-    else -> MaterialTheme.colorScheme.onSurface
+private fun pnlColor(value: Double): androidx.compose.ui.graphics.Color {
+    val ext = LocalExtendedColors.current
+    return when {
+        value > 0.0 -> ext.positive
+        value < 0.0 -> ext.negative
+        else -> MaterialTheme.colorScheme.onSurface
+    }
 }
 
 private fun marketPrefix(marketCode: String): String =
@@ -749,18 +761,11 @@ private fun marketPrefix(marketCode: String): String =
 
 private fun codeSuffix(code: String): String = code.substringAfter(".")
 
-internal fun portfolioFormatMoney(value: Double): String = "¥${"%,.2f".format(Locale.US, value)}"
+internal fun portfolioFormatMoney(value: Double): String = MoneyFormatter.withSymbol(value)
 
-internal fun portfolioFormatSignedPnl(value: Double): String {
-    val sign = when {
-        value > 0.0 -> "+"
-        value < 0.0 -> "-"
-        else -> ""
-    }
-    return "$sign¥${"%,.2f".format(Locale.US, kotlin.math.abs(value))}"
-}
+internal fun portfolioFormatSignedPnl(value: Double): String = MoneyFormatter.withSign(value)
 
-internal fun portfolioFormatPercent(value: Double): String = "%.1f%%".format(Locale.US, value)
+internal fun portfolioFormatPercent(value: Double): String = PercentFormatter.percent(value, decimals = 1)
 
 private fun Double.isApproximately(other: Double, epsilon: Double = 0.01): Boolean =
     kotlin.math.abs(this - other) < epsilon
@@ -862,13 +867,16 @@ private fun SwipeToDismissHoldingItem(
             title = { Text("确认删除") },
             text = { Text("确定要从持仓移除 ${item.name} 吗？") },
             confirmButton = {
-                TextButton(onClick = {
+                AppTextButton(onClick = {
                     showConfirmDialog = false
                     onDeleteStock()
                 }) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showConfirmDialog = false }) { Text("取消") }
+                AppTextButton(
+                    onClick = { showConfirmDialog = false },
+                    text = "取消",
+                )
             }
         )
     }
@@ -981,8 +989,8 @@ private fun SwipeToDismissWatchItem(
                 name = stock.name,
                 code = stock.code,
                 shares = stock.shares,
-                forecastIncome = forecastIncome?.let { "¥${"%.2f".format(it)}" },
-                marketValue = marketValue?.let { "¥${"%,.2f".format(it)}" },
+                forecastIncome = forecastIncome?.let { MoneyFormatter.withSymbol(it) },
+                marketValue = marketValue?.let { MoneyFormatter.withSymbol(it) },
                 lastUpdated = stock.lastUpdated,
                 currentPrice = currentPrice,
                 latestYearlyDividend = latestYearlyDividend,
@@ -1005,7 +1013,7 @@ private fun SwipeToDismissWatchItem(
             title = { Text("确认删除") },
             text = { Text("确定要删除 ${stock.name} 吗？删除后可以撤销。") },
             confirmButton = {
-                TextButton(
+                AppTextButton(
                     onClick = {
                         showConfirmDialog = false
                         onDismiss()
@@ -1013,9 +1021,10 @@ private fun SwipeToDismissWatchItem(
                 ) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showConfirmDialog = false }) {
-                    Text("取消")
-                }
+                AppTextButton(
+                    onClick = { showConfirmDialog = false },
+                    text = "取消",
+                )
             }
         )
     }
@@ -1058,7 +1067,7 @@ private fun SingleSelectDropdown(
         onExpandedChange = { expanded = it },
         modifier = modifier
     ) {
-        OutlinedTextField(
+        AppTextField(
             value = selected ?: "全部",
             onValueChange = {},
             readOnly = true,

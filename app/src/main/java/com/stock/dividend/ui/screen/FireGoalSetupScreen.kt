@@ -11,8 +11,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -20,7 +18,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,8 +28,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.stock.dividend.ui.component.AppCard
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.viewmodel.FireGoalViewModel
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,15 +55,11 @@ fun FireGoalSetupScreen(
                 title = "FIRE 目标",
                 onBack = onBack,
                 actions = {
-                    TextButton(
+                    AppTextButton(
                         onClick = viewModel::saveGoal,
-                        enabled = !uiState.isSaving
-                    ) {
-                        Text(
-                            "确认",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
+                        enabled = !uiState.isSaving,
+                        text = "确认",
+                    )
                 }
             )
         }
@@ -73,13 +70,9 @@ fun FireGoalSetupScreen(
             .padding(padding)
             .padding(16.dp)
     ) {
-        Card(
+        AppCard(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            )
-            ) {
+        ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
                         text = "目标年度支出",
@@ -98,7 +91,7 @@ fun FireGoalSetupScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    OutlinedTextField(
+                    AppTextField(
                         value = uiState.amountInput,
                         onValueChange = viewModel::onAmountChanged,
                         label = { Text("目标金额（元）") },
@@ -110,7 +103,6 @@ fun FireGoalSetupScreen(
                         supportingText = uiState.error?.let {
                             { Text(it, color = MaterialTheme.colorScheme.error) }
                         },
-                        shape = RoundedCornerShape(12.dp),
                         prefix = { Text("¥") }
                     )
                 }
@@ -119,14 +111,12 @@ fun FireGoalSetupScreen(
             if (uiState.existingGoal != null) {
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Card(
+                AppCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
-                    )
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ) {
-                    TextButton(
+                    AppTextButton(
                         onClick = viewModel::showDeleteDialog,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -149,14 +139,15 @@ fun FireGoalSetupScreen(
             title = { Text("确认删除") },
             text = { Text("确认删除 FIRE 目标？删除后主页将不再显示进度。") },
             confirmButton = {
-                TextButton(onClick = viewModel::deleteGoal) {
+                AppTextButton(onClick = viewModel::deleteGoal) {
                     Text("删除", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissDeleteDialog) {
-                    Text("取消")
-                }
+                AppTextButton(
+                    onClick = viewModel::dismissDeleteDialog,
+                    text = "取消",
+                )
             }
         )
     }

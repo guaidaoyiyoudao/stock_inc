@@ -21,7 +21,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,6 +47,8 @@ import com.stock.dividend.viewmodel.AchievementUiState
 import com.stock.dividend.viewmodel.AchievementViewModel
 import com.stock.dividend.viewmodel.DividendIncomeUiState
 import com.stock.dividend.viewmodel.DividendIncomeViewModel
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,7 +113,7 @@ fun IncomeScreen(
                 title = { Text("修正金额") },
                 text = {
                     Column {
-                        OutlinedTextField(
+                        AppTextField(
                             value = correctAmount,
                             onValueChange = { correctAmount = it },
                             label = { Text("金额 (元)") },
@@ -120,7 +121,7 @@ fun IncomeScreen(
                             modifier = Modifier.fillMaxSize()
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
+                        AppTextField(
                             value = correctNote,
                             onValueChange = { correctNote = it },
                             label = { Text("备注 (可选)") },
@@ -130,25 +131,27 @@ fun IncomeScreen(
                     }
                 },
                 confirmButton = {
-                    TextButton(
+                    AppTextButton(
                         onClick = {
-                            val amount = correctAmount.toDoubleOrNull() ?: return@TextButton
+                            val amount = correctAmount.toDoubleOrNull() ?: return@AppTextButton
                             viewModel.correctRecord(
                                 state.correctTargetId,
                                 amount,
                                 correctNote.ifBlank { null }
                             )
                             showCorrectDialog = false
-                        }
-                    ) { Text("确认") }
+                        },
+                        text = "确认",
+                    )
                 },
                 dismissButton = {
-                    TextButton(
+                    AppTextButton(
                         onClick = {
                             viewModel.dismissCorrectDialog()
                             showCorrectDialog = false
-                        }
-                    ) { Text("取消") }
+                        },
+                        text = "取消",
+                    )
                 }
             )
         }
@@ -312,7 +315,7 @@ private fun AddIncomeDialog(
         title = { Text("添加收入") },
         text = {
             Column {
-                OutlinedTextField(
+                AppTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
                     label = { Text("金额 (元)") },
@@ -320,7 +323,7 @@ private fun AddIncomeDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = noteText,
                     onValueChange = { noteText = it },
                     label = { Text("备注 (可选)") },
@@ -330,15 +333,16 @@ private fun AddIncomeDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            AppTextButton(
                 onClick = {
-                    val amount = amountText.toDoubleOrNull() ?: return@TextButton
+                    val amount = amountText.toDoubleOrNull() ?: return@AppTextButton
                     onConfirm(today, amount, null, noteText.ifBlank { null })
-                }
-            ) { Text("确认") }
+                },
+                text = "确认",
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            AppTextButton(onClick = onDismiss, text = "取消")
         }
     )
 }

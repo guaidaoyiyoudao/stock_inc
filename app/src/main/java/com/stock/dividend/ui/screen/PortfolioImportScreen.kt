@@ -21,19 +21,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,11 +41,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.viewmodel.ImportPhase
 import com.stock.dividend.viewmodel.ImportReviewRow
 import com.stock.dividend.viewmodel.PortfolioImportViewModel
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppOutlinedButton
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,9 +75,7 @@ fun PortfolioImportScreen(
                 onBack = onBack,
                 actions = {
                     if (uiState.phase == ImportPhase.Review && uiState.rows.isNotEmpty()) {
-                        TextButton(onClick = { viewModel.confirmImport() }) {
-                            Text("全部导入", style = MaterialTheme.typography.labelLarge)
-                        }
+                        AppTextButton(onClick = { viewModel.confirmImport() }, text = "全部导入")
                     }
                 }
             )
@@ -149,7 +147,10 @@ private fun IdleContent(onPick: () -> Unit, modifier: Modifier = Modifier) {
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(24.dp))
-            Button(onClick = onPick) { Text("选择持仓截图") }
+            AppButton(
+                onClick = onPick,
+                text = "选择持仓截图",
+            )
         }
     }
 }
@@ -194,11 +195,12 @@ private fun ErrorContent(
             )
             if (rawText != null) {
                 Spacer(modifier = Modifier.height(12.dp))
-                TextButton(onClick = { showRaw = !showRaw }) {
-                    Text(if (showRaw) "隐藏原始文本" else "查看原始识别文本")
-                }
+                AppTextButton(
+                    onClick = { showRaw = !showRaw },
+                    text = if (showRaw) "隐藏原始文本" else "查看原始识别文本",
+                )
                 if (showRaw) {
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    AppCard(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = rawText,
                             style = MaterialTheme.typography.bodySmall,
@@ -209,9 +211,15 @@ private fun ErrorContent(
             }
             Spacer(modifier = Modifier.height(16.dp))
             Row {
-                TextButton(onClick = onBack) { Text("返回") }
+                AppTextButton(
+                    onClick = onBack,
+                    text = "返回",
+                )
                 Spacer(modifier = Modifier.size(8.dp))
-                Button(onClick = onRetry) { Text("重新选图") }
+                AppButton(
+                    onClick = onRetry,
+                    text = "重新选图",
+                )
             }
         }
     }
@@ -238,9 +246,15 @@ private fun DoneContent(
             Spacer(modifier = Modifier.height(8.dp))
             Text(summary, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
             Spacer(modifier = Modifier.height(24.dp))
-            Button(onClick = onBackToPortfolio) { Text("返回持仓") }
+            AppButton(
+                onClick = onBackToPortfolio,
+                text = "返回持仓",
+            )
             Spacer(modifier = Modifier.size(8.dp))
-            TextButton(onClick = onImportAnother) { Text("再导入一张") }
+            AppTextButton(
+                onClick = onImportAnother,
+                text = "再导入一张",
+            )
         }
     }
 }
@@ -276,7 +290,10 @@ private fun ReviewContent(
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = onPickAnother) { Text("换一张图") }
+                AppTextButton(
+                    onClick = onPickAnother,
+                    text = "换一张图",
+                )
             }
         }
         items(items = state.rows, key = { it.id }) { row ->
@@ -289,19 +306,21 @@ private fun ReviewContent(
             )
         }
         item {
-            OutlinedButton(onClick = onAddRow, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Add, contentDescription = null)
-                Spacer(modifier = Modifier.size(6.dp))
-                Text("手动添加一行")
-            }
+            AppOutlinedButton(
+                onClick = onAddRow,
+                modifier = Modifier.fillMaxWidth(),
+                text = "手动添加一行",
+                leadingIcon = Icons.Default.Add,
+            )
         }
         state.ocrRawText?.let { raw ->
             item {
-                TextButton(onClick = { showRaw = !showRaw }) {
-                    Text(if (showRaw) "隐藏原始识别文本" else "查看原始识别文本（核对用）")
-                }
+                AppTextButton(
+                    onClick = { showRaw = !showRaw },
+                    text = if (showRaw) "隐藏原始识别文本" else "查看原始识别文本（核对用）",
+                )
                 if (showRaw) {
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    AppCard(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = raw,
                             style = MaterialTheme.typography.bodySmall,
@@ -312,13 +331,12 @@ private fun ReviewContent(
             }
         }
         item {
-            Button(
+            AppButton(
                 onClick = onConfirm,
+                enabled = state.rows.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth(),
-                enabled = state.rows.isNotEmpty()
-            ) {
-                Text("导入 ${state.rows.size} 条")
-            }
+                text = "导入 ${state.rows.size} 条",
+            )
         }
     }
 }
@@ -331,10 +349,8 @@ private fun ReviewRowCard(
     onCostChanged: (String) -> Unit,
     onRemove: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    AppCard(
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -348,7 +364,7 @@ private fun ReviewRowCard(
                     Icon(Icons.Default.Delete, contentDescription = "删除该行")
                 }
             }
-            OutlinedTextField(
+            AppTextField(
                 value = row.codeOrNameInput,
                 onValueChange = onCodeOrNameChanged,
                 label = { Text("6 位代码或股票名称") },
@@ -358,14 +374,13 @@ private fun ReviewRowCard(
                 supportingText = row.codeOrNameError?.let {
                     { Text(it, color = MaterialTheme.colorScheme.error) }
                 },
-                shape = MaterialTheme.shapes.medium
             )
             Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedTextField(
+                AppTextField(
                     value = row.sharesInput,
                     onValueChange = onSharesChanged,
                     label = { Text("股数") },
@@ -376,9 +391,8 @@ private fun ReviewRowCard(
                     supportingText = row.sharesError?.let {
                         { Text(it, color = MaterialTheme.colorScheme.error) }
                     },
-                    shape = MaterialTheme.shapes.medium
                 )
-                OutlinedTextField(
+                AppTextField(
                     value = row.costPerShareInput,
                     onValueChange = onCostChanged,
                     label = { Text("成本价") },
@@ -389,7 +403,6 @@ private fun ReviewRowCard(
                     supportingText = row.costError?.let {
                         { Text(it, color = MaterialTheme.colorScheme.error) }
                     },
-                    shape = MaterialTheme.shapes.medium
                 )
             }
         }

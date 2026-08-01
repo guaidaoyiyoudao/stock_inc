@@ -12,12 +12,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TrendingUp
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.ui.theme.tabularNumberStyle
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -62,18 +60,13 @@ fun StockCard(
         if (showBoll) onLoadBoll()
     }
 
-    Card(
+    AppCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isWatchOnly) {
-                MaterialTheme.colorScheme.surfaceVariant
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        )
+        // 自选股用 surfaceVariant（柔和），持仓股用 surface；AppCard 默认 tone=Surface，
+        // 自选股在这里用 List tone 复用 surface，再单独覆盖 containerColor 区分。
+        tone = if (isWatchOnly) AppCardTone.List else AppCardTone.Surface,
     ) {
         Column {
             // 坐标轴切换按钮：右上角浮在横轴上方。showBoll=false 显示股息率横轴（TrendingUp 图标），
@@ -149,13 +142,13 @@ fun StockCard(
                                 modifier = Modifier
                                     .background(
                                         MaterialTheme.colorScheme.secondaryContainer,
-                                        RoundedCornerShape(6.dp)
+                                        MaterialTheme.shapes.extraSmall
                                     )
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "$shares 股",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -166,7 +159,7 @@ fun StockCard(
                                 modifier = Modifier
                                     .background(
                                         MaterialTheme.colorScheme.tertiaryContainer,
-                                        RoundedCornerShape(6.dp)
+                                        MaterialTheme.shapes.extraSmall
                                     )
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
@@ -195,7 +188,7 @@ fun StockCard(
                     if (marketValue != null) {
                         Text(
                             text = marketValue,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleMedium.merge(tabularNumberStyle),
                             color = MaterialTheme.colorScheme.tertiary
                         )
                         Text(
@@ -208,7 +201,7 @@ fun StockCard(
                     if (forecastIncome != null) {
                         Text(
                             text = forecastIncome,
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleLarge.merge(tabularNumberStyle),
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
                         )

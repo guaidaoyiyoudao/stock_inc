@@ -14,9 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,8 +31,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppCard
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.viewmodel.StockNotificationRuleSettingUiState
 import com.stock.dividend.viewmodel.StockNotificationSettingsViewModel
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,7 +78,7 @@ fun StockNotificationSettingsScreen(
                     onThresholdChange = { viewModel.updateThreshold(rule.type, it) }
                 )
             }
-            Button(
+            AppButton(
                 onClick = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && state.rules.any { it.enabled }) {
                         permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -85,10 +86,9 @@ fun StockNotificationSettingsScreen(
                         viewModel.save()
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("保存")
-            }
+                modifier = Modifier.fillMaxWidth(),
+                text = "保存",
+            )
             if (state.saved) {
                 Text(
                     text = "已保存",
@@ -106,11 +106,9 @@ private fun StockNotificationRuleCard(
     onEnabledChange: (Boolean) -> Unit,
     onThresholdChange: (String) -> Unit
 ) {
-    Card(
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        tone = AppCardTone.List,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -139,7 +137,7 @@ private fun StockNotificationRuleCard(
                 )
             }
             if (rule.thresholdLabel.isNotEmpty()) {
-                OutlinedTextField(
+                AppTextField(
                     value = rule.thresholdInput,
                     onValueChange = onThresholdChange,
                     label = { Text(rule.thresholdLabel) },

@@ -38,6 +38,9 @@ import com.stock.dividend.data.repository.ScreenshotStrategy
 import com.stock.dividend.viewmodel.ScreenshotImportPhase
 import com.stock.dividend.viewmodel.ScreenshotImportUiState
 import com.stock.dividend.viewmodel.ScreenshotImportViewModel
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,11 +71,14 @@ fun ScreenshotImportScreen(
         ) {
             when (state.phase) {
                 ScreenshotImportPhase.Idle -> {
-                    Button(onClick = {
+                    AppButton(
+                        onClick = {
                         pickMedia.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         )
-                    }) { Text("选择截图") }
+                    },
+                        text = "选择截图",
+                    )
                 }
 
                 ScreenshotImportPhase.LoadingImage, ScreenshotImportPhase.OcrRunning -> {
@@ -93,13 +99,22 @@ fun ScreenshotImportScreen(
 
                 ScreenshotImportPhase.Done -> {
                     Text("策略已保存")
-                    TextButton(onClick = onViewList) { Text("查看策略库") }
-                    TextButton(onClick = viewModel::resetToIdle) { Text("再分析一张") }
+                    AppTextButton(
+                        onClick = onViewList,
+                        text = "查看策略库",
+                    )
+                    AppTextButton(
+                        onClick = viewModel::resetToIdle,
+                        text = "再分析一张",
+                    )
                 }
 
                 ScreenshotImportPhase.Error -> {
                     Text(state.errorMessage ?: "出错了", color = MaterialTheme.colorScheme.error)
-                    Button(onClick = viewModel::resetToIdle) { Text("重新开始") }
+                    AppButton(
+                        onClick = viewModel::resetToIdle,
+                        text = "重新开始",
+                    )
                 }
             }
         }
@@ -113,19 +128,23 @@ private fun ReviewOcrContent(
     onRetry: () -> Unit
 ) {
     state.analysisError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-    OutlinedTextField(
+    AppTextField(
         value = state.editableOcrText,
         onValueChange = vm::onOcrTextChanged,
         label = { Text("OCR 文本（可编辑修正）") },
         modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp)
     )
     Row {
-        Button(
+        AppButton(
             onClick = vm::startAnalysis,
-            enabled = state.editableOcrText.isNotBlank()
-        ) { Text("AI 提取策略") }
+            enabled = state.editableOcrText.isNotBlank(),
+            text = "AI 提取策略",
+        )
         Spacer(Modifier.width(8.dp))
-        TextButton(onClick = onRetry) { Text("重选图片") }
+        AppTextButton(
+            onClick = onRetry,
+            text = "重选图片",
+        )
     }
 }
 
@@ -135,7 +154,7 @@ private fun ReviewStrategyContent(
     vm: ScreenshotImportViewModel
 ) {
     val s = state.editableStrategy ?: return
-    OutlinedTextField(
+    AppTextField(
         value = s.targetText,
         onValueChange = vm::onTargetTextChanged,
         label = { Text("标的/语境") },
@@ -151,28 +170,31 @@ private fun ReviewStrategyContent(
             )
         }
     }
-    OutlinedTextField(
+    AppTextField(
         value = s.reasoning,
         onValueChange = vm::onReasoningChanged,
         label = { Text("核心理由") },
         modifier = Modifier.fillMaxWidth()
     )
     s.risks.forEachIndexed { i, r ->
-        OutlinedTextField(
+        AppTextField(
             value = r,
             onValueChange = { vm.onRiskChanged(i, it) },
             label = { Text("风险 ${i + 1}") },
             modifier = Modifier.fillMaxWidth()
         )
     }
-    TextButton(onClick = vm::addRisk) { Text("+ 添加风险") }
-    OutlinedTextField(
+    AppTextButton(
+        onClick = vm::addRisk,
+        text = "+ 添加风险",
+    )
+    AppTextField(
         value = s.validUntil ?: "",
         onValueChange = { vm.onValidUntilChanged(it.ifBlank { null }) },
         label = { Text("有效期 YYYY-MM-DD（空=长期）") },
         modifier = Modifier.fillMaxWidth()
     )
-    OutlinedTextField(
+    AppTextField(
         value = state.sourceNote,
         onValueChange = vm::onSourceNoteChanged,
         label = { Text("来源备注（可选）") },
@@ -180,9 +202,15 @@ private fun ReviewStrategyContent(
     )
     state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     Row {
-        Button(onClick = vm::confirmSave) { Text("保存策略") }
+        AppButton(
+            onClick = vm::confirmSave,
+            text = "保存策略",
+        )
         Spacer(Modifier.width(8.dp))
-        TextButton(onClick = vm::backToOcrReview) { Text("返回重提") }
+        AppTextButton(
+            onClick = vm::backToOcrReview,
+            text = "返回重提",
+        )
     }
 }
 

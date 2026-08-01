@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,9 +28,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
@@ -40,12 +36,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
@@ -62,8 +56,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.repository.StockSearchResult
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.ui.component.AppCard
+import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.ui.component.CompactTopAppBar
+import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.viewmodel.AddStockViewModel
+import com.stock.dividend.ui.component.AppTextButton
+import com.stock.dividend.ui.component.AppOutlinedButton
+import com.stock.dividend.ui.component.AppButton
+import com.stock.dividend.ui.component.AppTextField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,7 +91,7 @@ fun AddStockScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            OutlinedTextField(
+            AppTextField(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::onSearchQueryChanged,
                 placeholder = {
@@ -117,7 +119,6 @@ fun AddStockScreen(
                 } else null,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
@@ -159,12 +160,10 @@ fun AddStockScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut()
             ) {
-                Card(
+                AppCard(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ) {
                     Row(
                         modifier = Modifier
@@ -181,7 +180,7 @@ fun AddStockScreen(
                         )
                         if (uiState.canRetry) {
                             Spacer(modifier = Modifier.width(12.dp))
-                            Button(
+                            AppButton(
                                 onClick = {
                                     if (uiState.addedStock != null) {
                                         viewModel.retryAddStock()
@@ -189,12 +188,10 @@ fun AddStockScreen(
                                         viewModel.retrySearch()
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error
-                                )
-                            ) {
-                                Text("重试")
-                            }
+                                text = "重试",
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError,
+                            )
                         }
                     }
                 }
@@ -205,13 +202,10 @@ fun AddStockScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut()
             ) {
-                Card(
+                AppCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
+                    tone = AppCardTone.Summary
                 ) {
                     Column(
                         modifier = Modifier
@@ -225,7 +219,7 @@ fun AddStockScreen(
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(MaterialTheme.shapes.small)
                                     .background(MaterialTheme.colorScheme.primary),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -249,20 +243,18 @@ fun AddStockScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedButton(
+                            AppOutlinedButton(
                                 onClick = {
                                     viewModel.resetForNewAdd()
                                 },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("继续添加")
-                            }
-                            Button(
+                                modifier = Modifier.weight(1f),
+                                text = "继续添加",
+                            )
+                            AppButton(
                                 onClick = onBack,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("查看持仓")
-                            }
+                                modifier = Modifier.weight(1f),
+                                text = "查看持仓",
+                            )
                         }
                     }
                 }
@@ -304,12 +296,11 @@ fun AddStockScreen(
                 exit = fadeOut()
             ) {
                 Column {
-                    TextButton(
+                    AppTextButton(
                         onClick = viewModel::quickAddFirstResult,
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        Text("快速选择第一个结果")
-                    }
+                        modifier = Modifier.align(Alignment.End),
+                        text = "快速选择第一个结果",
+                    )
                     LazyColumn(
                         contentPadding = PaddingValues(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -342,7 +333,7 @@ fun AddStockScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    OutlinedTextField(
+                    AppTextField(
                         value = uiState.sharesInput,
                         onValueChange = viewModel::onSharesChanged,
                         label = { Text("持有股数（选填）") },
@@ -353,12 +344,11 @@ fun AddStockScreen(
                         supportingText = uiState.sharesError?.let {
                             { Text(it, color = MaterialTheme.colorScheme.error) }
                         },
-                        shape = MaterialTheme.shapes.medium
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    OutlinedTextField(
+                    AppTextField(
                         value = uiState.costPerShareInput,
                         onValueChange = viewModel::onCostPerShareChanged,
                         label = { Text("每股成本价（选填）") },
@@ -369,7 +359,6 @@ fun AddStockScreen(
                         supportingText = uiState.costPerShareError?.let {
                             { Text(it, color = MaterialTheme.colorScheme.error) }
                         },
-                        shape = MaterialTheme.shapes.medium
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -379,7 +368,7 @@ fun AddStockScreen(
                             .fillMaxWidth()
                             .clickable { showDatePicker = true }
                     ) {
-                        OutlinedTextField(
+                        AppTextField(
                             value = uiState.buyDateInput,
                             onValueChange = {},
                             label = { Text("首次买入日期（选填）") },
@@ -390,7 +379,6 @@ fun AddStockScreen(
                                 Icon(Icons.Default.DateRange, contentDescription = null)
                             },
                             singleLine = true,
-                            shape = MaterialTheme.shapes.medium,
                             colors = OutlinedTextFieldDefaults.colors(
                                 disabledTextColor = MaterialTheme.colorScheme.onSurface,
                                 disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
@@ -401,16 +389,14 @@ fun AddStockScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Button(
+                    AppButton(
                         onClick = { viewModel.confirmAddStock() },
                         enabled = uiState.sharesError == null
                                 && uiState.costPerShareError == null
                                 && uiState.buyDateError == null,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Text("确认添加", fontWeight = FontWeight.SemiBold)
-                    }
+                        text = "确认添加",
+                    )
                 }
             }
         }
@@ -428,7 +414,7 @@ fun AddStockScreen(
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
-                TextButton(
+                AppTextButton(
                     onClick = {
                         val selectedDate = datePickerState.selectedDateMillis?.let { millis ->
                             java.time.Instant.ofEpochMilli(millis)
@@ -440,11 +426,15 @@ fun AddStockScreen(
                             viewModel.onBuyDateChanged(selectedDate)
                         }
                         showDatePicker = false
-                    }
-                ) { Text("确认") }
+                    },
+                    text = "确认",
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+                AppTextButton(
+                    onClick = { showDatePicker = false },
+                    text = "取消",
+                )
             }
         ) {
             DatePicker(state = datePickerState)
@@ -458,16 +448,15 @@ private fun StockSearchItem(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    Card(
+    AppCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface
-        )
+        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surface,
+        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurface,
     ) {
         Row(
             modifier = Modifier
@@ -483,7 +472,7 @@ private fun StockSearchItem(
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(MaterialTheme.shapes.small)
                         .background(
                             if (isSelected) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.primaryContainer
@@ -521,8 +510,8 @@ private fun StockSearchItem(
             Column(horizontalAlignment = Alignment.End) {
                 result.currentPrice?.let { price ->
                     Text(
-                        text = "¥%.2f".format(price),
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = MoneyFormatter.withSymbol(price),
+                        style = MaterialTheme.typography.bodyMedium.merge(tabularNumberStyle),
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Medium
                     )

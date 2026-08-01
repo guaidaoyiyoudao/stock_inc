@@ -22,8 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.stock.dividend.ui.theme.FinanceGreen
-import com.stock.dividend.ui.theme.FinanceRed
+import com.stock.dividend.ui.theme.LocalExtendedColors
 import kotlin.math.abs
 
 /**
@@ -72,10 +71,12 @@ fun DividendPriceScale(
     }
     val maxDeviation = allDeviations.maxOfOrNull { abs(it) }?.coerceAtLeast(0.0001) ?: 0.0001
 
+    val ext = LocalExtendedColors.current
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -88,7 +89,7 @@ fun DividendPriceScale(
             Text(
                 text = "卖点",
                 style = MaterialTheme.typography.labelSmall,
-                color = FinanceRed,
+                color = ext.negative,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
@@ -99,7 +100,7 @@ fun DividendPriceScale(
             Text(
                 text = "买点",
                 style = MaterialTheme.typography.labelSmall,
-                color = FinanceGreen,
+                color = ext.positive,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -155,9 +156,10 @@ private fun ScaleTick(
     tone: ScaleTone,
     isOrigin: Boolean = false
 ) {
+    val ext = LocalExtendedColors.current
     val color = when (tone) {
-        ScaleTone.Buy -> FinanceGreen
-        ScaleTone.Sell -> FinanceRed
+        ScaleTone.Buy -> ext.positive
+        ScaleTone.Sell -> ext.negative
         ScaleTone.Current -> MaterialTheme.colorScheme.primary
     }
 
