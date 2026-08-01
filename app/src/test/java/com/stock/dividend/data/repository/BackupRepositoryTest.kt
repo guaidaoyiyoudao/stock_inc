@@ -12,6 +12,7 @@ import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.StockTagEntity
+import com.stock.dividend.data.local.entity.TradeStrategyEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import org.junit.Test
 
@@ -129,6 +130,21 @@ class BackupRepositoryTest {
             stockTags = listOf(
                 StockTagEntity(stockCode = "sh.600036", tag = "高息", createdAt = 5000L),
                 StockTagEntity(stockCode = "sz.000001", tag = "白马", createdAt = 6000L)
+            ),
+            tradeStrategies = listOf(
+                TradeStrategyEntity(
+                    id = "strat1",
+                    targetText = "招商银行",
+                    direction = "BUY",
+                    reasoning = "ROE高",
+                    risks = "[\"息差收窄\"]",
+                    validUntil = "2026-09-01",
+                    sourceNote = "研报",
+                    rawOcrText = "原文",
+                    status = "ACTIVE",
+                    createdAt = 7000L,
+                    updatedAt = 8000L
+                )
             )
         )
 
@@ -178,6 +194,13 @@ class BackupRepositoryTest {
         assertThat(restored.stockTags).hasSize(2)
         assertThat(restored.stockTags.map { it.stockCode to it.tag })
             .containsExactly("sh.600036" to "高息", "sz.000001" to "白马")
+
+        assertThat(restored.tradeStrategies).hasSize(1)
+        assertThat(restored.tradeStrategies[0].id).isEqualTo("strat1")
+        assertThat(restored.tradeStrategies[0].targetText).isEqualTo("招商银行")
+        assertThat(restored.tradeStrategies[0].direction).isEqualTo("BUY")
+        assertThat(restored.tradeStrategies[0].risks).isEqualTo("[\"息差收窄\"]")
+        assertThat(restored.tradeStrategies[0].validUntil).isEqualTo("2026-09-01")
     }
 
     @Test
