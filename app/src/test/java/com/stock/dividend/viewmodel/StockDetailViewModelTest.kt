@@ -10,15 +10,18 @@ import com.stock.dividend.data.remote.dto.LlmChatResponse
 import com.stock.dividend.data.remote.dto.LlmMessage
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.LlmConfig
 import com.stock.dividend.data.repository.LlmConfigSource
 import com.stock.dividend.data.repository.StockLlmAnalysisState
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.TradeStrategyRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +48,9 @@ class StockDetailViewModelTest {
     private val bondYieldRepository: BondYieldRepository = mockk()
     private val llmApi: LlmApi = mockk()
     private val llmConfigSource: LlmConfigSource = mockk()
+    private val tradeStrategyRepository: TradeStrategyRepository = mockk {
+        coEvery { activeStrategies() } returns emptyList()
+    }
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
     private val stockFlow = MutableStateFlow<StockEntity?>(null)
@@ -60,6 +66,8 @@ class StockDetailViewModelTest {
         coEvery { stockRepository.fetchBoll(any(), any()) } returns null
         // 默认未配置 LLM，现有用例不受影响
         every { llmConfigSource.observeConfig() } returns flowOf(LlmConfig("", "", ""))
+        // 默认基本面拉取返回 null（runCatching 兜底，现有用例不依赖基本面）
+        coEvery { stockRepository.fetchFundamentals(any()) } returns null
     }
 
     @After
@@ -82,7 +90,8 @@ class StockDetailViewModelTest {
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
             llmApi = llmApi,
-            llmConfigSource = llmConfigSource
+            llmConfigSource = llmConfigSource,
+        tradeStrategyRepository = tradeStrategyRepository
         )
 
         assertThat(viewModel.uiState.value.isLoading).isTrue()
@@ -99,7 +108,8 @@ class StockDetailViewModelTest {
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
             llmApi = llmApi,
-            llmConfigSource = llmConfigSource
+            llmConfigSource = llmConfigSource,
+        tradeStrategyRepository = tradeStrategyRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -128,7 +138,8 @@ class StockDetailViewModelTest {
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
             llmApi = llmApi,
-            llmConfigSource = llmConfigSource
+            llmConfigSource = llmConfigSource,
+        tradeStrategyRepository = tradeStrategyRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -147,7 +158,8 @@ class StockDetailViewModelTest {
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
             llmApi = llmApi,
-            llmConfigSource = llmConfigSource
+            llmConfigSource = llmConfigSource,
+        tradeStrategyRepository = tradeStrategyRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -162,7 +174,8 @@ class StockDetailViewModelTest {
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
             llmApi = llmApi,
-            llmConfigSource = llmConfigSource
+            llmConfigSource = llmConfigSource,
+        tradeStrategyRepository = tradeStrategyRepository
         )
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -178,7 +191,8 @@ class StockDetailViewModelTest {
             dividendRepository = mockDividendRepository(),
             bondYieldRepository = bondYieldRepository,
             llmApi = llmApi,
-            llmConfigSource = llmConfigSource
+            llmConfigSource = llmConfigSource,
+        tradeStrategyRepository = tradeStrategyRepository
         )
 
         assertThat(viewModel.uiState.value.error).isNull()
@@ -196,7 +210,8 @@ class StockDetailViewModelTest {
             dividendRepository = repo,
             bondYieldRepository = bondYieldRepository,
             llmApi = llmApi,
-            llmConfigSource = llmConfigSource
+            llmConfigSource = llmConfigSource,
+        tradeStrategyRepository = tradeStrategyRepository
         )
     }
 
@@ -534,6 +549,106 @@ class StockDetailViewModelTest {
 
     private fun httpException(code: Int): HttpException =
         HttpException(Response.error<Any>(code, "".toResponseBody("application/json".toMediaTypeOrNull())))
+
+    // endregion
+
+    // region 基本面加载与派息率补全
+
+    @Test
+    fun `fundamentals load and payout ratio enriched from dividends`() = runTest {
+        // 原始基本面（payoutRatio=null，basicEps=1.20）
+        coEvery { stockRepository.fetchFundamentals("sz.000001") } returns Fundamentals(
+            periods = listOf(
+                Fundamentals.Period("2024-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = 1.20, payoutRatio = null)
+            )
+        )
+        // 对应报告期的每股派息 0.30 → 派息率 0.30/1.20*100 = 25
+        val dividends = listOf(
+            DividendEntity(
+                id = "sz.000001_2024-12-31", stockCode = "sz.000001",
+                reportDate = "2024-12-31", cashPerShare = 0.30, dividendYield = 5.0
+            )
+        )
+
+        val viewModel = createViewModelWithStock(dividends = dividends)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val fundamentals = viewModel.uiState.value.fundamentals
+        assertThat(fundamentals).isNotNull()
+        assertThat(fundamentals!!.periods).hasSize(1)
+        assertThat(fundamentals.periods[0].payoutRatio).isEqualTo(25.0)
+        assertThat(viewModel.uiState.value.fundamentalsLoading).isFalse()
+    }
+
+    @Test
+    fun `fundamentals degrade to null when repository throws and loading flag resets`() = runTest {
+        coEvery { stockRepository.fetchFundamentals("sz.000001") } throws RuntimeException("network")
+
+        val viewModel = createViewModelWithStock()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.fundamentals).isNull()
+        // 红线 #3：失败也要复位 loading
+        assertThat(viewModel.uiState.value.fundamentalsLoading).isFalse()
+    }
+
+    @Test
+    fun `refreshFundamentals reloads fundamentals`() = runTest {
+        coEvery { stockRepository.fetchFundamentals("sz.000001") } returns Fundamentals(
+            periods = listOf(Fundamentals.Period("2024-12-31", 12.0, 60.0, 8.0, 5.0, basicEps = 1.0, payoutRatio = null))
+        )
+
+        val viewModel = createViewModelWithStock()
+        testDispatcher.scheduler.advanceUntilIdle()
+        val before = viewModel.uiState.value.fundamentals
+
+        coEvery { stockRepository.fetchFundamentals("sz.000001") } returns Fundamentals(
+            periods = listOf(Fundamentals.Period("2025-03-31", 11.0, 61.0, 6.0, 4.0, basicEps = 1.0, payoutRatio = null))
+        )
+        viewModel.refreshFundamentals()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.fundamentals).isNotEqualTo(before)
+        assertThat(viewModel.uiState.value.fundamentals!!.periods[0].reportDate).isEqualTo("2025-03-31")
+    }
+
+    // endregion
+
+    // region 股息率取当年累计（多次分红累加）
+
+    @Test
+    fun `latest dividend yield sums multiple dividends in the same year for prompt`() = runTest {
+        every { llmConfigSource.observeConfig() } returns
+            flowOf(LlmConfig("https://api.x.com/v1/", "key", "m"))
+        coEvery { llmApi.chatCompletions(any(), any(), any()) } returns
+            LlmChatResponse(listOf(LlmChatResponse.Choice(LlmMessage("assistant", """{"valuation":"ok"}"""))))
+
+        // 同一年（2024）两笔分红：2.0% + 3.0% = 5.0%（累计股息率）
+        val dividends = listOf(
+            DividendEntity(
+                id = "sz.000001_2024-06-30", stockCode = "sz.000001",
+                reportDate = "2024-06-30", cashPerShare = 0.10, dividendYield = 2.0
+            ),
+            DividendEntity(
+                id = "sz.000001_2024-12-31", stockCode = "sz.000001",
+                reportDate = "2024-12-31", cashPerShare = 0.15, dividendYield = 3.0
+            )
+        )
+
+        val viewModel = createViewModelWithStock(dividends = dividends)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val requestSlot = slot<LlmChatRequest>()
+        coEvery { llmApi.chatCompletions(any(), any(), capture(requestSlot)) } returns
+            LlmChatResponse(listOf(LlmChatResponse.Choice(LlmMessage("assistant", """{"valuation":"ok"}"""))))
+
+        viewModel.analyzeWithLlm()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 喂给 LLM 的 user prompt 应为当年累计 5.0%，而非单笔 2.0% 或 3.0%
+        val userPrompt = requestSlot.captured.messages[1].content
+        assertThat(userPrompt).contains("【最新股息率】5.0%")
+    }
 
     // endregion
 }

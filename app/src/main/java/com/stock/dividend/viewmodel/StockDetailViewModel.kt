@@ -14,7 +14,11 @@ import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.BuyThresholdStatus
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.TradeStrategyRepository
+import com.stock.dividend.data.repository.enrichPayoutRatio
+import com.stock.dividend.data.repository.toUserStrategyRef
 import com.stock.dividend.data.repository.LlmConfig
 import com.stock.dividend.data.repository.LlmConfigSource
 import com.stock.dividend.data.repository.StockLlmAnalysisParser
@@ -64,6 +68,8 @@ data class StockDetailUiState(
     val selectedPeriod: String = "3",
     val visibleCount: Int = 5,
     val buyThreshold: BuyThresholdStatus? = null,
+    val fundamentals: Fundamentals? = null,
+    val fundamentalsLoading: Boolean = true,
     val llmAnalysis: StockLlmAnalysisState = StockLlmAnalysisState.Idle
 )
 
@@ -74,13 +80,17 @@ class StockDetailViewModel @Inject constructor(
     private val dividendRepository: DividendRepository,
     private val bondYieldRepository: BondYieldRepository,
     private val llmApi: LlmApi,
-    private val llmConfigSource: LlmConfigSource
+    private val llmConfigSource: LlmConfigSource,
+    private val tradeStrategyRepository: TradeStrategyRepository
 ) : ViewModel() {
 
     private val stockCode: String = savedStateHandle["code"] ?: ""
 
     private val _uiState = MutableStateFlow(StockDetailUiState())
     val uiState: StateFlow<StockDetailUiState> = _uiState.asStateFlow()
+
+    /** fetchFundamentals 的原始结果（payoutRatio 未补全）；由 recomputeFundamentals 补全后写入 uiState。 */
+    private var rawFundamentals: Fundamentals? = null
 
     private val stockFlow = stockRepository.observeStock(stockCode)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -125,6 +135,8 @@ class StockDetailViewModel @Inject constructor(
                     )
                     // 标的或分红变化后，重新计算买入阈值（现价/国债异步拉取）
                     refreshBuyThreshold()
+                    // 分红数据更新后，用最新 EPS_DIV 重新补全基本面派息率（见 §6.3）
+                    recomputeFundamentals()
                 } else {
                     _uiState.value = _uiState.value.copy(
                         dividends = dividends,
@@ -135,6 +147,38 @@ class StockDetailViewModel @Inject constructor(
                 }
             }
         }
+
+        // 独立加载基本面（AGENTS §4.2：与分红 collector 解耦，各管各的字段）
+        loadFundamentals()
+    }
+
+    /** 拉取单股基本面并补全派息率；失败降级为 null（红线 #2）。成功/失败均复位 fundamentalsLoading（红线 #3）。 */
+    private fun loadFundamentals() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(fundamentalsLoading = true)
+            val result = runCatching { stockRepository.fetchFundamentals(stockCode) }.getOrNull()
+            rawFundamentals = result
+            recomputeFundamentals()
+            _uiState.value = _uiState.value.copy(fundamentalsLoading = false)
+        }
+    }
+
+    /** 用当前分红数据（EPS_DIV）补全 [rawFundamentals] 的派息率并写入 uiState（纯函数 enrichPayoutRatio）。 */
+    private fun recomputeFundamentals() {
+        val raw = rawFundamentals ?: run {
+            _uiState.value = _uiState.value.copy(fundamentals = null)
+            return
+        }
+        val epsDivByDate = _uiState.value.dividends
+            .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
+            .associate { it.reportDate to it.cashPerShare }
+        val enriched = enrichPayoutRatio(raw, epsDivByDate)
+        _uiState.value = _uiState.value.copy(fundamentals = enriched)
+    }
+
+    /** 手动刷新基本面（卡片「更新」入口调用）。 */
+    fun refreshFundamentals() {
+        loadFundamentals()
     }
 
     /**
@@ -265,7 +309,11 @@ class StockDetailViewModel @Inject constructor(
             }.getOrNull()
 
             val input = buildStockLlmInput(stock, state, currentPrice, dailyBand, weeklyBand, monthlyBand)
-            val prompt = StockLlmPromptBuilder.build(input)
+            // 回流全局用户投资原则（失败降级空，不阻塞分析，红线 #2）
+            val userStrategies = runCatching {
+                tradeStrategyRepository.activeStrategies().map { toUserStrategyRef(it) }
+            }.getOrDefault(emptyList())
+            val prompt = StockLlmPromptBuilder.build(input, userStrategies)
             val url = config.baseUrl.trimEnd('/') + "/chat/completions"
             val request = LlmChatRequest(
                 model = config.model,
@@ -309,9 +357,13 @@ class StockDetailViewModel @Inject constructor(
         val ratePoints = state.dividendRatePoints
             .takeIf { it.isNotEmpty() }
             ?.map { it.ratePercent }
-        val latestYield = state.dividends
-            .firstOrNull { it.dividendYield != null && it.dividendYield.isFinite() }
-            ?.dividendYield
+        // 股息率取「当年累计」：同一年多笔分红累加（与 deriveDividendRatePoints / ForecastCalculator 一致）。
+        // dividendRatePoints 升序，最后一项即最近一年的累计股息率；避免取单笔分红而低估。
+        val latestYield = state.dividendRatePoints
+            .takeIf { it.isNotEmpty() }
+            ?.lastOrNull()
+            ?.ratePercent
+            ?.takeIf { it.isFinite() && it >= 0.0 }
         val forecast = state.allForecasts.let { all ->
             val y1 = all["1"] ?: all[all.keys.firstOrNull()]
             if (y1 != null) {
@@ -341,7 +393,8 @@ class StockDetailViewModel @Inject constructor(
             buyThreshold = bt,
             bollDaily = dailyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) },
             bollWeekly = weeklyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) },
-            bollMonthly = monthlyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) }
+            bollMonthly = monthlyBand?.let { StockLlmInput.StockLlmBollPosition(ratioVsLowerPercent(currentPrice, it)) },
+            fundamentals = state.fundamentals
         )
     }
 

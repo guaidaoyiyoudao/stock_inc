@@ -21,6 +21,8 @@ import com.stock.dividend.data.repository.HoldingRecommender
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.LlmAnalysisRepository
 import com.stock.dividend.data.repository.LlmAnalysisResult
+import com.stock.dividend.data.repository.TradeStrategyRepository
+import com.stock.dividend.data.repository.toUserStrategyRef
 import com.stock.dividend.data.repository.LlmAnalysisState
 import com.stock.dividend.data.repository.PortfolioAdvisor
 import com.stock.dividend.data.repository.PortfolioSignals
@@ -128,6 +130,8 @@ data class PortfolioUiState(
     val totalCost: Double = 0.0,
     val totalPnl: Double = 0.0,
     val totalPnlRate: Double = 0.0,
+    /** 总成本息率 = Σ(最新年度每股股息 × 持仓股数) / Σ(成本价 × 持仓股数)，无数据/分母为 0 时为 null。 */
+    val costDividendYield: Double? = null,
     val targetWeightSum: Double = 0.0,
     val isLoading: Boolean = false,
     val isRefreshingIndustry: Boolean = false,
@@ -179,6 +183,7 @@ class PortfolioViewModel @Inject constructor(
     private val notificationCheckCoordinator: NotificationCheckCoordinator,
     private val notificationRuleRepository: NotificationRuleRepository,
     private val llmAnalysisRepository: LlmAnalysisRepository,
+    private val tradeStrategyRepository: TradeStrategyRepository,
     @ApplicationContext context: Context
 ) : ViewModel() {
 
@@ -203,6 +208,14 @@ class PortfolioViewModel @Inject constructor(
     /** Latest non-empty holding snapshot, kept so price refresh can recompute without re-reading the DAO. */
     @Volatile
     private var lastStocksSnapshot: List<StockEntity> = emptyList()
+
+    /**
+     * 全部股票快照（含 shares=0 的纯自选股），供现价刷新/行业回填覆盖自选股。
+     * 与 [lastStocksSnapshot] 分离：items 仍只含持仓股（shares>0），
+     * 但拉价/拉行业必须覆盖自选股，否则自选股卡片永远拿不到现价、行业。
+     */
+    @Volatile
+    private var lastAllStocksSnapshot: List<StockEntity> = emptyList()
 
     /** Latest price snapshot, preserved across holding-stream re-emissions so UI does not flash to "—". */
     @Volatile
@@ -235,6 +248,10 @@ class PortfolioViewModel @Inject constructor(
      * 每股的股息预测。forecast 只对 shares>0 的持仓股计算（ForecastCalculator 按 shares 折算收入）。
      * latestYearlyDividend 对所有股都可计算（自选股也要在卡片上画「股息率→价位」横轴），
      * 因此这里对所有股订阅 dividend，但仅当 shares>0 才计入 forecastTotal。
+     *
+     * 注意：shares=0 的纯自选股 [ForecastCalculator.calculateForecastIncome] 会返回 null，
+     * 但自选卡片仍需要 [StockForecast]（用以承载 currentPrice / latestYearlyDividend / bollBand），
+     * 故这里在 result 为 null 时也构造一个占位 forecast（avgCashPerShare/forecastIncome 均为 0）。
      */
     private val forecastMapFlow = allStocksFlow.flatMapLatest { stocks ->
         if (stocks.isEmpty()) {
@@ -246,7 +263,7 @@ class PortfolioViewModel @Inject constructor(
                     val result = ForecastCalculator.calculateForecastIncome(
                         dividends, stock.shares, years
                     )
-                    stock.code to result?.let {
+                    val forecast = result?.let {
                         StockForecast(
                             shares = stock.shares,
                             avgCashPerShare = it.avgCashPerShare,
@@ -255,13 +272,20 @@ class PortfolioViewModel @Inject constructor(
                             actualYears = it.actualYears,
                             latestYearlyDividend = ForecastCalculator.latestYearlyCashPerShare(dividends)
                         )
-                    }
+                    } ?: StockForecast(
+                        // 占位：result 为 null（shares<=0 或无足够股息记录）时仍要为自选卡保留槽位，
+                        // 否则 currentPrice/latestYearlyDividend 无处挂载，自选股卡片现价永远为空。
+                        shares = stock.shares,
+                        avgCashPerShare = 0.0,
+                        forecastIncome = 0.0,
+                        actualYears = 0,
+                        latestYearlyDividend = ForecastCalculator.latestYearlyCashPerShare(dividends)
+                    )
+                    stock.code to forecast
                 }
             }
             combine(forecastFlows) { results ->
-                results
-                    .filter { it.second != null }
-                    .associate { it.first to it.second!! }
+                results.associate { it.first to it.second }
             }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -294,9 +318,14 @@ class PortfolioViewModel @Inject constructor(
         }
 
         // Collector 2: fetch prices on refresh trigger and merge with the latest holdings.
+        // 关键：订阅 allStocksFlow（含 shares=0 的自选股），否则自选股永远拉不到现价——
+        // 历史上这里订的是 holdingsFlow(shares>0)，导致纯自选股卡片现价永远是缓存兜底，
+        // 且仅有自选股时 flatMapLatest 短路成 flowOf(emptyMap())，刷新按钮失效。
+        // 下游 recompute 仍用 lastStocksSnapshot(仅持仓) 保证 items 只含持仓股。
         viewModelScope.launch {
-            holdingsFlow
+            allStocksFlow
                 .flatMapLatest { stocks ->
+                    lastAllStocksSnapshot = stocks
                     if (stocks.isEmpty()) flowOf(emptyMap()) else {
                         _refreshTrigger.onStart { emit(Unit) }.conflate()
                             .map {
@@ -323,9 +352,11 @@ class PortfolioViewModel @Inject constructor(
                         lastPricesSnapshot
                     }
                     publish(recompute(lastStocksSnapshot, effectivePrices))
-                    // 把最新价同步进 forecast 卡片（现价/市值），并触发通知检查
+                    // 把最新价同步进 forecast 卡片（现价/市值，覆盖自选股），并对持仓触发通知检查。
+                    // 注意：stockForecasts 用全量价（自选股卡片也依赖现价画「股息率→价位」横轴），
+                    //       但通知只针对持仓股（shares>0）。
                     val holdings = lastStocksSnapshot
-                    if (holdings.isNotEmpty() && prices.isNotEmpty()) {
+                    if (prices.isNotEmpty()) {
                         _uiState.update { state ->
                             state.copy(
                                 stockForecasts = state.stockForecasts.mapValues { (code, f) ->
@@ -337,7 +368,9 @@ class PortfolioViewModel @Inject constructor(
                                 }
                             )
                         }
-                        notificationCheckCoordinator.checkWithPrices(holdings, prices)
+                        if (holdings.isNotEmpty()) {
+                            notificationCheckCoordinator.checkWithPrices(holdings, prices)
+                        }
                     }
                     _uiState.update { it.copy(isLoading = false) }
                 }
@@ -362,6 +395,17 @@ class PortfolioViewModel @Inject constructor(
                 val forecastTotal = forecasts.values
                     .filter { it.shares > 0 }
                     .sumOf { it.forecastIncome }
+                // 总成本息率：分子 = Σ(最新年度每股股息 × 持仓股数)，仅计 shares>0 的持仓；
+                // 分母 = Σ(成本价 × 持仓股数)。分母为 0 或无有效股息数据时为 null。
+                val holdings = stocks.filter { it.shares > 0 }
+                val totalDividendOnCost = holdings.sumOf { stock ->
+                    val div = forecasts[stock.code]?.latestYearlyDividend ?: 0.0
+                    div * stock.shares
+                }
+                val totalCostBasis = holdings.sumOf { it.costPerShare * it.shares }
+                val costDividendYield = if (totalCostBasis > 0.0 && totalDividendOnCost > 0.0) {
+                    totalDividendOnCost / totalCostBasis
+                } else null
                 val progress = if (livingExpenseTarget != null && livingExpenseTarget > 0) {
                     (forecastTotal / livingExpenseTarget * 100).toFloat().coerceAtMost(100f)
                 } else null
@@ -382,13 +426,19 @@ class PortfolioViewModel @Inject constructor(
                         stockForecasts = forecasts.mapValues { (code, forecast) ->
                             val previous = state.stockForecasts[code]
                             val cachedPrice = cachedPrices[code]
+                            // 现价优先级：上一轮已写入的现价 > 本轮网络拉到的价(lastPricesSnapshot)
+                            //   > price_cache 兜底。lastPricesSnapshot 由 Collector 2 在网络刷新后更新，
+                            //   这里直接读快照可保证自选股(shares=0)也能拿到网络价——
+                            //   历史仅依赖 previous/cachedPrice，自选股因 stockForecasts 时序问题拿不到现价。
+                            val livePrice = previous?.currentPrice ?: lastPricesSnapshot[code] ?: cachedPrice
                             forecast.copy(
-                                currentPrice = previous?.currentPrice ?: cachedPrice,
+                                currentPrice = livePrice,
                                 marketValue = previous?.marketValue
-                                    ?: cachedPrice?.let { if (forecast.shares > 0) it * forecast.shares else null }
+                                    ?: livePrice?.let { if (forecast.shares > 0) it * forecast.shares else null }
                             )
                         },
                         forecastTotal = forecastTotal,
+                        costDividendYield = costDividendYield,
                         livingExpenseTargetAmount = livingExpenseTarget,
                         fireProgress = progress,
                         filteredItems = fi,
@@ -463,9 +513,9 @@ class PortfolioViewModel @Inject constructor(
 
     /**
      * 一键评估当前筛选后可见的持仓股。对每只：
-     *  1. 确保 boll 已加载（复用 [_stockBands] 缓存，缺则触发 fetchBoll）；
+     *  1. 拉日/周/月三周期 BOLL（复用 [_stockBands] 周线缓存，日/月即时拉取）；
      *  2. 取 stockForecasts 的现价/股息；
-     *  3. 调 [HoldingRecommender.recommend] 得建议；
+     *  3. 调 [HoldingRecommender.recommend] 得建议（买入需「日下轨+周下轨+月中轨及以下」三周期共振）；
      *  4. 按 action 优先级（BUY→HOLD→SELL→INSUFFICIENT_DATA）排序。
      *
      * 并发用 [Semaphore] 限流到 3（每只股日/周/月 3 次 BOLL 请求），避免 Tencent 拒。
@@ -501,7 +551,9 @@ class PortfolioViewModel @Inject constructor(
                         val recommendation = HoldingRecommender.recommend(
                             price = price, band = weekly,
                             latestYearlyDividend = forecast?.latestYearlyDividend,
-                            thresholds = thresholds
+                            thresholds = thresholds,
+                            dailyBand = daily,
+                            monthlyBand = monthly
                         )
                         val evaluated = EvaluatedStock(
                             code = item.code, name = item.name, industry = item.industry,
@@ -546,7 +598,11 @@ class PortfolioViewModel @Inject constructor(
         val monthlyBands = current.monthlyBands
         viewModelScope.launch {
             _uiState.update { it.copy(llmAnalysis = LlmAnalysisState.Loading) }
-            val result = llmAnalysisRepository.analyze(evaluation, dailyBands, monthlyBands, signals, _evalThresholds.value)
+            // 回流全局用户投资原则（失败降级空，不阻塞分析，红线 #2）
+            val userStrategies = runCatching {
+                tradeStrategyRepository.activeStrategies().map { toUserStrategyRef(it) }
+            }.getOrDefault(emptyList())
+            val result = llmAnalysisRepository.analyze(evaluation, dailyBands, monthlyBands, signals, _evalThresholds.value, userStrategies)
             val state = when (result) {
                 is LlmAnalysisResult.Success -> LlmAnalysisState.Success(result.analysis)
                 LlmAnalysisResult.NotConfigured -> LlmAnalysisState.NotConfigured
@@ -599,11 +655,13 @@ class PortfolioViewModel @Inject constructor(
     }
 
     /**
-     * 按 code 删除（持仓卡片用）：从内存快照查 StockEntity 后委托 [deleteStock]，
-     * 以保留撤销时恢复交易记录的能力。快照里找不到时退化为无撤销删除。
+     * 按 code 删除（持仓/自选卡片共用）：从内存快照查 StockEntity 后委托 [deleteStock]，
+     * 以保留撤销时恢复交易记录的能力。持仓快照查不到时再查全量快照（含 shares=0 自选股），
+     * 仍找不到时退化为无撤销删除。
      */
     fun deleteStock(code: String) {
         val stock = lastStocksSnapshot.firstOrNull { it.code == code }
+            ?: lastAllStocksSnapshot.firstOrNull { it.code == code }
         if (stock != null) {
             deleteStock(stock)
         } else {
@@ -650,7 +708,8 @@ class PortfolioViewModel @Inject constructor(
     fun refreshIndustries() {
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshingIndustry = true) }
-            val stocks = lastStocksSnapshot.ifEmpty {
+            // 用全量快照（含自选股）：自选股的行业也要能被刷新，否则自选卡片行业永远是空。
+            val stocks = lastAllStocksSnapshot.ifEmpty {
                 stockRepository.observeAllStocks().first()
             }
             stocks.forEach { stock ->

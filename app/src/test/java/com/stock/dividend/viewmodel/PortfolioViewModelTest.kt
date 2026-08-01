@@ -1,7 +1,7 @@
 package com.stock.dividend.viewmodel
 
 import android.content.Context
-import android.content.SharedPreferences
+import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.TransactionDao
@@ -15,10 +15,12 @@ import com.stock.dividend.data.notification.NotificationCheckCoordinator
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.DividendThresholds
 import com.stock.dividend.data.repository.HoldingAction
+import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.LlmAnalysisRepository
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.TradeStrategyRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -33,8 +35,11 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
 class PortfolioViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
@@ -45,11 +50,11 @@ class PortfolioViewModelTest {
     private val notificationCheckCoordinator: NotificationCheckCoordinator = mockk(relaxed = true)
     private val notificationRuleRepository: NotificationRuleRepository = mockk()
     private val llmAnalysisRepository: LlmAnalysisRepository = mockk()
-    private val context: Context = mockk(relaxed = true)
-    private val prefs: SharedPreferences = mockk(relaxed = true)
-    private val prefsEditor: SharedPreferences.Editor = mockk(relaxed = true) {
-        every { putLong(any(), any()) } returns this
+    private val tradeStrategyRepository: TradeStrategyRepository = mockk {
+        coEvery { activeStrategies() } returns emptyList()
     }
+    // Robolectric 提供真实可用的 Context + SharedPreferences，不再需要 mockk 整条 prefs 链
+    private lateinit var context: Context
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
     private val livingExpensesFlow = MutableStateFlow<List<LivingExpenseItemEntity>>(emptyList())
@@ -57,10 +62,7 @@ class PortfolioViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        every { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) } returns prefs
-        every { prefs.edit() } returns prefsEditor
-        every { prefs.getLong("last_portfolio_refresh_ms", 0L) } returns 0L
-        every { prefs.contains("portfolio_total_assets") } returns false
+        context = ApplicationProvider.getApplicationContext()
         every { notificationRuleRepository.observeEvalThresholds() } returns
             MutableStateFlow(DividendThresholds())
         every { stockRepository.observeAllStocks() } returns stocksFlow
@@ -195,9 +197,11 @@ class PortfolioViewModelTest {
 
     @Test
     fun `actual weight uses total assets as denominator`() = runTest {
-        // Persist total assets = 400000 via prefs.
-        every { prefs.contains("portfolio_total_assets") } returns true
-        every { prefs.getLong("portfolio_total_assets", any()) } returns 400000.0.toRawBits()
+        // Persist total assets = 400000 via real Robolectric SharedPreferences.
+        context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putLong("portfolio_total_assets", 400000.0.toRawBits())
+            .commit()
         stocksFlow.value = listOf(
             stock("sz.000001", shares = 100, costPerShare = 10.0, targetWeight = 10.0, industry = "消费")
         )
@@ -278,7 +282,10 @@ class PortfolioViewModelTest {
 
         assertThat(viewModel.uiState.value.totalAssets).isWithin(0.01).of(400000.0)
         assertThat(viewModel.uiState.value.editingTotalAssets).isFalse()
-        coVerify { prefsEditor.putLong("portfolio_total_assets", 400000.0.toRawBits()) }
+        // 验证真实 SharedPreferences 已写入（Double.toRawBits 存为 Long）
+        val stored = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+            .getLong("portfolio_total_assets", 0L)
+        assertThat(stored).isEqualTo(400000.0.toRawBits())
         val item = viewModel.uiState.value.items.first()
         // 新两层配比：无行业目标时 targetValue 为 0
         assertThat(item.targetValue).isWithin(0.01).of(0.0)
@@ -302,8 +309,10 @@ class PortfolioViewModelTest {
 
     @Test
     fun `industry groups aggregate market value and map target weight`() = runTest {
-        every { prefs.contains("portfolio_total_assets") } returns true
-        every { prefs.getLong("portfolio_total_assets", any()) } returns 100000.0.toRawBits()
+        context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putLong("portfolio_total_assets", 100000.0.toRawBits())
+            .commit()
         coEvery { stockRepository.getIndustryTargets() } returns listOf(
             com.stock.dividend.data.local.entity.IndustryTargetEntity("银行", 30.0)
         )
@@ -365,6 +374,60 @@ class PortfolioViewModelTest {
         assertThat(viewModel.uiState.value.watchlist.map { it.code }).containsExactly("sh.600519")
     }
 
+    /**
+     * 回归：自选股（shares=0）也必须被现价刷新覆盖。
+     * 历史缺陷：Collector 2 订阅 holdingsFlow(shares>0)，自选股从不进入 fetchQuotes，
+     * 纯自选股时刷新还会因 flatMapLatest 短路成 flowOf(emptyMap()) 而彻底失效。
+     * 修复后 fetchQuotes 的入参应包含自选股 code，返回价同步进 stockForecasts。
+     */
+    @Test
+    fun `refresh fetches quotes for shares-zero watch stocks too`() = runTest {
+        stocksFlow.value = listOf(
+            stock("sz.000001", shares = 100, costPerShare = 10.0),
+            stock("sh.600519", shares = 0, costPerShare = 0.0)   // 纯自选
+        )
+        // 记录每次 fetchQuotes 调用的入参（stocks 列表），断言自选股 code 被包含
+        val fetchedStocks = mutableListOf<List<StockEntity>>()
+        coEvery { stockRepository.fetchQuotes(any()) } answers {
+            fetchedStocks += firstArg<List<StockEntity>>()
+            mapOf("sz.000001" to 12.0, "sh.600519" to 1800.0)
+        }
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 关键断言：fetchQuotes 的入参（stocks 列表）必须包含 shares=0 的自选股
+        val fetchedCodes = fetchedStocks.flatMap { it.map { s -> s.code } }.toSet()
+        assertThat(fetchedCodes).contains("sh.600519")
+        // 拉到的自选股现价同步进 stockForecasts（自选卡片据此画「股息率→价位」横轴）
+        assertThat(viewModel.uiState.value.stockForecasts["sh.600519"]?.currentPrice)
+            .isWithin(0.01).of(1800.0)
+    }
+
+    /**
+     * 回归：仅有自选股（无任何持仓）时，刷新按钮必须能正常结束 loading，
+     * 且 fetchQuotes 仍被调用。历史缺陷：holdingsFlow 为空 → flatMapLatest 短路
+     * → _refreshTrigger 从不被消费 → 刷新按钮永久转圈。
+     */
+    @Test
+    fun `watchlist-only portfolio still refreshes and resets loading`() = runTest {
+        stocksFlow.value = listOf(
+            stock("sh.600519", shares = 0, costPerShare = 0.0)   // 仅一只自选股
+        )
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sh.600519" to 1800.0)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 纯自选场景下 fetchQuotes 也被调用
+        coVerify { stockRepository.fetchQuotes(any()) }
+        // loading 正常复位，刷新按钮不会被卡死
+        assertThat(viewModel.uiState.value.isLoading).isFalse()
+        // 自选股现价被刷新
+        assertThat(viewModel.uiState.value.stockForecasts["sh.600519"]?.currentPrice)
+            .isWithin(0.01).of(1800.0)
+    }
+
     @Test
     fun `forecastTotal sums forecast income for shares-greater-than-zero holdings`() = runTest {
         val holding = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
@@ -389,6 +452,98 @@ class PortfolioViewModelTest {
         assertThat(forecast).isNotNull()
         assertThat(forecast!!.forecastIncome).isWithin(0.01).of(1000.0)
         assertThat(forecast.latestYearlyDividend).isWithin(0.01).of(10.0)
+    }
+
+    @Test
+    fun `costDividendYield sums latest yearly dividend times shares over total cost`() = runTest {
+        // 持仓 A：100 股 × 成本 10，最新年度每股股息 1.0  → 股息合计 100，成本合计 1000
+        val holdingA = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
+        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(
+            listOf(
+                DividendEntity(
+                    id = "sz.000001_2025",
+                    stockCode = "sz.000001",
+                    reportDate = "2025-12-31",
+                    cashPerShare = 1.0
+                )
+            )
+        )
+        // 持仓 B：200 股 × 成本 5，最新年度每股股息 0.5 → 股息合计 100，成本合计 1000
+        val holdingB = stock("sz.000002", shares = 200, costPerShare = 5.0, yieldPeriod = "1")
+        every { dividendDao.observeByStock("sz.000002") } returns MutableStateFlow(
+            listOf(
+                DividendEntity(
+                    id = "sz.000002_2025",
+                    stockCode = "sz.000002",
+                    reportDate = "2025-12-31",
+                    cashPerShare = 0.5
+                )
+            )
+        )
+        stocksFlow.value = listOf(holdingA, holdingB)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 总成本息率 = (100 + 100) / (1000 + 1000) = 0.10 (10%)
+        assertThat(viewModel.uiState.value.costDividendYield).isNotNull()
+        assertThat(viewModel.uiState.value.costDividendYield!!).isWithin(0.0001).of(0.10)
+    }
+
+    /**
+     * 复现用户场景：有持仓+自选时一切正常（价格已刷新），删掉全部持仓、只剩自选后，
+     * 自选区块是否还显示、自选股现价是否还在。
+     */
+    @Test
+    fun `watchlist still shows price after all holdings deleted`() = runTest {
+        // 初始：1 只持仓 + 1 只自选，价格已刷新
+        stocksFlow.value = listOf(
+            stock("sz.000001", shares = 100, costPerShare = 10.0),
+            stock("sh.600519", shares = 0, costPerShare = 0.0)
+        )
+        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf(
+            "sz.000001" to 12.0,
+            "sh.600519" to 1800.0
+        )
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 删除前：自选股现价 1800
+        assertThat(viewModel.uiState.value.stockForecasts["sh.600519"]?.currentPrice)
+            .isWithin(0.01).of(1800.0)
+
+        // 删掉持仓，只剩自选股
+        stocksFlow.value = listOf(
+            stock("sh.600519", shares = 0, costPerShare = 0.0)
+        )
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // 删除后：自选区块仍在
+        assertThat(viewModel.uiState.value.watchlist.map { it.code }).containsExactly("sh.600519")
+        assertThat(viewModel.uiState.value.filteredWatchlist.map { it.code })
+            .containsExactly("sh.600519")
+        // 自选股现价仍显示（不因持仓清空而丢失）
+        assertThat(viewModel.uiState.value.stockForecasts["sh.600519"]?.currentPrice)
+            .isWithin(0.01).of(1800.0)
+    }
+
+    @Test
+    fun `costDividendYield is null when no dividend data or zero cost`() = runTest {
+        // 持仓无股息记录 → 无 latestYearlyDividend
+        val holding = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
+        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(emptyList())
+        stocksFlow.value = listOf(holding)
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.costDividendYield).isNull()
+
+        // 零成本的纯自选股不应贡献分母 → 仍为 null
+        stocksFlow.value = listOf(stock("sz.000002", shares = 0, costPerShare = 0.0))
+        testDispatcher.scheduler.advanceUntilIdle()
+        assertThat(viewModel.uiState.value.costDividendYield).isNull()
     }
 
     @Test
@@ -516,12 +671,17 @@ class PortfolioViewModelTest {
     @Test
     fun `evaluateVisibleHoldings sets isEvaluating then produces sorted results`() = runTest {
         val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        // 月线 middle=12，price 8.8 ≤ 12 满足「月中轨及以下」，与日/周下轨共振 → BUY
+        val monthly = BollBand(middle = 12.0, upper = 14.0, lower = 10.0)
         stocksFlow.value = listOf(
             stock("sh.600036", shares = 100, costPerShare = 10.0, industry = "银行"),
             stock("sz.000001", shares = 200, costPerShare = 5.0, industry = "银行")
         )
         coEvery { stockRepository.fetchBoll("sh.600036") } returns band
+        coEvery { stockRepository.fetchBoll("sh.600036", KlinePeriod.DAILY) } returns band
+        coEvery { stockRepository.fetchBoll("sh.600036", KlinePeriod.MONTHLY) } returns monthly
         coEvery { stockRepository.fetchBoll("sz.000001") } returns null // 数据不足
+        coEvery { stockRepository.fetchBoll("sz.000001", any()) } returns null
         // 给 sh.600036 一个现价 + 股息
         every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(
             listOf(dividend("sh.600036", 0.50))
@@ -540,7 +700,7 @@ class PortfolioViewModelTest {
         assertThat(state.isEvaluating).isFalse()
         assertThat(state.evaluation).isNotNull()
         val eval = state.evaluation!!
-        // sh.600036: price 8.8 < lower 9 → BUY；sz.000001: band null → INSUFFICIENT_DATA
+        // sh.600036: 日/周下轨 + 月中轨及以下 三周期共振 → BUY；sz.000001: band null → INSUFFICIENT_DATA
         assertThat(eval.map { it.code to it.action }).containsExactly(
             "sh.600036" to HoldingAction.BUY,
             "sz.000001" to HoldingAction.INSUFFICIENT_DATA
@@ -566,13 +726,16 @@ class PortfolioViewModelTest {
     @Test
     fun `evaluateVisibleHoldings respects custom thresholds`() = runTest {
         val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        val monthly = BollBand(middle = 12.0, upper = 14.0, lower = 10.0)
         stocksFlow.value = listOf(stock("sh.600036", shares = 100, costPerShare = 10.0))
         coEvery { stockRepository.fetchBoll("sh.600036") } returns band
+        coEvery { stockRepository.fetchBoll("sh.600036", KlinePeriod.DAILY) } returns band
+        coEvery { stockRepository.fetchBoll("sh.600036", KlinePeriod.MONTHLY) } returns monthly
         every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(
             listOf(dividend("sh.600036", 0.22)) // yield ~2.5% at price 8.8
         )
         coEvery { stockRepository.fetchQuotes(any()) } returns mapOf("sh.600036" to 8.8)
-        // 严格门槛：min=3 → 2.5% 应降级 HOLD
+        // 严格门槛：min=3 → 三周期共振但 2.5% 应降级 HOLD
         every { notificationRuleRepository.observeEvalThresholds() } returns
             MutableStateFlow(DividendThresholds(minYieldPercent = 3.0, boostYieldPercent = 6.0))
 
@@ -594,6 +757,7 @@ class PortfolioViewModelTest {
         notificationCheckCoordinator,
         notificationRuleRepository,
         llmAnalysisRepository,
+        tradeStrategyRepository,
         context
     )
 

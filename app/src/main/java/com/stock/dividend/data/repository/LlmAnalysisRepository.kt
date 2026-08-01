@@ -20,12 +20,13 @@ class LlmAnalysisRepository @Inject constructor(
         monthlyBands: Map<String, BollBand?>,
         signals: PortfolioSignals,
         thresholds: DividendThresholds,
+        userStrategies: List<UserStrategyRef> = emptyList(),
     ): LlmAnalysisResult {
         if (evaluatedStocks.isEmpty()) return LlmAnalysisResult.NotConfigured
         val config = configSource.observeConfig().first()
         if (!config.isComplete) return LlmAnalysisResult.NotConfigured
 
-        val prompt = LlmPromptBuilder.build(evaluatedStocks, dailyBands, monthlyBands, signals, thresholds)
+        val prompt = LlmPromptBuilder.build(evaluatedStocks, dailyBands, monthlyBands, signals, thresholds, userStrategies)
         val url = config.baseUrl.trimEnd('/') + "/chat/completions"
         val request = LlmChatRequest(
             model = config.model,
