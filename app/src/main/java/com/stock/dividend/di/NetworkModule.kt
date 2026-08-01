@@ -1,6 +1,8 @@
 package com.stock.dividend.di
 
+import com.stock.dividend.data.remote.BondYieldApi
 import com.stock.dividend.data.remote.DividendApi
+import com.stock.dividend.data.remote.FundamentalApi
 import com.stock.dividend.data.remote.LlmApi
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
@@ -22,6 +24,11 @@ import javax.inject.Singleton
 @Retention(AnnotationRetention.BINARY)
 annotation class EastMoneyDividendApi
 
+/** 标记东方财富基本面（主要财务指标）接口。 */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class EastMoneyFundamentalApi
+
 /** 标记腾讯财经股息接口（主源）。 */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
@@ -38,6 +45,7 @@ object NetworkModule {
 
     private const val SEARCH_BASE_URL = "https://searchapi.eastmoney.com/"
     private const val DATA_BASE_URL = "https://datacenter-web.eastmoney.com/"
+    private const val DATACENTER_BASE_URL = "https://datacenter.eastmoney.com/"
     private const val QUOTE_BASE_URL = "https://push2.eastmoney.com/"
     private const val TENCENT_KLINE_BASE_URL = "https://web.ifzq.gtimg.cn/"
 
@@ -95,6 +103,18 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    @EastMoneyFundamentalApi
+    fun provideEastMoneyFundamentalApi(client: OkHttpClient): FundamentalApi {
+        return Retrofit.Builder()
+            .baseUrl(DATA_BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(FundamentalApi::class.java)
+    }
+
+    @Provides
+    @Singleton
     @TencentDividendSource
     fun provideTencentDividendApi(client: OkHttpClient): TencentDividendApi {
         return Retrofit.Builder()
@@ -114,6 +134,17 @@ object NetworkModule {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(QuoteApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideBondYieldApi(client: OkHttpClient): BondYieldApi {
+        return Retrofit.Builder()
+            .baseUrl(DATACENTER_BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(BondYieldApi::class.java)
     }
 
     @Provides

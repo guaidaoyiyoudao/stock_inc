@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -61,7 +63,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.StockLlmAnalysisState
+import com.stock.dividend.data.repository.formatFundamentalsPeriod
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.CompactTopAppBar
@@ -74,6 +78,8 @@ import com.stock.dividend.ui.component.SectionHeader
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.viewmodel.ForecastDetail
 import com.stock.dividend.viewmodel.StockDetailViewModel
+import com.stock.dividend.ui.theme.FinanceGreen
+import com.stock.dividend.ui.theme.FinanceRed
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -248,6 +254,15 @@ fun StockDetailScreen(
                                 DividendRateFallbackCard(point = null)
                             }
                         }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        FundamentalsSection(
+                            fundamentals = uiState.fundamentals,
+                            isLoading = uiState.fundamentalsLoading,
+                            onRefresh = { viewModel.refreshFundamentals() }
+                        )
                     }
 
                     item {
@@ -704,5 +719,270 @@ private fun StockLlmAnalysisSection(
                 Text("AI 解读")
             }
         }
+    }
+}
+
+/**
+ * 基本面区块（设计文档 §5）：三态——加载中 / 空 / 成功。
+ * 位置在「分红率趋势」与「AI 解读」之间，逻辑顺序：过去的分红 → 支撑分红的盈利 → 综合解读。
+ */
+@Composable
+private fun FundamentalsSection(
+    fundamentals: Fundamentals?,
+    isLoading: Boolean,
+    onRefresh: () -> Unit
+) {
+    SectionHeader(
+        title = "基本面（近${fundamentals?.periods?.size ?: 0}期）",
+        actionText = "更新",
+        actionIcon = Icons.Filled.Refresh,
+        onActionClick = onRefresh
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    when {
+        isLoading -> FundamentalsLoadingCard()
+        fundamentals == null || fundamentals.periods.isEmpty() -> FundamentalsEmptyCard()
+        else -> FundamentalsCard(fundamentals = fundamentals)
+    }
+}
+
+@Composable
+private fun FundamentalsLoadingCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = AppCardDefaults.listCardColors()
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(AppCardDefaults.ListPadding)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp
+            )
+            Text(
+                text = "加载基本面数据…",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun FundamentalsEmptyCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = AppCardDefaults.listCardColors()
+    ) {
+        Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
+            Text(
+                text = "暂无基本面数据",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "点上方「更新」重试，或稍后再试。",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/**
+ * 基本面卡片：最新期突出行 + 趋势小表（默认最近 3 期，可展开全部）。
+ */
+@Composable
+private fun FundamentalsCard(fundamentals: Fundamentals) {
+    val periods = fundamentals.periods
+    // 默认展示最近 3 期（设计文档 §5.2）；展开则显示全部
+    var expanded by remember { mutableStateOf(false) }
+    val visiblePeriods = remember(periods, expanded) {
+        if (expanded || periods.size <= 3) periods else periods.takeLast(3)
+    }
+    val canToggle = periods.size > 3
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = AppCardDefaults.listCardColors()
+    ) {
+        Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
+            // 最新期突出行
+            periods.lastOrNull()?.let { latest ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    FinanceMetric(
+                        label = "最新期",
+                        value = formatFundamentalsPeriod(latest.reportDate)
+                    )
+                    FinanceMetric(
+                        label = "ROE",
+                        value = latest.roe?.let { "%.1f%%".format(it) } ?: "—"
+                    )
+                    FinanceMetric(
+                        label = "负债率",
+                        value = latest.debtToAssetRatio?.let { "%.0f%%".format(it) } ?: "—"
+                    )
+                    FinanceMetric(
+                        label = "派息率",
+                        value = latest.payoutRatio?.let { "%.0f%%".format(it) } ?: "—"
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    FinanceMetric(
+                        label = "营收同比",
+                        value = formatYoy(latest.revenueYoy),
+                        valueColor = yoyColor(latest.revenueYoy)
+                    )
+                    FinanceMetric(
+                        label = "净利同比",
+                        value = formatYoy(latest.netProfitYoy),
+                        valueColor = yoyColor(latest.netProfitYoy)
+                    )
+                    FinanceMetric(
+                        label = "公告股息率",
+                        value = latest.announceYield?.let { "%.2f%%".format(it) } ?: "—"
+                    )
+                }
+                // 最新期分红方案（整行，缺失不展示）
+                latest.dividendPlan?.takeIf { it.isNotBlank() }?.let { plan ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "分红方案：$plan",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (periods.size > 1) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "趋势",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                // 趋势表头
+                FundamentalsTrendHeader()
+                visiblePeriods.forEach { p ->
+                    FundamentalsTrendRow(period = p, isLatest = p.reportDate == periods.last().reportDate)
+                }
+
+                if (canToggle) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        TextButton(onClick = { expanded = !expanded }) {
+                            Icon(
+                                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                contentDescription = null
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (expanded) "收起" else "展开全部 (${periods.size}期)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FundamentalsTrendHeader() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("期次", modifier = Modifier.weight(1.2f), style = trendHeaderStyle())
+        Text("ROE", modifier = cellWeight(), style = trendHeaderStyle())
+        Text("负债", modifier = cellWeight(), style = trendHeaderStyle())
+        Text("营收", modifier = cellWeight(), style = trendHeaderStyle())
+        Text("净利", modifier = cellWeight(), style = trendHeaderStyle())
+        Text("派息", modifier = cellWeight(), style = trendHeaderStyle())
+    }
+}
+
+@Composable
+private fun FundamentalsTrendRow(period: Fundamentals.Period, isLatest: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = formatFundamentalsPeriod(period.reportDate) + if (isLatest) "·" else "",
+            modifier = Modifier.weight(1.2f),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (isLatest) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            fontWeight = if (isLatest) FontWeight.SemiBold else FontWeight.Normal
+        )
+        Text(period.roe?.let { "%.1f%%".format(it) } ?: "—", modifier = cellWeight(), style = trendCellStyle())
+        Text(period.debtToAssetRatio?.let { "%.0f%%".format(it) } ?: "—", modifier = cellWeight(), style = trendCellStyle())
+        Text(
+            formatYoy(period.revenueYoy),
+            modifier = cellWeight(),
+            style = trendCellStyle().copy(color = yoyColor(period.revenueYoy))
+        )
+        Text(
+            formatYoy(period.netProfitYoy),
+            modifier = cellWeight(),
+            style = trendCellStyle().copy(color = yoyColor(period.netProfitYoy))
+        )
+        Text(period.payoutRatio?.let { "%.0f%%".format(it) } ?: "—", modifier = cellWeight(), style = trendCellStyle())
+    }
+}
+
+/** 趋势单元格权重（仅在 RowScope 内可用，weight 是 RowScope 扩展）。 */
+private fun androidx.compose.foundation.layout.RowScope.cellWeight() = Modifier.weight(1f)
+
+@Composable
+private fun trendHeaderStyle() = MaterialTheme.typography.labelSmall.copy(
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    fontWeight = FontWeight.SemiBold
+)
+
+@Composable
+private fun trendCellStyle() = MaterialTheme.typography.labelMedium.copy(
+    color = MaterialTheme.colorScheme.onSurface
+)
+
+/** 同比%渲染：带正负号。 */
+private fun formatYoy(value: Double?): String = when {
+    value == null || !value.isFinite() -> "—"
+    else -> "${if (value >= 0) "+" else ""}${"%.1f".format(value)}%"
+}
+
+/** 同比正负色：正→绿，负→红，缺失/0→中性。 */
+@Composable
+private fun yoyColor(value: Double?): androidx.compose.ui.graphics.Color {
+    val unspecified = MaterialTheme.colorScheme.onSurface
+    if (value == null || !value.isFinite()) return unspecified
+    return when {
+        value > 0 -> FinanceGreen
+        value < 0 -> FinanceRed
+        else -> unspecified
     }
 }

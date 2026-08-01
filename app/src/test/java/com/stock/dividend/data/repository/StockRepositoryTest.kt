@@ -15,6 +15,8 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
+import com.stock.dividend.data.remote.dto.BalanceSheetResponse
+import com.stock.dividend.data.remote.dto.FundamentalResponse
 import com.stock.dividend.data.remote.dto.QuoteData
 import com.stock.dividend.data.remote.dto.QuoteItem
 import com.stock.dividend.data.remote.dto.QuoteResponse
@@ -42,6 +44,7 @@ class StockRepositoryTest {
 
     private val api: SearchApi = mockk()
     private val quoteApi: QuoteApi = mockk()
+    private val fundamentalApi: com.stock.dividend.data.remote.FundamentalApi = mockk()
     private val dao: StockDao = mockk(relaxed = true)
     private val transactionDao: TransactionDao = mockk(relaxed = true)
     private val industryTargetDao: IndustryTargetDao = mockk(relaxed = true)
@@ -51,7 +54,7 @@ class StockRepositoryTest {
     private val klineRepository: KlineRepository = mockk(relaxed = true)
     private val appDatabase: AppDatabase = mockk(relaxed = true)
     private val repository = StockRepository(
-        api, quoteApi, dao, transactionDao, industryTargetDao,
+        api, quoteApi, fundamentalApi, dao, transactionDao, industryTargetDao,
         priceCacheDao, searchCacheDao, stockTagDao, klineRepository, appDatabase
     )
 
@@ -783,6 +786,75 @@ class StockRepositoryTest {
         coVerify { searchCacheDao.upsertAll(capture(cacheSlot)) }
         assertThat(cacheSlot.captured.first().queryKey).isEqualTo("贵州茅台")
         assertThat(cacheSlot.captured.first().code).isEqualTo("sh.600519")
+    }
+
+    // ---------- 基本面：双接口合并 ----------
+
+    @Test
+    fun `fetchFundamentals merges financials and balance sheet debt ratio`() = runTest {
+        coEvery { fundamentalApi.getFundamentals(filter = any()) } returns FundamentalResponse(
+            success = true,
+            result = FundamentalResponse.FundamentalResult(
+                data = listOf(
+                    FundamentalResponse.Item(
+                        reportDate = "2024-12-31", weightedAvgRoe = 9.15, debtAssetRatio = null,
+                        revenueYoy = -1.6, netProfitYoy = -4.2, basicEps = 2.07
+                    )
+                )
+            )
+        )
+        coEvery { fundamentalApi.getBalanceSheet(filter = any()) } returns BalanceSheetResponse(
+            success = true,
+            result = BalanceSheetResponse.BalanceSheetResult(
+                data = listOf(
+                    BalanceSheetResponse.Item(reportDate = "2024-12-31 00:00:00", debtAssetRatio = 90.7)
+                )
+            )
+        )
+
+        val result = repository.fetchFundamentals("sz.000001")
+
+        assertThat(result).isNotNull()
+        assertThat(result!!.periods).hasSize(1)
+        assertThat(result.periods[0].roe).isEqualTo(9.15)
+        // 负债率由资产负债表补全
+        assertThat(result.periods[0].debtToAssetRatio).isEqualTo(90.7)
+        assertThat(result.periods[0].basicEps).isEqualTo(2.07)
+    }
+
+    @Test
+    fun `fetchFundamentals degrades debt ratio to null when balance sheet fails`() = runTest {
+        coEvery { fundamentalApi.getFundamentals(filter = any()) } returns FundamentalResponse(
+            success = true,
+            result = FundamentalResponse.FundamentalResult(
+                data = listOf(
+                    FundamentalResponse.Item(
+                        reportDate = "2024-12-31", weightedAvgRoe = 9.15, debtAssetRatio = null,
+                        revenueYoy = -1.6, netProfitYoy = -4.2, basicEps = 2.07
+                    )
+                )
+            )
+        )
+        // 资产负债表接口抛异常 → runCatching 兜底为 null，仅负债率缺失
+        coEvery { fundamentalApi.getBalanceSheet(filter = any()) } throws RuntimeException("network")
+
+        val result = repository.fetchFundamentals("sz.000001")
+
+        assertThat(result).isNotNull()
+        assertThat(result!!.periods[0].debtToAssetRatio).isNull()
+        assertThat(result.periods[0].roe).isEqualTo(9.15)
+    }
+
+    @Test
+    fun `fetchFundamentals returns null when financials endpoint fails`() = runTest {
+        // 主要财务指标接口失败 → 整体降级 null（红线 #2）
+        coEvery { fundamentalApi.getFundamentals(filter = any()) } throws RuntimeException("network")
+        coEvery { fundamentalApi.getBalanceSheet(filter = any()) } returns BalanceSheetResponse(
+            success = true, result = BalanceSheetResponse.BalanceSheetResult(data = emptyList())
+        )
+
+        val result = repository.fetchFundamentals("sz.000001")
+        assertThat(result).isNull()
     }
 
     private fun stockItem(code: String, name: String, mktNum: String) = StockSearchResponse.StockItem(

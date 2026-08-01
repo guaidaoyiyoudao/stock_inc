@@ -17,5 +17,11 @@ data class StockEntity(
     val yieldPeriod: String = "3",
     val costPerShare: Double = 0.0,
     val targetWeight: Double = 0.0,
-    val industry: String = ""
-)
+    val industry: String = "",
+    /** 买入阈值倍数：当前股息率达到「10Y 国债收益率 × 该倍数」时提示买入。默认 2.5。 */
+    val buyThresholdMultiplier: Double = DEFAULT_BUY_THRESHOLD_MULTIPLIER
+) {
+    companion object {
+        const val DEFAULT_BUY_THRESHOLD_MULTIPLIER = 2.5
+    }
+}

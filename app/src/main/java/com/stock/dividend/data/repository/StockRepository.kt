@@ -15,7 +15,10 @@ import com.stock.dividend.data.local.entity.StockTagEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
+import com.stock.dividend.di.EastMoneyFundamentalApi
 import androidx.room.withTransaction
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -47,6 +50,7 @@ data class ImportSummary(
 class StockRepository @Inject constructor(
     private val api: SearchApi,
     private val quoteApi: QuoteApi,
+    @EastMoneyFundamentalApi private val fundamentalApi: com.stock.dividend.data.remote.FundamentalApi,
     private val stockDao: StockDao,
     private val transactionDao: TransactionDao,
     private val industryTargetDao: IndustryTargetDao,
@@ -198,6 +202,14 @@ class StockRepository @Inject constructor(
         stockDao.updateTargetWeight(code, weight.coerceIn(0.0, 100.0))
     }
 
+    /**
+     * 更新买入阈值倍数（股息率达到「10Y 国债 × 该倍数」时提示买入）。
+     * 合法范围 [0.1, 20.0]，过小或过大无意义。
+     */
+    suspend fun updateBuyThresholdMultiplier(code: String, multiplier: Double) {
+        stockDao.updateBuyThresholdMultiplier(code, multiplier.coerceIn(0.1, 20.0))
+    }
+
     suspend fun updateLastUpdated(code: String, timestamp: Long) {
         stockDao.updateLastUpdated(code, timestamp)
     }
@@ -297,6 +309,37 @@ class StockRepository @Inject constructor(
             return null
         }
         return BollCalculator.calculate(closes)
+    }
+
+    /**
+     * 拉取单股近 5 期主要财务指标（ROE / 负债率 / 营收净利同比）。
+     *
+     * 并发拉两个接口：主要财务指标（RPT_LICO_FN_CPD）+ 资产负债表（RPT_DMSK_FN_BALANCE），
+     * 后者补全前者缺失的负债率（按报告期对齐，见 [FundamentalsBuilder]）。
+     *
+     * 职责分离：只解析财务摘要，**不**补全派息率（派息率需股息数据，由 VM 经 [enrichPayoutRatio] 补全，
+     * 避免 Repository 间交叉注入）。任一接口失败降级为空（红线 #2），绝不崩 UI——财务指标接口失败则整体 null，
+     * 资产负债表接口失败则仅负债率为 null。
+     */
+    suspend fun fetchFundamentals(stockCode: String): Fundamentals? {
+        return try {
+            val securityCode = stockCode.substringAfter(".")
+            val filter = """(SECURITY_CODE="$securityCode")"""
+            coroutineScope {
+                // 并发拉两接口；任一失败用 runCatching 兜底为空，不阻塞另一个
+                val finDeferred = async {
+                    runCatching { fundamentalApi.getFundamentals(filter = filter) }.getOrNull()
+                }
+                val balDeferred = async {
+                    runCatching { fundamentalApi.getBalanceSheet(filter = filter) }.getOrNull()
+                }
+                val finItems = finDeferred.await()?.result?.data.orEmpty()
+                val balItems = balDeferred.await()?.result?.data.orEmpty()
+                FundamentalsBuilder.build(finItems, balItems)
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     // ---------- 行业目标配比 ----------

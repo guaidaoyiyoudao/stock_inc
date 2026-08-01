@@ -39,6 +39,9 @@ interface StockDao {
     @Query("UPDATE stocks SET industry = :industry WHERE code = :code")
     suspend fun updateIndustry(code: String, industry: String)
 
+    @Query("UPDATE stocks SET buyThresholdMultiplier = :multiplier WHERE code = :code")
+    suspend fun updateBuyThresholdMultiplier(code: String, multiplier: Double)
+
     @Query("SELECT * FROM stocks")
     suspend fun getAll(): List<StockEntity>
 
