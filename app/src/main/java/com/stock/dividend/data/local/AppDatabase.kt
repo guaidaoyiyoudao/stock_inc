@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.stock.dividend.data.local.dao.AchievementDao
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
+import com.stock.dividend.data.local.dao.FinancialStatementsCacheDao
 import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.FundamentalsCacheDao
 import com.stock.dividend.data.local.dao.IndustryTargetDao
@@ -22,6 +23,7 @@ import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
+import com.stock.dividend.data.local.entity.FinancialStatementsCacheEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.FundamentalsCacheEntity
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
@@ -51,9 +53,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         StockTagEntity::class,
         TradeStrategyEntity::class,
         FundamentalsCacheEntity::class,
-        LlmAnalysisCacheEntity::class
+        LlmAnalysisCacheEntity::class,
+        FinancialStatementsCacheEntity::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -72,6 +75,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tradeStrategyDao(): TradeStrategyDao
     abstract fun fundamentalsCacheDao(): FundamentalsCacheDao
     abstract fun llmAnalysisCacheDao(): LlmAnalysisCacheDao
+    abstract fun financialStatementsCacheDao(): FinancialStatementsCacheDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -309,6 +313,18 @@ abstract class AppDatabase : RoomDatabase() {
                         "`scope` TEXT NOT NULL, " +
                         "`payload` TEXT NOT NULL, " +
                         "`createdAt` INTEGER NOT NULL)"
+                )
+            }
+        }
+
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 财务三表缓存：季报级慢变数据，7 天 TTL
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `financial_statements_cache` (" +
+                        "`stockCode` TEXT NOT NULL PRIMARY KEY, " +
+                        "`payload` TEXT NOT NULL, " +
+                        "`fetchedAt` INTEGER NOT NULL)"
                 )
             }
         }

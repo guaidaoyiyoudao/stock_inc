@@ -26,7 +26,7 @@
 | 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.0.21-1.0.28 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.6.1，**当前 DB version = 15** |
+| 本地存储 | Room (SQLite) | 2.6.1，**当前 DB version = 18** |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
 | 导航 | Navigation Compose（单 Activity + 多 Composable） | 2.8.5 |
@@ -43,40 +43,251 @@
 
 ## 3. 目录结构
 
+> 下列为真实文件清单（含 2026-08-02 新增的 AI 工具/财务三表/资金流等），每个文件标注作用。改代码前先定位对应文件。
+
 ```text
-app/
-├── build.gradle.kts              # 应用模块配置（SDK、签名、依赖）
-└── src/
-    ├── main/
-    │   ├── AndroidManifest.xml
-    │   ├── java/com/stock/dividend/
-    │   │   ├── MainActivity.kt           # 唯一 Activity
-    │   │   ├── StockDividendApp.kt        # @HiltAndroidApp，WorkManager 初始化
-    │   │   ├── data/
-    │   │   │   ├── local/
-    │   │   │   │   ├── AppDatabase.kt     # Room DB + 所有 Migration（version=15）
-    │   │   │   │   ├── dao/               # XXXDao 接口
-    │   │   │   │   ├── entity/            # @Entity（含常量如 EXPENSE_PERIOD_MONTHLY）
-    │   │   │   │   └── backup/BackupData.kt
-    │   │   │   ├── remote/
-    │   │   │   │   ├── *Api.kt            # Retrofit 接口
-    │   │   │   │   └── dto/               # 网络 DTO（东财/腾讯/LLM）
-    │   │   │   ├── repository/            # Repository + 纯函数计算器
-    │   │   │   ├── notification/          # 通知规则评估、Worker、调度
-    │   │   │   └── scan/                  # OCR 截图解析
-    │   │   ├── di/                        # Hilt Module（Network/Database/Notification/Ocr）
-    │   │   ├── ui/
-    │   │   │   ├── component/             # 可复用 Composable + DesignSystem.kt
-    │   │   │   ├── screen/                # 各页面 Composable
-    │   │   │   ├── navigation/AppNavigation.kt  # 路由表（Routes object）
-    │   │   │   └── theme/                 # Color/Shape/Theme/Type
-    │   │   └── viewmodel/                 # @HiltViewModel + UiState data class
-    │   └── res/
-    └── test/java/com/stock/dividend/      # 单元测试，包结构与 main 对齐
-gradle/libs.versions.toml         # Version Catalog：依赖版本唯一来源
-docs/superpowers/                 # 设计文档（design + plan，superpowers 工作流产出）
-.github/workflows/                # android.yml（CI 构建）+ release.yml（打 v* 标签发版）
+stock_inc/
+├── AGENTS.md                     # 本文件（AI agent 开发指南，必读）
+├── DESIGN.md                     # 设计系统文档（双主题/Inter 字体/组件/格式化器）
+├── README.md                     # 项目说明
+├── CLAUDE.md                     # Claude 专属提示（可空）
+├── build.gradle.kts / settings.gradle.kts   # 根构建配置
+├── gradle/libs.versions.toml     # Version Catalog：依赖版本唯一来源（红线 #9）
+├── docs/superpowers/             # 设计文档（specs/ + plans/，superpowers 工作流产出）
+├── .github/workflows/            # android.yml（CI 构建）+ release.yml（打 v* 标签发版）
+└── app/
+    ├── build.gradle.kts          # 应用模块配置（SDK、签名、依赖；applicationId=com.stock.dividend）
+    └── src/
+        ├── main/
+        │   ├── AndroidManifest.xml
+        │   ├── java/com/stock/dividend/
+        │   │   ├── MainActivity.kt              # 唯一 Activity，承载所有 Compose 页面
+        │   │   ├── StockDividendApp.kt          # @HiltAndroidApp，WorkManager 初始化
+        │   │   │
+        │   │   ├── data/
+        │   │   │   ├── local/
+        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=18）+ 全部 Migration（红线 #1）
+        │   │   │   │   ├── backup/BackupData.kt # 备份/恢复的数据载体（JSON 序列化）
+        │   │   │   │   ├── dao/                 # Room DAO 接口（@Dao）
+        │   │   │   │   │   ├── StockDao.kt                  # 自选股（含 observeAll/observeByCode/getByCode）
+        │   │   │   │   │   ├── DividendDao.kt               # 历史分红记录
+        │   │   │   │   │   ├── DividendIncomeRecordDao.kt   # 实际股息到账记录（按年统计）
+        │   │   │   │   │   ├── TransactionDao.kt            # 买卖交易记录
+        │   │   │   │   │   ├── StockTagDao.kt               # 股票标签（多对多）
+        │   │   │   │   │   ├── IndustryTargetDao.kt         # 行业目标配比
+        │   │   │   │   │   ├── PriceCacheDao.kt             # 实时价格缓存（冷启动兜底）
+        │   │   │   │   │   ├── SearchCacheDao.kt            # 搜索结果缓存
+        │   │   │   │   │   ├── FundamentalsCacheDao.kt      # 基本面缓存（7 天 TTL）
+        │   │   │   │   │   ├── FinancialStatementsCacheDao.kt  # 财务三表缓存（7 天 TTL，2026-08-02 新增）
+        │   │   │   │   │   ├── NotificationRuleDao.kt       # 通知/评估规则
+        │   │   │   │   │   ├── TradeStrategyDao.kt          # 截图策略分析产出的全局策略
+        │   │   │   │   │   ├── LlmAnalysisCacheDao.kt       # LLM 解读结果缓存（24h TTL）
+        │   │   │   │   │   ├── FireGoalDao.kt               # FIRE 财务自由目标
+        │   │   │   │   │   ├── LivingExpenseItemDao.kt      # 生活支出项
+        │   │   │   │   │   └── AchievementDao.kt            # 成就解锁记录
+        │   │   │   │   └── entity/             # @Entity（表名下划线、字段驼峰，Room 注解映射）
+        │   │   │   │       ├── StockEntity.kt              # stocks：含 shares/costPerShare/industry/buyThresholdMultiplier
+        │   │   │   │       ├── DividendEntity.kt          # dividends：报告期/每股分红/股息率/除权日
+        │   │   │   │       ├── DividendIncomeRecordEntity.kt
+        │   │   │   │       ├── TransactionEntity.kt
+        │   │   │   │       ├── StockTagEntity.kt
+        │   │   │   │       ├── IndustryTargetEntity.kt
+        │   │   │   │       ├── PriceCacheEntity.kt
+        │   │   │   │       ├── SearchCacheEntity.kt
+        │   │   │   │       ├── FundamentalsCacheEntity.kt       # payload=Fundamentals JSON
+        │   │   │   │       ├── FinancialStatementsCacheEntity.kt  # payload=FinancialStatements JSON（2026-08-02 新增）
+        │   │   │   │       ├── NotificationRuleEntity.kt
+        │   │   │   │       ├── TradeStrategyEntity.kt
+        │   │   │   │       ├── LlmAnalysisCacheEntity.kt
+        │   │   │   │       ├── FireGoalEntity.kt
+        │   │   │   │       ├── LivingExpenseItemEntity.kt      # 含 EXPENSE_PERIOD_MONTHLY 常量
+        │   │   │   │       └── AchievementEntity.kt
+        │   │   │   │
+        │   │   │   ├── remote/                  # Retrofit 接口（DI 在 NetworkModule 装配，见 §4.7/§4.9）
+        │   │   │   │   ├── SearchApi.kt         # 东财 searchapi（搜索）
+        │   │   │   │   ├── QuoteApi.kt          # 东财 push2 ulist/stock/get（行情，÷100 规则见 §4.9）
+        │   │   │   │   ├── MarketApi.kt         # 东财 push2 clist/stock/get（板块/个股/资金流/指数，2026-08-02 新增）
+        │   │   │   │   ├── FundamentalApi.kt    # 东财 datacenter（基本面/财务三表/资产负债表/龙虎榜）
+        │   │   │   │   ├── DividendApi.kt       # 东财 datacenter（分红明细，回退源）
+        │   │   │   │   ├── TencentDividendApi.kt # 腾讯 ifzq（K线/分红，主源，见 §4.9.4）
+        │   │   │   │   ├── BondYieldApi.kt      # 东财 datacenter（国债收益率，含多期限/LPR）
+        │   │   │   │   ├── ResearchApi.kt       # 东财 reportapi（研报）+ np-anotice（公告）（2026-08-02 新增）
+        │   │   │   │   ├── LlmApi.kt            # OpenAI 兼容 LLM（@Url 动态 base，60s 超时）
+        │   │   │   │   └── dto/                 # 网络 DTO（@SerializedName 映射裸字段，单位见 §4.9）
+        │   │   │   │       ├── StockSearchResponse.kt
+        │   │   │   │       ├── QuoteResponse.kt           # ulist 行情（×100 整数，÷100）
+        │   │   │   │       ├── StockInfoResponse.kt       # 个股详情（行业等）
+        │   │   │   │       ├── MarketClistResponse.kt     # clist 列表 + IndexQuoteResponse（真实值不除，2026-08-02 新增）
+        │   │   │   │       ├── FundamentalResponse.kt     # 主要财务指标 RPT_LICO_FN_CPD
+        │   │   │   │       ├── BalanceSheetResponse.kt    # 资产负债表（仅负债率，补全用）
+        │   │   │   │       ├── FinancialStatementResponse.kt  # 三表全量（利润/现金流/资产负债全字段，2026-08-02 新增）
+        │   │   │   │       ├── DividendResponse.kt
+        │   │   │   │       ├── TencentKlineResponse.kt
+        │   │   │   │       ├── BondYieldResponse.kt       # 国债多期限 + LPR + 中美利差（2026-08-02 扩展）
+        │   │   │   │       ├── DragonTigerResponse.kt     # 龙虎榜（2026-08-02 新增）
+        │   │   │   │       ├── ResearchReportResponse.kt  # 研报（2026-08-02 新增）
+        │   │   │   │       ├── StockAnnouncementResponse.kt  # 公告（2026-08-02 新增）
+        │   │   │   │       ├── LlmChatRequest.kt / LlmChatResponse.kt  # LLM 请求/响应
+        │   │   │   │
+        │   │   │   ├── repository/              # Repository（@Singleton）+ 纯函数计算器（无 Android 依赖）
+        │   │   │   │   ├── StockRepository.kt              # 自选股核心：resolveStock/fetchQuotes/fetchQuoteSnapshots/fetchBoll/fetchFundamentals
+        │   │   │   │   ├── DividendRepository.kt           # 分红拉取（腾讯主+东财回退）与缓存
+        │   │   │   │   ├── DividendIncomeRepository.kt     # 实际股息到账统计
+        │   │   │   │   ├── TransactionRepository.kt        # 交易记录
+        │   │   │   │   ├── TradeStrategyRepository.kt      # 全局策略库（含 risksFromJson）
+        │   │   │   │   ├── NotificationRuleRepository.kt   # 通知/评估规则
+        │   │   │   │   ├── KlineRepository.kt              # 腾讯 K线（fetchCloses/fetchKlines）
+        │   │   │   │   ├── BondYieldRepository.kt          # 国债（fetch10YBondYield + fetchAllYields 多期限，2026-08-02 扩展）
+        │   │   │   │   ├── FundamentalsCacheRepository.kt  # 基本面 7 天缓存编排
+        │   │   │   │   ├── FinancialStatementsRepository.kt  # 财务三表 7 天缓存编排（2026-08-02 新增）
+        │   │   │   │   ├── MarketDataRepository.kt         # 资金流/板块/行业内个股/指数/龙虎榜/情绪（2026-08-02 新增）
+        │   │   │   │   ├── ResearchRepository.kt           # 研报 + 公告（2026-08-02 新增）
+        │   │   │   │   ├── FireGoalRepository.kt
+        │   │   │   │   ├── LivingExpenseRepository.kt
+        │   │   │   │   ├── AchievementRepository.kt
+        │   │   │   │   ├── BackupRepository.kt             # 备份/恢复（事务式批量）
+        │   │   │   │   ├── WidgetDataRepository.kt         # 桌面小组件数据
+        │   │   │   │   ├── ScreenshotStrategyRepository.kt # 截图策略持久化
+        │   │   │   │   ├── LlmConfigRepository.kt          # LLM 配置（provider/key/url）
+        │   │   │   │   ├── LlmAnalysisRepository.kt        # 组合级 LLM 解读编排
+        │   │   │   │   ├── LlmAnalysisCacheStore.kt       # LLM 解读缓存读写
+        │   │   │   │   ├── EvaluatedStock.kt              # 持仓评估聚合数据结构
+        │   │   │   │   ├── UserStrategyRef.kt             # 用户策略引用
+        │   │   │   │   ├── PortfolioLlmInput.kt           # 组合 LLM 输入装配
+        │   │   │   │   ├── StockLlmInput.kt               # 个股 LLM 输入装配
+        │   │   │   │   ├── ScreenshotStrategy.kt          # 截图策略数据结构
+        │   │   │   │   ├── LlmConfig.kt / LlmProviderPresets.kt  # LLM 配置数据类
+        │   │   │   │   ├── LlmAnalysis.kt / LlmCacheKey.kt
+        │   │   │   │   ├── StockLlmAnalysis.kt
+        │   │   │   │   ├── JsonExtraction.kt              # LLM 响应 JSON 提取（容错）
+        │   │   │   │   │
+        │   │   │   │   ├── 纯函数计算器（决策/计算逻辑，配单测，见 §4.4）：
+        │   │   │   │   ├── BollCalculator.kt              # 收盘价 → BOLL 带（MA20 ± 2σ）
+        │   │   │   │   ├── ForecastCalculator.kt          # 历史分红 → 年均每股 + 预测收入
+        │   │   │   │   ├── BuyThresholdCalculator.kt     # 10Y 国债 × 倍数 → 买入价
+        │   │   │   │   ├── DividendDiscountCalculator.kt # DDM 估值
+        │   │   │   │   ├── DividendMetricsCalculator.kt  # 分红深度（连续年数/CAGR/稳定性，2026-08-02 新增）
+        │   │   │   │   ├── HoldingRecommender.kt         # 单股评估：BOLL+股息率门槛 → BUY/HOLD/SELL
+        │   │   │   │   ├── PortfolioAdvisor.kt           # 组合层仓位控制 + 三周期共振买点
+        │   │   │   │   ├── Fundamentals.kt               # 基本面数据类 + Builder/enrichPayoutRatio/趋势
+        │   │   │   │   ├── FinancialStatements.kt        # 三表数据类 + Builder（2026-08-02 新增）
+        │   │   │   │   ├── QuoteSnapshot.kt              # 行情快照数据类 + toQuoteSnapshot（÷100）
+        │   │   │   │   ├── LlmPromptBuilder.kt           # 组合评估 LLM prompt
+        │   │   │   │   ├── StockLlmPromptBuilder.kt      # 个股评估 LLM prompt
+        │   │   │   │   ├── ScreenshotStrategyPromptBuilder.kt  # 截图策略 LLM prompt
+        │   │   │   │   ├── LlmAnalysisParser.kt          # LLM 响应 → 结构化（组合）
+        │   │   │   │   ├── StockLlmAnalysisParser.kt     # LLM 响应 → 结构化（个股）
+        │   │   │   │   ├── ScreenshotStrategyParser.kt   # 截图策略 JSON 解析
+        │   │   │   │   └── Formatters.kt                 # MoneyFormatter/PercentFormatter（纯函数 + 单测）
+        │   │   │   │
+        │   │   │   ├── agent/                  # AI Agent（Google ADK，AI Tab）
+        │   │   │   │   ├── AiAgentFactory.kt           # 工具注册中心（43 工具：31 读 + 12 写，装配 LlmAgent）
+        │   │   │   │   ├── AgentInstructionBuilder.kt  # 系统提示词（注入策略库）
+        │   │   │   │   ├── AiChatRepository.kt         # AI 会话编排（流式 SSE）
+        │   │   │   │   ├── AiTitleGenerator.kt         # 会话标题生成
+        │   │   │   │   ├── ConfirmationSummaryBuilder.kt # 写操作确认摘要
+        │   │   │   │   ├── OpenAiCompatibleModel.kt    # ADK Model 适配（OpenAI 兼容协议）
+        │   │   │   │   ├── OpenAiProtocol.kt / OpenAiDtos.kt / OpenAiSse.kt  # 协议/DTO/SSE 解析
+        │   │   │   │   └── tools/                      # Agent 工具（ReadTool/WriteTool 基类 + 43 个工具）
+        │   │   │   │       ├── ToolBases.kt            # ReadTool（只读）/ WriteTool（带确认门）抽象基类
+        │   │   │   │       ├── ToolArgs.kt             # 参数解析扩展（stringArg/intArg/...）+ refreshPrice/toEntity 共用
+        │   │   │   │       ├── MarketDataTools.kt      # 9 个行情工具（get_stock_info/get_kline/get_stock_fundamentals 等）
+        │   │   │   │       ├── CapitalFlowTools.kt     # 4 个工具：资金流/估值指标/龙虎榜/市场情绪（2026-08-02 新增）
+        │   │   │   │       ├── FinancialStatementTools.kt  # get_financial_statements（2026-08-02 新增）
+        │   │   │   │       ├── DividendMetricsTools.kt # get_dividend_metrics（2026-08-02 新增）
+        │   │   │   │       ├── IndustryComparisonTools.kt  # 行业列表/行业内对比（2026-08-02 新增）
+        │   │   │   │       ├── ResearchTools.kt        # 研报/公告（2026-08-02 新增）
+        │   │   │   │       ├── MarketBreadthTools.kt   # 指数/ETF/国债收益率（2026-08-02 新增）
+        │   │   │   │       ├── PortfolioDataTools.kt   # 8 个组合工具（get_holdings/get_portfolio_signals 等）
+        │   │   │   │       ├── StockActionTools.kt    # 8 个写工具（add_stock/update_holding 等，带确认门）
+        │   │   │   │       └── FinanceActionTools.kt   # 5 个 FIRE/支出工具（1 读 + 4 写）
+        │   │   │   │
+        │   │   │   ├── notification/            # 通知/后台任务（WorkManager）
+        │   │   │   │   ├── NotificationRuleEvaluator.kt    # 规则匹配纯函数
+        │   │   │   │   ├── NotificationCheckCoordinator.kt # 编排（拉行情→评估→发通知）
+        │   │   │   │   ├── NotificationCheckWorker.kt      # WorkManager Worker
+        │   │   │   │   ├── NotificationScheduler.kt        # 调度（周期/约束）
+        │   │   │   │   ├── DividendAlertNotifier.kt        # 通知发送抽象
+        │   │   │   │   ├── AndroidDividendAlertNotifier.kt # Android NotificationManager 实现
+        │   │   │   │   ├── NotificationChannels.kt         # 通知渠道
+        │   │   │   │   └── VivoPermissionIntents.kt        # vivo 后台保活权限引导
+        │   │   │   ├── scan/                     # OCR 截图导入
+        │   │   │   │   ├── HoldingScreenshotParser.kt  # 截图 → 持仓结构化
+        │   │   │   │   ├── TextRecognitionService.kt   # ML Kit 中文识别
+        │   │   │   │   └── BitmapLoader.kt            # 图片加载
+        │   │   │   └── widget/                    # 桌面小组件（Glance）
+        │   │   │       ├── MarketWidget.kt / MarketWidgetReceiver.kt  # 小组件 UI 与入口
+        │   │   │       ├── WidgetActionCallback.kt / WidgetEntryPoint.kt
+        │   │   │       └── WidgetUiState.kt
+        │   │   │
+        │   │   ├── di/                          # Hilt Module
+        │   │   │   ├── NetworkModule.kt         # Retrofit/OkHttp 装配（@Qualifier + 反爬头，见 §4.7/§4.9）
+        │   │   │   ├── DatabaseModule.kt        # Room DB + DAO + Migration 注册
+        │   │   │   ├── NotificationModule.kt    # 通知相关绑定
+        │   │   │   ├── OcrModule.kt             # ML Kit OCR 绑定
+        │   │   │   └── AiSessionModule.kt       # AI 会话作用域绑定
+        │   │   │
+        │   │   ├── ui/
+        │   │   │   ├── navigation/AppNavigation.kt   # 路由表（Routes object）+ NavHost
+        │   │   │   ├── theme/                     # 双主题（StockDividendTheme，跟随系统深浅色）
+        │   │   │   │   ├── Color.kt / Gradient.kt  # 颜色 + ExtendedColors（财务正负色 LocalExtendedColors）
+        │   │   │   │   ├── Shape.kt              # 圆角（6/10/14/20/28dp，禁止硬编码）
+        │   │   │   │   ├── Type.kt               # Inter 可变字体 + tnum 等宽数字
+        │   │   │   │   └── Theme.kt              # M3 主题组装
+        │   │   │   ├── component/                # 可复用 Composable（详见 DESIGN.md）
+        │   │   │   │   ├── AppComponents.kt      # 新组件层：AppCard/AmountText/PercentText/AppButton（新代码优先用）
+        │   │   │   │   ├── DesignSystem.kt       # 历史组件层：AppCardDefaults/SectionHeader/FinanceMetric（兼容）
+        │   │   │   │   ├── DesignSystemPreview.kt
+        │   │   │   │   ├── StockCard.kt / DividendSummaryCard.kt / IncomeSummaryCard.kt  # 摘要卡片
+        │   │   │   │   ├── IncomeBreakdownChart.kt / IncomeTimelineCard.kt / IncomeTrendChart.kt  # 收入图表
+        │   │   │   │   ├── DividendRateChart.kt / PriceVolumeChart.kt  # 价量/股息率图（Vico）
+        │   │   │   │   ├── BollPriceScale.kt / DividendPriceScale.kt    # BOLL/股息率刻度尺
+        │   │   │   │   ├── IndustryAllocationPieChart.kt # 行业配比饼图
+        │   │   │   │   ├── FireProgressCard.kt / ForecastComparisonCard.kt
+        │   │   │   │   ├── CompanyIcon.kt / CompanyLogoMap.kt  # 公司 logo（Coil3 SVG）
+        │   │   │   │   ├── EmptyStateView.kt / CompactTopAppBar.kt / AchievementCard.kt / YearSelector.kt
+        │   │   │   └── screen/                   # 各页面 Composable（单 Activity + 多 Composable）
+        │   │   │       ├── MainScaffold.kt       # 底部导航骨架（Tab 切换）
+        │   │   │       ├── HomeScreen.kt         # 首页（概览）
+        │   │   │       ├── PortfolioScreen.kt    # 持仓主页（自选/持仓列表 + 下拉刷新 + FAB）
+        │   │   │       ├── StockDetailScreen.kt  # 个股详情（行情/股息/BOLL/评估/AI 解读）
+        │   │   │       ├── AiChatScreen.kt       # AI Tab（对话式 Agent）
+        │   │   │       ├── AddStockScreen.kt / EditHoldingScreen.kt  # 加股/改持仓
+        │   │   │       ├── DividendCalendarScreen.kt  # 股息日历
+        │   │   │       ├── DividendValuationScreen.kt # 股息估值
+        │   │   │       ├── PortfolioEvaluationScreen.kt  # 持仓一键评估
+        │   │   │       ├── ExpenseCoverageScreen.kt    # 支出覆盖率
+        │   │   │       ├── ScreenshotImportScreen.kt / PortfolioImportScreen.kt  # 截图/批量导入
+        │   │   │       ├── TradeStrategyListScreen.kt  # 策略库
+        │   │   │       ├── NotificationSettingsScreen.kt / StockNotificationSettingsScreen.kt / NotificationReliabilityScreen.kt
+        │   │   │       ├── BackupRestoreScreen.kt / FireGoalSetupScreen.kt / OcrDebugScreen.kt
+        │   │   │       └── TabRefreshLocal.kt    # 本地刷新辅助
+        │   │   │
+        │   │   └── viewmodel/                    # @HiltViewModel + UiState（参考 PortfolioViewModel，见 §4.2）
+        │   │       ├── PortfolioViewModel.kt     # 持仓主 VM（多 collector + 派生 Flow）
+        │   │       ├── StockDetailViewModel.kt   # 个股详情 VM
+        │   │       ├── AiChatViewModel.kt        # AI 会话 VM
+        │   │       ├── AddStockViewModel.kt / EditHoldingViewModel.kt
+        │   │       ├── DividendCalendarViewModel.kt / DividendValuationViewModel.kt
+        │   │       ├── DividendIncomeViewModel.kt
+        │   │       ├── ExpenseCoverageViewModel.kt + ExpenseCoverageCalculator.kt  # 支出覆盖率 VM + 纯函数
+        │   │       ├── PortfolioImportViewModel.kt / ScreenshotImportViewModel.kt
+        │   │       ├── TradeStrategyListViewModel.kt
+        │   │       ├── NotificationSettingsViewModel.kt / StockNotificationSettingsViewModel.kt
+        │   │       ├── FireGoalViewModel.kt / BackupViewModel.kt / OcrDebugViewModel.kt
+        │   │       ├── AchievementViewModel.kt + AchievementChecker.kt + AchievementDef.kt + AchievementCategory.kt  # 成就
+        │   │       └── MarkdownRenderGuard.kt    # Markdown 渲染安全（防注入）
+        │   └── res/                              # 资源（字体 inter.ttf 子集化、图标、字符串等）
+        │
+        └── test/java/com/stock/dividend/         # 单元测试（包结构与 main 对齐，见 §6）
+            ├── data/agent/        # 8 个：AgentInstructionBuilderTest / AiChatRepositoryTest / StockAgentToolsTest（43 工具）等
+            ├── data/repository/   # 38 个：纯函数（BollCalculatorTest/BuyThresholdCalculatorTest/DividendMetricsCalculatorTest）
+            │                       #    + DTO 解析（QuoteSnapshotTest/MarketDtoParseTest/FinancialStatementDtoParseTest/BondYieldResponseParseTest）
+            │                       #    + Repository（StockRepositoryTest/DividendRepositoryTest/Robolectric）
+            └── viewmodel/         # 19 个：PortfolioViewModelTest 等（Robolectric + MockK + Turbine）
 ```
+
+**文件规模速览**（2026-08-02）：main 源集约 130 个 .kt，测试约 65 个 .kt；DB 16 张表/18 个 Migration；AI Agent 43 个工具（31 读 + 12 写）。
 
 ---
 
@@ -139,7 +350,7 @@ docs/superpowers/                 # 设计文档（design + plan，superpowers �
 
 ### 4.6 数据库（Room）纪律 —— 关键
 
-- **DB version 当前 = 15**，`exportSchema = false`。
+- **DB version 当前 = 18**，`exportSchema = false`。
 - 改 schema（加表/加列/改类型）**必须**：① 在 `AppDatabase` 的 `entities`/`version` 同步；② 新增 `MIGRATION_N_(N+1)` 并在 `DatabaseModule` 注册；③ `version` +1。
 - 历史迁移全部手写 `ALTER`/`CREATE`，保持这个风格。
 - 表名/列名用下划线（`dividend_income_records`、`stockCode`），实体字段用驼峰，靠 Room 注解映射。
@@ -154,6 +365,55 @@ docs/superpowers/                 # 设计文档（design + plan，superpowers �
 
 - `data/notification/`：`NotificationRuleEvaluator`（规则匹配纯函数）、`NotificationCheckCoordinator`（编排）、`NotificationCheckWorker`（WorkManager）、`NotificationScheduler`。
 - 评估门槛（min/boost 股息率）**复用 `notification_rules` 表存储**，避免加表（见迁移 9→10、10→11 历史）。
+
+### 4.9 外部数据接口单位与解析纪律 —— 关键（数据准确性）
+
+> 接入任何行情/财务/资金流等外部数据时必读。本节由 2026-08-02 实践教训沉淀，每条均经实测交叉验证。
+
+**核心原则：单位换算只允许「每10股→每股」与展示格式化（宪法原则 III）；其余裸值→真实值的转换必须在 DTO/解析层显式处理，并配真实 JSON fixture 单测锁定。**
+
+#### 4.9.1 东方财富 push2 三接口的单位规则**互不相同**（最大易错点）
+
+| 接口 | URL | `fltt` 参数 | 单位规则 | 代码位置 |
+|---|---|---|---|---|
+| `ulist.np/get`（批量行情） | `push2.eastmoney.com/api/qt/ulist.np/get` | 无此参数 | **价格/百分比 ×100 整数，需 ÷100**；成交量(手)/成交额(元)/市值(元) 原值不除 | `QuoteApi` + `toQuoteSnapshot`（`QuoteSnapshot.kt`） |
+| `clist/get`（板块/个股/资金流列表） | `push2.eastmoney.com/api/qt/clist/get` | `fltt=2` 时 | **全部字段真实值，不 ÷100**（价格带小数、百分比直接是 %、净额是元） | `MarketApi.getClist` + `toMarketList`（`MarketDataRepository.kt`） |
+| `stock/get`（单股/指数详情） | `push2.eastmoney.com/api/qt/stock/get` | 无此参数 | **价格/百分比 ×100 整数，需 ÷100**；成交量(手)/成交额(元) 原值不除 | `QuoteApi.getStockInfo` / `MarketApi.getIndexQuote` |
+
+⚠️ **`clist` 与 `ulist`/`stock/get` 的价格单位规则相反**——`ulist` 的 `f2` 是 ×100 整数（`3962`→39.62 元），`clist` 的 `f2` 是真实值（`127.24`→127.24 元）。两个解析函数**必须独立、切勿复用或混用** ÷100 逻辑。
+
+#### 4.9.2 字段编号必须查官方文档，禁止凭直觉推断
+
+东财资金流字段有固定编号规律，**不要猜**（曾因写错字段导致占位值被当真实数据）：
+
+| 净额（元，不除） | 占比（%，clist 不除） |
+|---|---|
+| f62 主力 = f66 超大单 + f72 大单 | f184 主力 |
+| f66 超大单 | **f69** 超大单 |
+| f72 大单 | **f75** 大单 |
+| f78 中单 | **f81** 中单 |
+| f84 小单 | **f87** 小单 |
+
+规律：净额 f6x/7x/8x（66/72/78/84，每 +6）；净占比 = 净额 +3（69/75/81/87）。⚠️ 不是 f174/f175/f185/f192。拿不准时**先查东财资金流向页面字段或用 `WebSearch` 核实**。
+
+#### 4.9.3 同语义数据要换接口时，先验证「字段完整度」
+
+`stock/get` 对资金流字段（f66/f69/f72/f75 等）**返回不完整**（实测只回 f62/f184/f84 等少数）——个股资金流必须改用 `clist`（`fs=m:{market}+t:2+s:{code}`）才能拿到全套净额/占比。**「字段在 stock/get 存在但为空」≠「数据缺失」，可能是接口对该类字段不支持，要换接口而非反复重试。**
+
+#### 4.9.4 腾讯接口作为交叉验证金标准
+
+腾讯行情返回**直接是真实值**（无 ÷100 问题），是验证东财裸值规则的可靠基准：
+
+- **`qt.gtimg.cn/q=sh600519`**（实时行情）：`v_sh600519="1~贵州茅台~600519~1350.60~..."`，第 4 字段=现价、含涨跌额/涨跌幅/成交额/主力净流入。**接入东货行情前，用腾讯同时刻值交叉验证 ÷100 规则是否正确**（见 `QuoteSnapshotTest` 注释）。
+- **`web.ifzq.gtimg.cn/`（fqkline）**：前复权 K 线 + 分红明细，`KlineRepository`/`DividendRepository` 使用。注意：单次上限约 640 交易日（≈2.5 年），覆盖 5 年需按日期窗口分块请求（见 `DividendRepository.fetchAllDividendsFromTencent`）。
+
+#### 4.9.5 解析层实践（强制）
+
+1. **每个新 DTO 必须配真实 JSON fixture 单测**——fixture 取自实测响应（脱敏裁剪无关字段），断言每个字段的解析值与单位。例：`MarketDtoParseTest`、`FinancialStatementDtoParseTest`、`BondYieldResponseParseTest`、`QuoteSnapshotTest`。
+2. **÷100 / takeIfFinite 等转换封装为 private 扩展**，集中一处，禁止散落多份复制。注意可空性：可空字段（`Double?`）调扩展要用 `Double?.takeIfFinite()`（接收者也声明可空），`item.field?.takeIfFinite()` 的写法才编译通过。
+3. **金额一律「元」绝对值**（非每股、非万元），缺失字段为 null，**绝不臆造**（宪法原则 III）。占比字段单位「%」，真实值即展示值。
+4. **报告期日期归一化**：东财 datacenter 三表的 `REPORT_DATE`/`REPORTDATE` 实测带 ` 00:00:00` 后缀，跨表对齐前必须 `substringBefore(" ")` 去后缀（见 `FinancialStatementsBuilder`）。
+5. **Gson 对 `"-"`（停牌占位）转 `Double` 会抛异常**：生产层用 `runCatching` 吞掉（红线 #2）；测试层不要断言 `"-"`→null（Gson 默认不容错），改用「字段缺失→null」的 fixture。
 
 ---
 
@@ -226,6 +486,7 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 8. **Release 签名信息是环境变量**（`KEYSTORE_*`），别硬编码进 gradle 或提交进仓库。
 9. **依赖版本只改 `libs.versions.toml`**，别在 `build.gradle.kts` 写裸版本号。
 10. **中文界面**：所有用户可见文本中文；注释项目内统一用中文（与现有代码一致）。
+11. **外部数据接入必读 §4.9**：东财 `ulist`/`clist`/`stock/get` 三接口单位规则互不相同（clist 不除、其余 ÷100），资金流字段编号要查文档（占比是 f69/f75/f81/f87 不是 f174/f175），新 DTO 必须配实测 fixture 单测并用腾讯 qt 交叉验证。**单位搞错 = 数据全错，比崩溃更隐蔽。**
 
 ---
 
@@ -236,7 +497,7 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 | 理解整体架构 | `MainActivity.kt` → `ui/navigation/AppNavigation.kt` → `ui/screen/MainScaffold.kt` |
 | 持仓/评估主流程 | `viewmodel/PortfolioViewModel.kt` + `data/repository/HoldingRecommender.kt` / `PortfolioAdvisor.kt` |
 | 加一张数据表 | `data/local/AppDatabase.kt`（Migration）+ `dao/` + `entity/` + `di/DatabaseModule.kt` |
-| 加一个网络接口 | `data/remote/*Api.kt` + `dto/` + `di/NetworkModule.kt` |
+| 加一个网络接口 | `data/remote/*Api.kt` + `dto/` + `di/NetworkModule.kt`；**接入行情/财务/资金流等外部数据前必读 [§4.9](#49-外部数据接口单位与解析纪律--关键数据准确性)**（单位规则/字段编号/fixture 单测） |
 | 加一个页面 | `ui/screen/XxxScreen.kt` + `viewmodel/XxxViewModel.kt` + 注册到 `AppNavigation.kt` |
 | 复用 UI 样式 | [`DESIGN.md`](DESIGN.md) + `ui/component/AppComponents.kt`（新组件）/ `DesignSystem.kt`（历史）+ `ui/theme/` |
 | 通知/后台 | `data/notification/` + `StockDividendApp.kt`（WorkManager） |
@@ -247,3 +508,5 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 
 - 2026-07-29：重写本文件，从自动生成的稀薄摘要升级为面向 AI agent 的完整开发指南（技术栈/架构/约定/命令/测试/红线/速查）；移除 spec-kit 工作流章节及所有相关引用。
 - 2026-08-01：新增 `DESIGN.md` 设计系统文档（双主题/Inter 字体/核心组件/格式化器）；§4.5 改为引用该文档；落地基建：`AppComponents.kt`（AppCard/AmountText/PercentText 等）+ `Formatters.kt`（MoneyFormatter/PercentFormatter + 26 单测）+ `Gradient.kt`（CompositionLocal 扩展主题）+ 双主题（亮/暗）+ Inter 可变字体（子集化 210KB，含 tnum）。
+- 2026-08-02：新增 §4.9「外部数据接口单位与解析纪律」+ §8 红线 #11，沉淀数据准确性实践经验（东财 push2 三接口单位规则差异/资金流字段编号/腾讯交叉验证/fixture 单测）；落地 AI Agent 新增 13 个股票信息工具（估值指标/资金流/财务三表/分红深度/行业对比/资讯研报/市场广度），DB version 15→18（新增 `financial_statements_cache` 表），配套纯函数 `DividendMetricsCalculator` + 真实 fixture 解析单测。修正：AGENTS.md 原写 DB version=15 已过时，实际 18（含历史 16/17 的 trade_strategies、fundamentals_cache、llm_analysis_cache 表）。
+- 2026-08-02：§3 目录结构从「目录级简述」升级为「完整文件清单 + 每个文件作用」，覆盖 main 全部 ~130 个 .kt（data/local|remote|repository|agent|notification|scan|widget、di、ui/component|screen|theme|navigation、viewmodel）+ test ~65 个 .kt，含本次新增的财务三表/资金流/分红深度等文件。新增「文件规模速览」速记。

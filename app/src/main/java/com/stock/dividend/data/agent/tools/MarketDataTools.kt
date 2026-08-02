@@ -17,7 +17,6 @@ import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
-import com.stock.dividend.data.repository.StockSearchResult
 import com.stock.dividend.data.repository.BollCalculator
 import com.stock.dividend.data.repository.computeBuyThreshold
 import com.stock.dividend.data.repository.enrichPayoutRatio
@@ -33,9 +32,6 @@ private val CODE_SCHEMA = Schema(
     ),
     required = listOf("code")
 )
-
-private fun StockSearchResult.toEntity(): StockEntity =
-    StockEntity(code = code, name = name, marketCode = marketCode)
 
 class GetStockInfoTool(
     private val stockRepository: StockRepository,

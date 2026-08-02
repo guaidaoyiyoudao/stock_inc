@@ -2,6 +2,7 @@ package com.stock.dividend.data.agent.tools
 
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.StockSearchResult
 
 /** 从工具参数 Map 取必填字符串，空白视为缺失。 */
 internal fun Map<String, Any?>.stringArg(key: String): String? =
@@ -43,3 +44,7 @@ internal fun Map<String, Any?>.stringListArg(key: String): List<String> =
 internal suspend fun StockRepository.refreshPrice(entity: StockEntity): Double? =
     runCatching { fetchQuotes(listOf(entity))[entity.code] }.getOrNull()
         ?: runCatching { getCachedPrices(listOf(entity.code))[entity.code] }.getOrNull()
+
+/** 搜索结果 → 轻量 StockEntity（仅 code/name/marketCode，供行情查询用，多个工具共用）。 */
+internal fun StockSearchResult.toEntity(): StockEntity =
+    StockEntity(code = code, name = name, marketCode = marketCode)
