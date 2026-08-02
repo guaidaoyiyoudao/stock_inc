@@ -442,25 +442,13 @@ class StockRepository @Inject constructor(
 
     /**
      * 重新计算某股票的 denormalized shares / costPerShare。
-     * 逻辑与 EditHoldingViewModel.calculateHolding 一致（BUY 减 SELL 得净持仓；
-     * 成本按买入加权平均）。用于批量导入后修正已存在股票的缓存字段。
+     * 统一调用 [HoldingCalculator.calculate]（移动加权平均），确保 AI 录入、
+     * UI 编辑、备份恢复三条路径的成本算法永远一致。用于批量导入后修正已存在股票的缓存字段。
      */
     suspend fun recomputeHolding(stockCode: String) {
-        val transactions = transactionDao.getByStock(stockCode)
-        if (transactions.isEmpty()) {
-            stockDao.updateShares(stockCode, 0)
-            stockDao.updateCostPerShare(stockCode, 0.0)
-            return
-        }
-        val totalShares = transactions.sumOf {
-            if (it.type == "BUY") it.shares.toLong() else -it.shares.toLong()
-        }.toInt().coerceAtLeast(0)
-        val buyTransactions = transactions.filter { it.type == "BUY" }
-        val buyShares = buyTransactions.sumOf { it.shares.toLong() }.toInt()
-        val totalCost = buyTransactions.sumOf { it.price * it.shares }
-        val avgCost = if (buyShares > 0) totalCost / buyShares else 0.0
-        stockDao.updateShares(stockCode, totalShares)
-        stockDao.updateCostPerShare(stockCode, avgCost)
+        val holding = HoldingCalculator.calculate(transactionDao.getByStock(stockCode))
+        stockDao.updateShares(stockCode, holding.totalShares)
+        stockDao.updateCostPerShare(stockCode, holding.avgCostPerShare)
     }
 
     /**

@@ -135,6 +135,14 @@ class BackupRepository @Inject constructor(
                 // stock_tags 必须在 stocks 之后（FK），IGNORE 防御重复主键
                 stockTagDao.insertAll(container.stockTags)
                 tradeStrategyDao.insertAll(container.tradeStrategies)
+
+                // 交易记录已全部回灌，按移动加权平均重算每只股票的持仓量与成本，
+                // 确保旧备份恢复后立即使用统一算法（避免沿用快照里的旧算法值）。
+                container.stocks.forEach { stock ->
+                    val holding = HoldingCalculator.calculate(transactionDao.getByStock(stock.code))
+                    stockDao.updateShares(stock.code, holding.totalShares)
+                    stockDao.updateCostPerShare(stock.code, holding.avgCostPerShare)
+                }
             }
 
             Result.success(Unit)

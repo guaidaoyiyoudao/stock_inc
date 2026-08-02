@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.data.repository.HoldingCalculator
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -329,19 +330,6 @@ class EditHoldingViewModel @Inject constructor(
         ).transform()
     }
 
-    private fun calculateHolding(transactions: List<TransactionEntity>): HoldingSummary {
-        val totalShares = transactions.sumOf {
-            if (it.type == "BUY") it.shares.toLong() else -it.shares.toLong()
-        }.toInt().coerceAtLeast(0)
-        val buyShares = transactions.filter { it.type == "BUY" }.sumOf { it.shares.toLong() }.toInt()
-        val totalCost = transactions.filter { it.type == "BUY" }.sumOf { it.price * it.shares }
-        val avgCost = if (buyShares > 0) totalCost / buyShares else 0.0
-
-        return HoldingSummary(totalShares, avgCost)
-    }
-
-    private data class HoldingSummary(
-        val totalShares: Int,
-        val avgCostPerShare: Double
-    )
+    private fun calculateHolding(transactions: List<TransactionEntity>) =
+        HoldingCalculator.calculate(transactions)
 }
