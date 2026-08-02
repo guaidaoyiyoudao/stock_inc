@@ -19,6 +19,7 @@ internal object ConfirmationSummaryBuilder {
         "update_living_expense" -> "修改支出：id=${args["id"]} ${args["name"]} ${args["amount"]} 元"
         "remove_living_expense" -> "删除支出：id=${args["id"]}"
         "set_fire_goal" -> "设置 FIRE 目标：${args["amount"]} 元"
+        "add_trade_strategy" -> "写入策略：[${args["direction"]}] ${args["targetText"]}"
         else -> "$toolName（$args）"
     }
 }

@@ -7,6 +7,7 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.agent.tools.AddTransactionTool
 import com.stock.dividend.data.agent.tools.AddLivingExpenseTool
 import com.stock.dividend.data.agent.tools.AddStockTool
+import com.stock.dividend.data.agent.tools.AddTradeStrategyTool
 import com.stock.dividend.data.agent.tools.GetBuyThresholdTool
 import com.stock.dividend.data.agent.tools.GetCapitalFlowTool
 import com.stock.dividend.data.agent.tools.GetDividendIncomeTool
@@ -1130,5 +1131,81 @@ class StockAgentToolsTest {
         assertThat(result["cnGovBond10Y"]).isEqualTo(1.71)
         assertThat(result["cnGovBond30Y"]).isEqualTo(2.19)
         assertThat(result["lpr5Y"]).isEqualTo(4.75)
+
+    @Test
+    fun addTradeStrategyTool_declaration_requiresCoreFields() {
+        val tool = AddTradeStrategyTool(mockk())
+        val decl = tool.declaration()
+        assertThat(decl.name).isEqualTo("add_trade_strategy")
+        assertThat(decl.parameters!!.required).containsExactly("targetText", "direction", "reasoning")
+    }
+
+    @Test
+    fun addTradeStrategyTool_returnsConfirmationPlaceholderWhenUnconfirmed() = runTest {
+        val repo = mockk<TradeStrategyRepository>(relaxed = true)
+        val tool = AddTradeStrategyTool(repo)
+        val context = mockk<ToolContext>(relaxed = true)
+        every { context.toolConfirmation } returns null
+        val result = tool.run(
+            context,
+            mapOf("targetText" to "银行股", "direction" to "buy", "reasoning" to "高股息")
+        ) as Map<*, *>
+        assertThat(result["error"]).isEqualTo(FunctionTool.CONFIRMATION_REQUIRED_ERROR)
+        coVerify(exactly = 0) { repo.upsert(any()) }
+        coVerify { context.requestConfirmation(any(), any()) }
+    }
+
+    @Test
+    fun addTradeStrategyTool_writesEntityWhenConfirmed() = runTest {
+        val repo = mockk<TradeStrategyRepository>(relaxed = true)
+        val tool = AddTradeStrategyTool(repo)
+        val context = mockk<ToolContext>(relaxed = true)
+        every { context.toolConfirmation } returns ToolConfirmation(confirmed = true)
+        val result = tool.run(
+            context,
+            mapOf(
+                "targetText" to "银行股",
+                "direction" to "buy",
+                "reasoning" to "股息率高且破净",
+                "risks" to listOf("估值修复不及预期", "分红下滑")
+            )
+        ) as Map<*, *>
+        assertThat(result["ok"]).isEqualTo(true)
+        assertThat(result["direction"]).isEqualTo("BUY")
+        coVerify {
+            repo.upsert(match {
+                it.targetText == "银行股" && it.direction == "BUY" &&
+                    it.reasoning == "股息率高且破净" && it.risks.contains("估值修复不及预期") &&
+                    it.sourceNote == "AI 对话" && it.rawOcrText == ""
+            })
+        }
+    }
+
+    @Test
+    fun addTradeStrategyTool_skipsRepositoryWhenRejected() = runTest {
+        val repo = mockk<TradeStrategyRepository>(relaxed = true)
+        val tool = AddTradeStrategyTool(repo)
+        val context = mockk<ToolContext>(relaxed = true)
+        every { context.toolConfirmation } returns ToolConfirmation(confirmed = false)
+        val result = tool.run(
+            context,
+            mapOf("targetText" to "银行股", "direction" to "buy", "reasoning" to "高股息")
+        ) as Map<*, *>
+        assertThat(result["error"]).isEqualTo(FunctionTool.REJECTED_ERROR)
+        coVerify(exactly = 0) { repo.upsert(any()) }
+    }
+
+    @Test
+    fun addTradeStrategyTool_rejectsInvalidDirection() = runTest {
+        val repo = mockk<TradeStrategyRepository>(relaxed = true)
+        val tool = AddTradeStrategyTool(repo)
+        val context = mockk<ToolContext>(relaxed = true)
+        every { context.toolConfirmation } returns ToolConfirmation(confirmed = true)
+        val result = tool.run(
+            context,
+            mapOf("targetText" to "银行股", "direction" to "HOLD", "reasoning" to "高股息")
+        ) as Map<*, *>
+        assertThat(result["error"]).isNotNull()
+        coVerify(exactly = 0) { repo.upsert(any()) }
     }
 }

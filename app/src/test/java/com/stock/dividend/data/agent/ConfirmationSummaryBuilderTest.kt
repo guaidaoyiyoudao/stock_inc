@@ -31,4 +31,13 @@ class ConfirmationSummaryBuilderTest {
         )
         assertThat(summary).isEqualTo("修改个股参数：600519（倍数=3.0，预测年限=5）")
     }
+
+    @Test
+    fun addTradeStrategy_summary() {
+        val summary = ConfirmationSummaryBuilder.summarize(
+            "add_trade_strategy",
+            mapOf("direction" to "BUY", "targetText" to "银行股")
+        )
+        assertThat(summary).isEqualTo("写入策略：[BUY] 银行股")
+    }
 }

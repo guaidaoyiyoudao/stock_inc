@@ -2,8 +2,10 @@ package com.stock.dividend.data.agent
 
 import com.google.adk.kt.agents.Instruction
 import com.google.adk.kt.agents.LlmAgent
+import com.google.adk.kt.types.GenerateContentConfig
 import com.stock.dividend.data.agent.tools.AddLivingExpenseTool
 import com.stock.dividend.data.agent.tools.AddStockTool
+import com.stock.dividend.data.agent.tools.AddTradeStrategyTool
 import com.stock.dividend.data.agent.tools.AddTransactionTool
 import com.stock.dividend.data.agent.tools.GetBuyThresholdTool
 import com.stock.dividend.data.agent.tools.GetCapitalFlowTool
@@ -53,6 +55,7 @@ import com.stock.dividend.data.repository.FinancialStatementsRepository
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.LivingExpenseRepository
+import com.stock.dividend.data.repository.AiAgentConfigSource
 import com.stock.dividend.data.repository.LlmConfig
 import com.stock.dividend.data.repository.MarketDataRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
@@ -61,11 +64,12 @@ import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TradeStrategyRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import com.stock.dividend.di.LlmClient
+import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** 组装 AI Tab 的单 LlmAgent（43 个工具：31 只读 + 12 写，写操作全部带确认门）。 */
+/** 组装 AI Tab 的单 LlmAgent（44 个工具：31 只读 + 13 写，写操作全部带确认门）。 */
 @Singleton
 class AiAgentFactory @Inject constructor(
     private val stockRepository: StockRepository,
@@ -82,10 +86,12 @@ class AiAgentFactory @Inject constructor(
     private val tradeStrategyRepository: TradeStrategyRepository,
     private val marketDataRepository: MarketDataRepository,
     private val researchRepository: ResearchRepository,
+    private val agentConfigSource: AiAgentConfigSource,
     @LlmClient private val llmClient: OkHttpClient,
 ) {
     suspend fun create(config: LlmConfig): LlmAgent {
         val strategies = tradeStrategyRepository.activeStrategies()
+        val agentConfig = agentConfigSource.observe().first()
         val marketTools = listOf(
             // ── 基础行情与估值 ──
             GetStockInfoTool(stockRepository, dividendRepository),
@@ -135,6 +141,7 @@ class AiAgentFactory @Inject constructor(
             UpdateIndustryTargetTool(stockRepository),
             UpdateNotificationRuleTool(stockRepository, notificationRuleRepository),
             UpdateStockSettingsTool(stockRepository),
+            AddTradeStrategyTool(tradeStrategyRepository),
         )
         val financeTools = listOf(
             GetLivingExpensesTool(livingExpenseRepository),
@@ -146,7 +153,13 @@ class AiAgentFactory @Inject constructor(
         return LlmAgent(
             name = AGENT_NAME,
             model = OpenAiCompatibleModel(config, llmClient),
-            instruction = Instruction(AgentInstructionBuilder.build(strategies)),
+            instruction = Instruction(AgentInstructionBuilder.build(strategies, agentConfig.systemPrompt)),
+            // temperature/maxOutputTokens：经 ADK 注入 LlmRequest.config，
+            // 由 OpenAiProtocol 自动透传到 OpenAI 请求体（null 表示用模型默认）。
+            generateContentConfig = GenerateContentConfig(
+                temperature = agentConfig.temperature,
+                maxOutputTokens = agentConfig.maxTokens,
+            ),
             tools = marketTools + portfolioTools + actionTools + financeTools,
         )
     }
