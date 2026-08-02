@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.CircularProgressIndicator
@@ -70,6 +71,7 @@ private val SUGGESTIONS = listOf(
 @Composable
 fun AiChatScreen(
     onGoSettings: () -> Unit,
+    onOpenAiSettings: () -> Unit,
     viewModel: AiChatViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -107,7 +109,8 @@ fun AiChatScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         SessionBar(
             currentTitle = state.sessions.firstOrNull { it.id == state.currentSessionId }?.title ?: "AI 助手",
-            onOpenSessions = { showSessions = true }
+            onOpenSessions = { showSessions = true },
+            onOpenAiSettings = onOpenAiSettings,
         )
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -162,6 +165,7 @@ fun AiChatScreen(
 private fun SessionBar(
     currentTitle: String,
     onOpenSessions: () -> Unit,
+    onOpenAiSettings: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -177,6 +181,9 @@ private fun SessionBar(
         )
         IconButton(onClick = onOpenSessions) {
             Icon(Icons.Filled.Chat, contentDescription = "会话列表")
+        }
+        IconButton(onClick = onOpenAiSettings) {
+            Icon(Icons.Filled.Settings, contentDescription = "AI 设置")
         }
     }
 }

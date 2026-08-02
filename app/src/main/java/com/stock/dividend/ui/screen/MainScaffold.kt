@@ -170,8 +170,12 @@ fun MainScaffold(
                             launchSingleTop = true
                             restoreState = true
                         }
-                    }
+                    },
+                    onOpenAiSettings = { tabNavController.navigate("aiSettings") }
                 )
+            }
+            composable("aiSettings") {
+                AiSettingsScreen(onBack = { tabNavController.popBackStack() })
             }
             composable("achievements") {
                 AchievementScreen()
