@@ -5,10 +5,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
 import org.junit.Test
 
 /**
- * [HoldingCalculator]（移动加权平均）单测。
+ * [HoldingCalculator]（摊薄成本法）单测。
  *
- * 重点覆盖移动加权与简单加权的真正差异：
- * 「卖出之后再买入」会让新均价随结转后的剩余成本而变化。
+ * 摊薄公式：成本价 = (买入总额 − 卖出总额) / 持仓数量。
+ * 核心：卖出盈利→均价降，卖出亏损→均价升，单纯卖出也会改变均价。
  */
 class HoldingCalculatorTest {
 
@@ -42,17 +42,52 @@ class HoldingCalculatorTest {
         assertThat(holding.avgCostPerShare).isEqualTo(12.0)
     }
 
+    /**
+     * 核心场景：卖出盈利 → 均价降低。
+     * 这是用户要求「同花顺语义」的关键行为，移动加权平均做不到。
+     */
     @Test
-    fun `partial sell keeps average cost unchanged`() {
+    fun `sell at profit lowers average cost`() {
         val holding = HoldingCalculator.calculate(
             listOf(
                 tx(1, "BUY", 100, 10.0, "2026-01-01"),
                 tx(2, "BUY", 100, 14.0, "2026-02-01"),
-                tx(3, "SELL", 50, 15.0, "2026-03-01") // 卖出价不影响成本
+                tx(3, "SELL", 50, 15.0, "2026-03-01") // 卖出盈利
             )
         )
-        // 持仓 150；均价仍 12（卖出按均价结转，不改变剩余均价）
+        // 摊薄 = (1000 + 1400 − 750) / 150 = 1650 / 150 = 11.0
         assertThat(holding.totalShares).isEqualTo(150)
+        assertThat(holding.avgCostPerShare).isEqualTo(11.0)
+    }
+
+    /**
+     * 富途官方示例，用于锁定公式正确性（跨平台交叉验证）。
+     * 参考：富途「成本价介绍」—— 买1000@10、卖500@12 → 摊薄成本 8.0。
+     */
+    @Test
+    fun `futu official example yields 8`() {
+        val holding = HoldingCalculator.calculate(
+            listOf(
+                tx(1, "BUY", 1000, 10.0, "2026-01-01"),
+                tx(2, "SELL", 500, 12.0, "2026-02-01")
+            )
+        )
+        // (10000 − 6000) / 500 = 8.0
+        assertThat(holding.totalShares).isEqualTo(500)
+        assertThat(holding.avgCostPerShare).isEqualTo(8.0)
+    }
+
+    /** 对称场景：卖出亏损 → 均价升高。 */
+    @Test
+    fun `sell at loss raises average cost`() {
+        val holding = HoldingCalculator.calculate(
+            listOf(
+                tx(1, "BUY", 100, 10.0, "2026-01-01"),
+                tx(2, "SELL", 50, 8.0, "2026-02-01") // 卖出亏损
+            )
+        )
+        // 摊薄 = (1000 − 400) / 50 = 600 / 50 = 12.0
+        assertThat(holding.totalShares).isEqualTo(50)
         assertThat(holding.avgCostPerShare).isEqualTo(12.0)
     }
 
@@ -61,10 +96,10 @@ class HoldingCalculatorTest {
         val holding = HoldingCalculator.calculate(
             listOf(
                 tx(1, "BUY", 100, 10.0, "2026-01-01"),
-                tx(2, "SELL", 100, 15.0, "2026-02-01") // 全仓卖出
+                tx(2, "SELL", 100, 15.0, "2026-02-01") // 全仓卖出（盈利）
             )
         )
-        // 清仓：持仓 0，成本归 0（不保留历史均价）
+        // 持仓 0 → 均价归 0（不保留历史）
         assertThat(holding.totalShares).isEqualTo(0)
         assertThat(holding.avgCostPerShare).isEqualTo(0.0)
     }
@@ -77,72 +112,42 @@ class HoldingCalculatorTest {
                 tx(2, "SELL", 250, 15.0, "2026-02-01") // 卖超 150 股
             )
         )
-        // 卖超部分忽略，持仓钳到 0，成本归 0
+        // 卖超部分忽略，持仓钳到 0，均价归 0
         assertThat(holding.totalShares).isEqualTo(0)
         assertThat(holding.avgCostPerShare).isEqualTo(0.0)
     }
 
-    /**
-     * 核心差异用例：卖出结转后，剩余持仓成本变小；再买入时新均价会
-     * 基于结转后的剩余成本重算，而非「全部历史买入的加权均价」。
-     *
-     * 数据：买100@10、买100@14（均价12）→ 卖100（结转，剩100股成本1200，均价仍12）
-     *     → 再买100@16（剩100*12 + 100*16 = 2800 / 200 = 14）
-     * 简单加权平均会无视中间的卖出，仍算成 (100*10+100*14+100*16)/300 = 13.33。
-     */
+    /** 摊薄成本法不依赖交易时间顺序，验证顺序无关性。 */
     @Test
-    fun `buy after sell uses carried-over cost basis`() {
-        val holding = HoldingCalculator.calculate(
+    fun `order independent`() {
+        val a = HoldingCalculator.calculate(
             listOf(
                 tx(1, "BUY", 100, 10.0, "2026-01-01"),
-                tx(2, "BUY", 100, 14.0, "2026-02-01"),
-                tx(3, "SELL", 100, 15.0, "2026-03-01"),
-                tx(4, "BUY", 100, 16.0, "2026-04-01")
+                tx(2, "SELL", 50, 15.0, "2026-02-01"),
+                tx(3, "BUY", 100, 14.0, "2026-03-01")
             )
         )
-        // 移动加权：持仓 200；均价 (100*12 + 100*16)/200 = 14.0
-        assertThat(holding.totalShares).isEqualTo(200)
-        assertThat(holding.avgCostPerShare).isEqualTo(14.0)
-    }
-
-    @Test
-    fun `transaction order affects result`() {
-        // 同样两笔交易，顺序不同 → 结果不同（验证顺序敏感性）。
-        // 先贵买后便宜买 vs 先便宜买后贵买，均价相同，但若夹卖出则不同。
-        val data = listOf(
-            tx(1, "BUY", 100, 10.0, "2026-01-01"),
-            tx(2, "SELL", 50, 0.0, "2026-02-01"),
-            tx(3, "BUY", 100, 20.0, "2026-03-01")
-        )
-        val holding = HoldingCalculator.calculate(data)
-        // 卖50后剩50@10=500；再买100@20 → 2500/150 ≈ 16.666...
-        assertThat(holding.totalShares).isEqualTo(150)
-        assertThat(holding.avgCostPerShare).isWithin(1e-9).of(2500.0 / 150.0)
-    }
-
-    @Test
-    fun `sell before any buy is ignored`() {
-        val holding = HoldingCalculator.calculate(
+        val b = HoldingCalculator.calculate(
             listOf(
-                tx(1, "SELL", 100, 15.0, "2026-01-01"), // 无持仓时卖出，全忽略
-                tx(2, "BUY", 100, 10.0, "2026-02-01")
-            )
-        )
-        // 卖出被忽略，仅剩买入：持仓 100，均价 10
-        assertThat(holding.totalShares).isEqualTo(100)
-        assertThat(holding.avgCostPerShare).isEqualTo(10.0)
-    }
-
-    @Test
-    fun `sell with zero price still carries cost`() {
-        val holding = HoldingCalculator.calculate(
-            listOf(
+                tx(3, "BUY", 100, 14.0, "2026-03-01"),
                 tx(1, "BUY", 100, 10.0, "2026-01-01"),
-                tx(2, "SELL", 50, 0.0, "2026-02-01") // 卖出价=0（选填），不影响结转
+                tx(2, "SELL", 50, 15.0, "2026-02-01")
             )
         )
-        // 卖出价不参与成本计算，剩 50 股均价仍 10
-        assertThat(holding.totalShares).isEqualTo(50)
-        assertThat(holding.avgCostPerShare).isEqualTo(10.0)
+        // 两种顺序结果应一致：买入 2400、卖出 750、持仓 150 → 11.0
+        assertThat(a).isEqualTo(b)
+        assertThat(a.avgCostPerShare).isEqualTo(11.0)
+    }
+
+    @Test
+    fun `sell before any buy still dilutes via negative contribution`() {
+        // 无买入直接卖出：sellAmount>0、buyAmount=0、持仓=0→均价归 0（钳零兜底）
+        val holding = HoldingCalculator.calculate(
+            listOf(
+                tx(1, "SELL", 100, 15.0, "2026-01-01")
+            )
+        )
+        assertThat(holding.totalShares).isEqualTo(0)
+        assertThat(holding.avgCostPerShare).isEqualTo(0.0)
     }
 }

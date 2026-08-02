@@ -601,14 +601,16 @@ class StockRepositoryTest {
 
         // 净持仓 = 100 + 100 - 50 = 150
         coVerify { dao.updateShares("sh.600519", 150) }
-        // 移动加权均价：卖出不改均价，仍 = (1500*100 + 1600*100) / 200 = 1550
-        coVerify { dao.updateCostPerShare("sh.600519", 1550.0) }
+        // 摊薄成本 = (买入总额 − 卖出总额) / 持仓量
+        //         = (1500*100 + 1600*100 − 1700*50) / 150 = 225000 / 150 = 1500
+        // （卖出盈利 → 均价从简单加权的 1550 降到 1500）
+        coVerify { dao.updateCostPerShare("sh.600519", 1500.0) }
     }
 
     @Test
-    fun `recomputeHolding uses moving weighted average when buying after sell`() = runTest {
-        // 覆盖移动加权 vs 简单加权的核心差异：卖出结转后再买入，
-        // 新均价基于剩余成本重算（而非全部历史买入的加权均价）。
+    fun `recomputeHolding dilutes cost with realized pnl across buy and sell`() = runTest {
+        // 摊薄成本法：已实现盈亏（买卖差额）直接冲减/增加剩余持仓成本，
+        // 与交易时间顺序无关（纯累加）。
         coEvery { transactionDao.getByStock("sh.600519") } returns listOf(
             TransactionEntity(id = 1, stockCode = "sh.600519", type = "BUY", shares = 100, price = 10.0, date = "2026-01-01"),
             TransactionEntity(id = 2, stockCode = "sh.600519", type = "BUY", shares = 100, price = 14.0, date = "2026-02-01"),
@@ -618,10 +620,9 @@ class StockRepositoryTest {
 
         repository.recomputeHolding("sh.600519")
 
-        // 卖100后剩100@12=1200；再买100@16 → 2800/200 = 14.0
-        // （简单加权会算成 (10+14+16)*100/300 = 13.33，新算法才是真实持有成本）
+        // 摊薄 = (10*100 + 14*100 − 15*100 + 16*100) / 200 = 2500 / 200 = 12.5
         coVerify { dao.updateShares("sh.600519", 200) }
-        coVerify { dao.updateCostPerShare("sh.600519", 14.0) }
+        coVerify { dao.updateCostPerShare("sh.600519", 12.5) }
     }
 
     @Test

@@ -89,7 +89,8 @@ class EditHoldingViewModelTest {
         assertThat(editedTransaction.shares).isEqualTo(150)
         assertThat(editedTransaction.price).isEqualTo(11.5)
         assertThat(viewModel.uiState.value.totalShares).isEqualTo(130)
-        assertThat(viewModel.uiState.value.avgCostPerShare).isEqualTo(11.5)
+        // 摊薄成本 = (150*11.5 − 20*12) / 130 = 1485 / 130 ≈ 11.4231
+        assertThat(viewModel.uiState.value.avgCostPerShare).isWithin(1e-6).of(1485.0 / 130.0)
         assertThat(viewModel.uiState.value.showEditTransactionSheet).isFalse()
         assertThat(viewModel.uiState.value.editSharesError).isNull()
         assertThat(viewModel.uiState.value.editPriceError).isNull()
