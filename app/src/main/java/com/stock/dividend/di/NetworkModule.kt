@@ -1,10 +1,13 @@
 package com.stock.dividend.di
 
+import com.stock.dividend.data.remote.AnnouncementApi
 import com.stock.dividend.data.remote.BondYieldApi
 import com.stock.dividend.data.remote.DividendApi
 import com.stock.dividend.data.remote.FundamentalApi
 import com.stock.dividend.data.remote.LlmApi
+import com.stock.dividend.data.remote.MarketApi
 import com.stock.dividend.data.remote.QuoteApi
+import com.stock.dividend.data.remote.ResearchApi
 import com.stock.dividend.data.remote.SearchApi
 import com.stock.dividend.data.remote.TencentDividendApi
 import dagger.Module
@@ -48,6 +51,8 @@ object NetworkModule {
     private const val DATACENTER_BASE_URL = "https://datacenter.eastmoney.com/"
     private const val QUOTE_BASE_URL = "https://push2.eastmoney.com/"
     private const val TENCENT_KLINE_BASE_URL = "https://web.ifzq.gtimg.cn/"
+    private const val REPORT_API_BASE_URL = "https://reportapi.eastmoney.com/"
+    private const val ANNOUNCEMENT_BASE_URL = "https://np-anotice-stock.eastmoney.com/"
 
     @Provides
     @Singleton
@@ -145,6 +150,39 @@ object NetworkModule {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(BondYieldApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideMarketApi(client: OkHttpClient): MarketApi {
+        return Retrofit.Builder()
+            .baseUrl(QUOTE_BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(MarketApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideResearchApi(client: OkHttpClient): ResearchApi {
+        return Retrofit.Builder()
+            .baseUrl(REPORT_API_BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(ResearchApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideAnnouncementApi(client: OkHttpClient): AnnouncementApi {
+        return Retrofit.Builder()
+            .baseUrl(ANNOUNCEMENT_BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(AnnouncementApi::class.java)
     }
 
     @Provides

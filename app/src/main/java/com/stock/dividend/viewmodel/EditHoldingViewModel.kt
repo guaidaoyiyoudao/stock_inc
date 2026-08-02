@@ -21,18 +21,22 @@ data class EditHoldingUiState(
     val avgCostPerShare: Double = 0.0,
     val transactions: List<TransactionEntity> = emptyList(),
     val yieldPeriod: String = "3",
-    val showAddBuyDialog: Boolean = false,
-    val showAddSellDialog: Boolean = false,
+    // ── 添加交易（买入/卖出合并到一个 Sheet，方向用 isBuyInput 区分）──
+    val showTransactionSheet: Boolean = false,
+    val isBuyInput: Boolean = true,
     val addSharesInput: String = "",
     val addPriceInput: String = "",
     val addDateInput: String = LocalDate.now().toString(),
-    val addInputError: String? = null,
-    val showEditTransactionDialog: Boolean = false,
+    val addSharesError: String? = null,
+    val addPriceError: String? = null,
+    // ── 编辑已有交易（方向锁定，不可切换）──
+    val showEditTransactionSheet: Boolean = false,
     val editingTransaction: TransactionEntity? = null,
     val editSharesInput: String = "",
     val editPriceInput: String = "",
     val editDateInput: String = "",
-    val editInputError: String? = null,
+    val editSharesError: String? = null,
+    val editPriceError: String? = null,
     // ── 标签 ──────────────────────────────────────────
     val tags: List<String> = emptyList(),
     val allTags: List<String> = emptyList(),
@@ -142,35 +146,34 @@ class EditHoldingViewModel @Inject constructor(
         }
     }
 
-    fun showAddBuyDialog() {
+    /** 打开交易录入 Sheet。默认方向：无持仓 → 买入，有持仓 → 卖出。 */
+    fun showTransactionSheet(isBuy: Boolean) {
         _uiState.value = _uiState.value.copy(
-            showAddBuyDialog = true,
-            showAddSellDialog = false,
+            showTransactionSheet = true,
+            isBuyInput = isBuy,
             addSharesInput = "",
             addPriceInput = "",
             addDateInput = LocalDate.now().toString(),
-            addInputError = null
+            addSharesError = null,
+            addPriceError = null
         )
     }
 
-    fun showAddSellDialog() {
+    /** 表单内切换买/卖方向：保留已输入的股数/价格，仅清方向相关错误。 */
+    fun onTransactionTypeChanged(isBuy: Boolean) {
         _uiState.value = _uiState.value.copy(
-            showAddBuyDialog = false,
-            showAddSellDialog = true,
-            addSharesInput = "",
-            addPriceInput = "",
-            addDateInput = LocalDate.now().toString(),
-            addInputError = null
+            isBuyInput = isBuy,
+            addPriceError = null
         )
     }
 
     fun dismissDialog() {
         _uiState.value = _uiState.value.copy(
-            showAddBuyDialog = false,
-            showAddSellDialog = false,
-            showEditTransactionDialog = false,
+            showTransactionSheet = false,
+            showEditTransactionSheet = false,
             editingTransaction = null,
-            editInputError = null,
+            editSharesError = null,
+            editPriceError = null,
             showAddTagDialog = false,
             addTagInput = "",
             addTagError = null
@@ -178,34 +181,40 @@ class EditHoldingViewModel @Inject constructor(
     }
 
     fun onAddSharesChanged(input: String) {
-        _uiState.value = _uiState.value.copy(addSharesInput = input)
+        _uiState.value = _uiState.value.copy(
+            addSharesInput = input,
+            addSharesError = null
+        )
     }
 
     fun onAddPriceChanged(input: String) {
-        _uiState.value = _uiState.value.copy(addPriceInput = input)
+        _uiState.value = _uiState.value.copy(
+            addPriceInput = input,
+            addPriceError = null
+        )
     }
 
     fun onAddDateChanged(input: String) {
         _uiState.value = _uiState.value.copy(addDateInput = input)
     }
 
-    fun confirmAddTransaction(isBuy: Boolean) {
-        val shares = _uiState.value.addSharesInput.toIntOrNull()
-        val price = _uiState.value.addPriceInput.toDoubleOrNull() ?: 0.0
-        val date = _uiState.value.addDateInput
+    fun confirmAddTransaction() {
+        val state = _uiState.value
+        val isBuy = state.isBuyInput
+        val shares = state.addSharesInput.toIntOrNull()
+        val price = state.addPriceInput.toDoubleOrNull() ?: 0.0
+        val date = state.addDateInput
 
-        if (shares == null || shares <= 0) {
-            _uiState.value = _uiState.value.copy(addInputError = "请输入有效的股数")
-            return
-        }
-
-        if (date.isBlank()) {
-            _uiState.value = _uiState.value.copy(addInputError = "请输入日期")
-            return
-        }
-
-        if (isBuy && price <= 0) {
-            _uiState.value = _uiState.value.copy(addInputError = "请输入买入价格")
+        // 字段级校验：一次把所有错误都标出，便于用户修正
+        var sharesError: String? = null
+        var priceError: String? = null
+        if (shares == null || shares <= 0) sharesError = "请输入有效的股数"
+        if (isBuy && price <= 0) priceError = "请输入买入价格"
+        if (sharesError != null || priceError != null) {
+            _uiState.value = _uiState.value.copy(
+                addSharesError = sharesError,
+                addPriceError = priceError
+            )
             return
         }
 
@@ -215,16 +224,16 @@ class EditHoldingViewModel @Inject constructor(
                 TransactionEntity(
                     stockCode = stockCode,
                     type = type,
-                    shares = shares,
+                    shares = shares!!,
                     price = price,
                     date = date
                 )
             )
             refreshHoldingState {
                 copy(
-                    showAddBuyDialog = false,
-                    showAddSellDialog = false,
-                    addInputError = null
+                    showTransactionSheet = false,
+                    addSharesError = null,
+                    addPriceError = null
                 )
             }
         }
@@ -232,23 +241,29 @@ class EditHoldingViewModel @Inject constructor(
 
     fun showEditTransactionDialog(transaction: TransactionEntity) {
         _uiState.value = _uiState.value.copy(
-            showAddBuyDialog = false,
-            showAddSellDialog = false,
-            showEditTransactionDialog = true,
+            showTransactionSheet = false,
+            showEditTransactionSheet = true,
             editingTransaction = transaction,
             editSharesInput = transaction.shares.toString(),
             editPriceInput = if (transaction.price > 0.0) transaction.price.toString() else "",
             editDateInput = transaction.date,
-            editInputError = null
+            editSharesError = null,
+            editPriceError = null
         )
     }
 
     fun onEditSharesChanged(input: String) {
-        _uiState.value = _uiState.value.copy(editSharesInput = input)
+        _uiState.value = _uiState.value.copy(
+            editSharesInput = input,
+            editSharesError = null
+        )
     }
 
     fun onEditPriceChanged(input: String) {
-        _uiState.value = _uiState.value.copy(editPriceInput = input)
+        _uiState.value = _uiState.value.copy(
+            editPriceInput = input,
+            editPriceError = null
+        )
     }
 
     fun onEditDateChanged(input: String) {
@@ -262,34 +277,32 @@ class EditHoldingViewModel @Inject constructor(
         val date = _uiState.value.editDateInput
         val isBuy = transaction.type == "BUY"
 
-        if (shares == null || shares <= 0) {
-            _uiState.value = _uiState.value.copy(editInputError = "请输入有效的股数")
-            return
-        }
-
-        if (date.isBlank()) {
-            _uiState.value = _uiState.value.copy(editInputError = "请输入日期")
-            return
-        }
-
-        if (isBuy && price <= 0) {
-            _uiState.value = _uiState.value.copy(editInputError = "请输入买入价格")
+        var sharesError: String? = null
+        var priceError: String? = null
+        if (shares == null || shares <= 0) sharesError = "请输入有效的股数"
+        if (isBuy && price <= 0) priceError = "请输入买入价格"
+        if (sharesError != null || priceError != null) {
+            _uiState.value = _uiState.value.copy(
+                editSharesError = sharesError,
+                editPriceError = priceError
+            )
             return
         }
 
         viewModelScope.launch {
             transactionRepository.updateTransaction(
                 transaction.copy(
-                    shares = shares,
+                    shares = shares!!,
                     price = price,
                     date = date
                 )
             )
             refreshHoldingState {
                 copy(
-                    showEditTransactionDialog = false,
+                    showEditTransactionSheet = false,
                     editingTransaction = null,
-                    editInputError = null
+                    editSharesError = null,
+                    editPriceError = null
                 )
             }
         }

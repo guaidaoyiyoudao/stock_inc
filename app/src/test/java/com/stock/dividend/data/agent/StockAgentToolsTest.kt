@@ -8,19 +8,32 @@ import com.stock.dividend.data.agent.tools.AddTransactionTool
 import com.stock.dividend.data.agent.tools.AddLivingExpenseTool
 import com.stock.dividend.data.agent.tools.AddStockTool
 import com.stock.dividend.data.agent.tools.GetBuyThresholdTool
+import com.stock.dividend.data.agent.tools.GetCapitalFlowTool
 import com.stock.dividend.data.agent.tools.GetDividendIncomeTool
 import com.stock.dividend.data.agent.tools.GetDividendHistoryTool
+import com.stock.dividend.data.agent.tools.GetDividendMetricsTool
+import com.stock.dividend.data.agent.tools.GetDragonTigerTool
+import com.stock.dividend.data.agent.tools.GetEtfInfoTool
+import com.stock.dividend.data.agent.tools.GetFinancialStatementsTool
 import com.stock.dividend.data.agent.tools.GetFundamentalsTool
 import com.stock.dividend.data.agent.tools.GetNotificationRulesTool
 import com.stock.dividend.data.agent.tools.GetHoldingsTool
+import com.stock.dividend.data.agent.tools.GetIndustryListTool
+import com.stock.dividend.data.agent.tools.GetIndustryPeersTool
 import com.stock.dividend.data.agent.tools.GetKlineTool
 import com.stock.dividend.data.agent.tools.GetPortfolioSignalsTool
 import com.stock.dividend.data.agent.tools.GetPortfolioSummaryTool
 import com.stock.dividend.data.agent.tools.GetLivingExpensesTool
+import com.stock.dividend.data.agent.tools.GetMarketIndexTool
+import com.stock.dividend.data.agent.tools.GetMarketSentimentTool
+import com.stock.dividend.data.agent.tools.GetResearchReportsTool
 import com.stock.dividend.data.agent.tools.GetStockEvaluationTool
 import com.stock.dividend.data.agent.tools.GetStockInfoTool
+import com.stock.dividend.data.agent.tools.GetStockNewsTool
 import com.stock.dividend.data.agent.tools.GetTransactionsTool
+import com.stock.dividend.data.agent.tools.GetTreasuryYieldsTool
 import com.stock.dividend.data.agent.tools.GetUserStrategiesTool
+import com.stock.dividend.data.agent.tools.GetValuationMetricsTool
 import com.stock.dividend.data.agent.tools.GetValuationTool
 import com.stock.dividend.data.agent.tools.RemoveStockTool
 import com.stock.dividend.data.agent.tools.RemoveLivingExpenseTool
@@ -41,21 +54,34 @@ import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.StockTagEntity
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BondYieldRepository
+import com.stock.dividend.data.repository.CapitalFlow
 import com.stock.dividend.data.repository.DividendIncomeRepository
+import com.stock.dividend.data.repository.DividendMetrics
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.DividendThresholds
+import com.stock.dividend.data.repository.DragonTigerItem
 import com.stock.dividend.data.repository.FireGoalRepository
+import com.stock.dividend.data.repository.FinancialStatements
+import com.stock.dividend.data.repository.FinancialStatementsRepository
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
+import com.stock.dividend.data.repository.IndexQuote
 import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.LivingExpenseRepository
+import com.stock.dividend.data.repository.MarketDataRepository
+import com.stock.dividend.data.repository.MarketListItem
 import com.stock.dividend.data.repository.NotificationRuleRepository
+import com.stock.dividend.data.repository.QuoteSnapshot
+import com.stock.dividend.data.repository.ResearchReport
+import com.stock.dividend.data.repository.ResearchRepository
+import com.stock.dividend.data.repository.StockAnnouncement
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StockSearchResult
 import com.stock.dividend.data.repository.TradeStrategyRepository
 import com.stock.dividend.data.repository.TransactionRepository
+import com.stock.dividend.data.repository.TreasuryYields
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -784,5 +810,325 @@ class StockAgentToolsTest {
         val list = result["expenses"] as List<*>
         assertThat((list.single() as Map<*, *>)["id"]).isEqualTo(7L)
         assertThat((list.single() as Map<*, *>)["name"]).isEqualTo("房租")
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // 新增 13 个工具测试（估值指标/资金面/财务三表/分红深度/行业/资讯研报/市场广度）
+    // ────────────────────────────────────────────────────────────────
+
+    @Test
+    fun getCapitalFlowTool_declaration_requiresCode() {
+        val tool = GetCapitalFlowTool(mockk(), mockk())
+        assertThat(tool.declaration().name).isEqualTo("get_capital_flow")
+        assertThat(tool.declaration().parameters!!.required).containsExactly("code")
+    }
+
+    @Test
+    fun getCapitalFlowTool_returnsFlowFields() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery { marketRepo.fetchCapitalFlow("sh.600519") } returns CapitalFlow(
+            mainNetInflow = 1.2e9, mainNetInflowPct = 5.0,
+            superLargeNetInflow = 8.0e8, largeNetInflow = 4.0e8,
+            mediumNetInflow = -2.0e8, smallNetInflow = -1.0e8,
+            superLargeNetInflowPct = 3.0, largeNetInflowPct = 2.0,
+            mediumNetInflowPct = -1.0, smallNetInflowPct = -0.5
+        )
+        val tool = GetCapitalFlowTool(stockRepo, marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        assertThat(result["code"]).isEqualTo("sh.600519")
+        assertThat(result["mainNetInflow"]).isEqualTo(1.2e9)
+        assertThat(result["mainNetInflowPct"]).isEqualTo(5.0)
+    }
+
+    @Test
+    fun getCapitalFlowTool_returnsErrorWhenNotFound() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("000000") } returns null
+        val tool = GetCapitalFlowTool(stockRepo, mockk(relaxed = true))
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "000000")) as Map<*, *>
+        assertThat(result["error"]?.toString()).contains("未找到股票")
+    }
+
+    @Test
+    fun getValuationMetricsTool_returnsPePbMarketCap() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { stockRepo.fetchQuoteSnapshots(any()) } returns mapOf(
+            "sh.600519" to QuoteSnapshot(
+                stockCode = "sh.600519", price = 1500.0,
+                pe = 25.0, pb = 8.0,
+                totalMarketCap = 1.8e12, circMarketCap = 1.8e12,
+                turnoverRate = 0.3, amplitude = 1.2, volumeRatio = 0.8
+            )
+        )
+        val tool = GetValuationMetricsTool(stockRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        assertThat(result["peTtm"]).isEqualTo(25.0)
+        assertThat(result["pb"]).isEqualTo(8.0)
+        assertThat(result["totalMarketCap"]).isEqualTo(1.8e12)
+    }
+
+    @Test
+    fun getDragonTigerTool_returnsItemsWithoutCode() = runTest {
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery { marketRepo.fetchDragonTiger(null, 20) } returns listOf(
+            DragonTigerItem(
+                tradeDate = "2026-07-31", securityCode = "600519", securityName = "贵州茅台",
+                explain = "日涨幅偏离值达7%", netBuy = 1.0e8, billboardDealAmt = 5.0e8
+            )
+        )
+        val tool = GetDragonTigerTool(marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        val item = (result["items"] as List<*>).single() as Map<*, *>
+        assertThat(item["code"]).isEqualTo("600519")
+        assertThat(item["netBuy"]).isEqualTo(1.0e8)
+    }
+
+    @Test
+    fun getMarketSentimentTool_returnsIndicesAndIndustries() = runTest {
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery { marketRepo.fetchIndexQuotes() } returns listOf(
+            IndexQuote("000001", "上证指数", 3000.0, 1.5, null, null, null, null, 1.0e11)
+        )
+        coEvery { marketRepo.fetchIndustryList(any(), any()) } returns listOf(
+            MarketListItem(code = "BK1277", name = "白酒", changePct = 3.0, leaderName = "贵州茅台",
+                price = null, pe = null, pb = null, totalMarketCap = null, turnoverRate = null,
+                industry = null, mainNetInflow = null, mainNetInflowPct = null,
+                leaderCode = null, leaderChangePct = null)
+        )
+        val tool = GetMarketSentimentTool(marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        assertThat((result["indices"] as List<*>)).isNotEmpty()
+        assertThat((result["topIndustries"] as List<*>)).isNotEmpty()
+    }
+
+    @Test
+    fun getFinancialStatementsTool_returnsPeriods() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        val finRepo = mockk<FinancialStatementsRepository>(relaxed = true)
+        coEvery { finRepo.getFinancialStatements("sh.600519", false) } returns FinancialStatements(
+            periods = listOf(
+                FinancialStatements.Period(
+                    reportDate = "2024-12-31",
+                    totalOperateIncome = 1.7e10, parentNetProfit = 8.6e9,
+                    netcashOperate = 9.0e9, totalAssets = 2.5e11,
+                    operateCost = null, saleExpense = null, manageExpense = null,
+                    financeExpense = null, operateProfit = null, totalProfit = null,
+                    incomeTax = null, deductParentNetProfit = null,
+                    netcashInvest = null, netcashFinance = null, endCce = null,
+                    totalLiabilities = null, totalEquity = null, monetaryFunds = null,
+                    accountsRece = null, inventory = null, accountsPayable = null,
+                    fixedAsset = null
+                )
+            )
+        )
+        val tool = GetFinancialStatementsTool(stockRepo, finRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        val period = (result["periods"] as List<*>).single() as Map<*, *>
+        assertThat(period["reportDate"]).isEqualTo("2024-12-31")
+        assertThat(period["totalOperateIncome"]).isEqualTo(1.7e10)
+        assertThat(period["netcashOperate"]).isEqualTo(9.0e9)
+    }
+
+    @Test
+    fun getFinancialStatementsTool_passesForceRefresh() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        val finRepo = mockk<FinancialStatementsRepository>(relaxed = true)
+        coEvery { finRepo.getFinancialStatements("sh.600519", true) } returns FinancialStatements(periods = emptyList())
+        val tool = GetFinancialStatementsTool(stockRepo, finRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        tool.run(context, mapOf("code" to "600519", "forceRefresh" to true))
+        coVerify { finRepo.getFinancialStatements("sh.600519", true) }
+    }
+
+    @Test
+    fun getDividendMetricsTool_returnsMetrics() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        val dividendRepo = mockk<DividendRepository>(relaxed = true)
+        coEvery { dividendRepo.observeDividends("sh.600519") } returns flowOf(
+            listOf(
+                DividendEntity(id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 1.0),
+                DividendEntity(id = "d2", stockCode = "sh.600519", reportDate = "2023-12-31", cashPerShare = 1.1),
+                DividendEntity(id = "d3", stockCode = "sh.600519", reportDate = "2022-12-31", cashPerShare = 1.21)
+            )
+        )
+        val tool = GetDividendMetricsTool(stockRepo, dividendRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        assertThat(result["totalYears"]).isEqualTo(3)
+        assertThat(result["consecutiveYears"]).isEqualTo(3)
+        assertThat(result["latestYear"]).isEqualTo("2024")
+        assertThat(result["cagr3y"]).isNotNull()
+    }
+
+    @Test
+    fun getDividendMetricsTool_returnsErrorWhenNoData() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        val dividendRepo = mockk<DividendRepository>(relaxed = true)
+        coEvery { dividendRepo.observeDividends(any()) } returns flowOf(emptyList())
+        val tool = GetDividendMetricsTool(stockRepo, dividendRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        assertThat(result["error"]?.toString()).contains("分红数据不足")
+    }
+
+    @Test
+    fun getIndustryListTool_returnsIndustries() = runTest {
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery {
+            marketRepo.fetchIndustryList(MarketDataRepository.SortBy.CHANGE, 15)
+        } returns listOf(
+            MarketListItem(code = "BK1277", name = "白酒", changePct = 3.0, leaderName = "贵州茅台",
+                price = null, pe = null, pb = null, totalMarketCap = null, turnoverRate = null,
+                industry = null, mainNetInflow = null, mainNetInflowPct = null,
+                leaderCode = null, leaderChangePct = null)
+        )
+        val tool = GetIndustryListTool(marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        assertThat(result["sortBy"]).isEqualTo("CHANGE")
+        val ind = (result["industries"] as List<*>).single() as Map<*, *>
+        assertThat(ind["code"]).isEqualTo("BK1277")
+    }
+
+    @Test
+    fun getIndustryListTool_parsesSortByInflow() = runTest {
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery { marketRepo.fetchIndustryList(MarketDataRepository.SortBy.INFLOW, any()) } returns emptyList()
+        val tool = GetIndustryListTool(marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        tool.run(context, mapOf("sortBy" to "INFLOW"))
+        coVerify { marketRepo.fetchIndustryList(MarketDataRepository.SortBy.INFLOW, any()) }
+    }
+
+    @Test
+    fun getIndustryPeersTool_requiresCodeOrIndustry() = runTest {
+        val tool = GetIndustryPeersTool(mockk(relaxed = true), mockk(relaxed = true))
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        assertThat(result["error"]?.toString()).contains("code 或 industry")
+    }
+
+    @Test
+    fun getIndustryPeersTool_returnsPeersByIndustryCode() = runTest {
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery {
+            marketRepo.fetchIndustryPeers("BK1277", MarketDataRepository.PeerSortBy.MARKET_CAP, 15)
+        } returns listOf(
+            MarketListItem(code = "600519", name = "贵州茅台", price = 1500.0, pe = 25.0, totalMarketCap = 1.8e12,
+                changePct = null, pb = null, turnoverRate = null, industry = null,
+                mainNetInflow = null, mainNetInflowPct = null, leaderName = null,
+                leaderCode = null, leaderChangePct = null)
+        )
+        val tool = GetIndustryPeersTool(mockk(relaxed = true), marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("industry" to "BK1277")) as Map<*, *>
+        val peer = (result["peers"] as List<*>).single() as Map<*, *>
+        assertThat(peer["code"]).isEqualTo("600519")
+        assertThat(peer["pe"]).isEqualTo(25.0)
+    }
+
+    @Test
+    fun getResearchReportsTool_returnsReports() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        val researchRepo = mockk<ResearchRepository>(relaxed = true)
+        coEvery { researchRepo.fetchReports("600519", 10) } returns listOf(
+                ResearchReport(
+                    title = "需求根基稳固", stockCode = "600519", stockName = "贵州茅台",
+                    orgName = "中邮证券", publishDate = "2026-07-23",
+                    predictThisYearEps = 67.19, predictThisYearPe = 19.42,
+                    predictNextYearEps = null, predictNextYearPe = null, rating = "买入"
+                )
+        )
+        val tool = GetResearchReportsTool(stockRepo, researchRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        val r = (result["reports"] as List<*>).single() as Map<*, *>
+        assertThat(r["orgName"]).isEqualTo("中邮证券")
+        assertThat(r["predictThisYearEps"]).isEqualTo(67.19)
+        assertThat(r["rating"]).isEqualTo("买入")
+    }
+
+    @Test
+    fun getStockNewsTool_returnsAnnouncements() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        val researchRepo = mockk<ResearchRepository>(relaxed = true)
+        coEvery { researchRepo.fetchAnnouncements("600519", 10) } returns listOf(
+            StockAnnouncement(title = "贵州茅台重大事项公告", noticeDate = "2026-07-18", artCode = "AN123")
+        )
+        val tool = GetStockNewsTool(stockRepo, researchRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        val a = (result["announcements"] as List<*>).single() as Map<*, *>
+        assertThat(a["title"]).isEqualTo("贵州茅台重大事项公告")
+        assertThat(a["noticeDate"]).isEqualTo("2026-07-18")
+    }
+
+    @Test
+    fun getMarketIndexTool_returnsAllIndicesWhenNoCode() = runTest {
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery { marketRepo.fetchIndexQuotes() } returns listOf(
+            IndexQuote("000001", "上证指数", 3000.0, 1.5, null, null, null, null, 1.0e11)
+        )
+        val tool = GetMarketIndexTool(marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        val idx = (result["indices"] as List<*>).single() as Map<*, *>
+        assertThat(idx["name"]).isEqualTo("上证指数")
+        assertThat(idx["price"]).isEqualTo(3000.0)
+    }
+
+    @Test
+    fun getMarketIndexTool_returnsSingleIndexByCode() = runTest {
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery { marketRepo.fetchIndexOrEtfQuote("000300") } returns
+            IndexQuote("000300", "沪深300", 4000.0, 0.8, null, null, null, null, null)
+        val tool = GetMarketIndexTool(marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "000300")) as Map<*, *>
+        val idx = (result["indices"] as List<*>).single() as Map<*, *>
+        assertThat(idx["code"]).isEqualTo("000300")
+    }
+
+    @Test
+    fun getEtfInfoTool_returnsEtfQuote() = runTest {
+        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        coEvery { marketRepo.fetchIndexOrEtfQuote("510300") } returns
+            IndexQuote("510300", "沪深300ETF", 4.65, 1.04, null, null, null, null, 7.0e9)
+        val tool = GetEtfInfoTool(marketRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "510300")) as Map<*, *>
+        assertThat(result["name"]).isEqualTo("沪深300ETF")
+        assertThat(result["price"]).isEqualTo(4.65)
+    }
+
+    @Test
+    fun getTreasuryYieldsTool_returnsYields() = runTest {
+        val bondRepo = mockk<BondYieldRepository>(relaxed = true)
+        coEvery { bondRepo.fetchAllYields() } returns TreasuryYields(
+            date = "2026-07-31",
+            yield2Y = 1.26, yield5Y = 1.41, yield10Y = 1.71, yield30Y = 2.19,
+            cnUsSpread10Y = 0.45, lpr1Y = 4.28, lpr5Y = 4.75
+        )
+        val tool = GetTreasuryYieldsTool(bondRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        assertThat(result["cnGovBond10Y"]).isEqualTo(1.71)
+        assertThat(result["cnGovBond30Y"]).isEqualTo(2.19)
+        assertThat(result["lpr5Y"]).isEqualTo(4.75)
     }
 }

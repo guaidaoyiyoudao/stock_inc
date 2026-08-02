@@ -77,4 +77,35 @@ class BondYieldResponseParseTest {
         val resp = gson.fromJson(json, BondYieldResponse::class.java)
         assertThat(resp.result).isNull()
     }
+
+    // ── 多期限国债收益率 / 中美利差 / LPR 字段（2026-08-02 扩展）──────
+    // 各字段单位均为「%」，真实值不 ÷100（如 1.7141 表示 1.7141%）。
+    @Test
+    fun `parses multi tenor yields and lpr from real response`() {
+        val resp = gson.fromJson(realJson, BondYieldResponse::class.java)
+        val latest = resp.result!!.data!![0]
+        // 中国国债：2Y/5Y/10Y/30Y
+        assertThat(latest.yield2Y).isWithin(1e-9).of(1.2688)
+        assertThat(latest.yield5Y).isWithin(1e-9).of(1.4451)
+        assertThat(latest.yield10Y).isWithin(1e-9).of(1.7337)
+        assertThat(latest.yield30Y).isWithin(1e-9).of(2.193)
+        // 中美 10Y 利差
+        assertThat(latest.cnUsSpread10Y).isWithin(1e-9).of(0.4649)
+        // LPR：EMG00001306=1Y、EMG00001310=5Y（注意非 EMG00001308/12）
+        assertThat(latest.lpr1Y).isWithin(1e-9).of(4.31)
+        assertThat(latest.lpr5Y).isWithin(1e-9).of(4.65)
+    }
+
+    @Test
+    fun `multi tenor fields default null when absent`() {
+        val json = """
+            {"result":{"data":[{"SOLAR_DATE":"2026-08-01","EMM00166466":1.71}]}}
+        """.trimIndent()
+        val resp = gson.fromJson(json, BondYieldResponse::class.java)
+        val item = resp.result!!.data!![0]
+        // 仅传 10Y，其余多期限字段缺失 → null（默认值）
+        assertThat(item.yield10Y).isEqualTo(1.71)
+        assertThat(item.yield2Y).isNull()
+        assertThat(item.lpr5Y).isNull()
+    }
 }

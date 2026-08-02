@@ -62,6 +62,27 @@ class BondYieldRepository @Inject constructor(
         value
     }
 
+    /**
+     * 取多期限国债收益率、中美利差与 LPR。返回最新一日的全集（%）。
+     * 任一字段网络失败/缺失为 null。仅 10Y 有兜底默认值（[DEFAULT_YIELD]），其余无兜底。
+     */
+    suspend fun fetchAllYields(): TreasuryYields = withContext(Dispatchers.IO) {
+        val item = runCatching {
+            api.getTreasuryYield().result?.data?.firstOrNull()
+        }.getOrNull()
+        val fallback10Y = fetch10YBondYield()
+        TreasuryYields(
+            date = item?.solarDate?.substringBefore(" "),
+            yield2Y = item?.yield2Y?.takeIfFinite(),
+            yield5Y = item?.yield5Y?.takeIfFinite(),
+            yield10Y = item?.yield10Y?.takeIfFinite() ?: fallback10Y,
+            yield30Y = item?.yield30Y?.takeIfFinite(),
+            cnUsSpread10Y = item?.cnUsSpread10Y?.takeIfFinite(),
+            lpr1Y = item?.lpr1Y?.takeIfFinite(),
+            lpr5Y = item?.lpr5Y?.takeIfFinite()
+        )
+    }
+
     companion object {
         private const val PREFS_NAME = "app_prefs"
         private const val KEY_YIELD = "bond_yield_10y"
@@ -72,3 +93,20 @@ class BondYieldRepository @Inject constructor(
         const val DEFAULT_YIELD = 2.5
     }
 }
+
+/**
+ * 多期限国债收益率、中美利差与 LPR 全集（单位：%）。各字段可空，缺失即 null。
+ * 仅 [yield10Y] 有兜底默认值（[BondYieldRepository.DEFAULT_YIELD]），其余无兜底。
+ */
+data class TreasuryYields(
+    val date: String?,
+    val yield2Y: Double?,
+    val yield5Y: Double?,
+    val yield10Y: Double?,
+    val yield30Y: Double?,
+    val cnUsSpread10Y: Double?,
+    val lpr1Y: Double?,
+    val lpr5Y: Double?
+)
+
+private fun Double.takeIfFinite(): Double? = takeIf { it.isFinite() }
