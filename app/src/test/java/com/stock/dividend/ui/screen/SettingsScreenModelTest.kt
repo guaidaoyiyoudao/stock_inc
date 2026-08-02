@@ -14,10 +14,12 @@ class SettingsScreenModelTest {
     }
 
     @Test
-    fun `settings page exposes notification and data management entries`() {
-        assertThat(settingsEntries.map { it.title }).containsExactly(
-            "通知设置",
-            "数据管理"
+    fun `settings page groups entries by function in fixed order`() {
+        // 按渲染顺序：提醒与评估 / AI 与策略 / 数据
+        assertThat(settingsGroupTitles).containsExactly(
+            "提醒与评估",
+            "AI 与策略",
+            "数据",
         ).inOrder()
     }
 }
