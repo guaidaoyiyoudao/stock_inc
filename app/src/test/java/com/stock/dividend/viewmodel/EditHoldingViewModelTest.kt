@@ -90,7 +90,8 @@ class EditHoldingViewModelTest {
         assertThat(editedTransaction.price).isEqualTo(11.5)
         assertThat(viewModel.uiState.value.totalShares).isEqualTo(130)
         assertThat(viewModel.uiState.value.avgCostPerShare).isEqualTo(11.5)
-        assertThat(viewModel.uiState.value.showEditTransactionDialog).isFalse()
-        assertThat(viewModel.uiState.value.editInputError).isNull()
+        assertThat(viewModel.uiState.value.showEditTransactionSheet).isFalse()
+        assertThat(viewModel.uiState.value.editSharesError).isNull()
+        assertThat(viewModel.uiState.value.editPriceError).isNull()
     }
 }
