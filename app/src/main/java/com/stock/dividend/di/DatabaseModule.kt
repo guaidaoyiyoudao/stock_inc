@@ -105,13 +105,14 @@ object DatabaseModule {
         livingExpenseItemDao: LivingExpenseItemDao,
         notificationRuleDao: NotificationRuleDao,
         stockTagDao: StockTagDao,
-        tradeStrategyDao: TradeStrategyDao
+        tradeStrategyDao: TradeStrategyDao,
+        industryTargetDao: IndustryTargetDao
     ): BackupRepository {
         return BackupRepository(
             db, stockDao, dividendDao, fireGoalDao,
             dividendIncomeRecordDao, transactionDao,
             achievementDao, livingExpenseItemDao, notificationRuleDao,
-            stockTagDao, tradeStrategyDao
+            stockTagDao, tradeStrategyDao, industryTargetDao
         )
     }
 }

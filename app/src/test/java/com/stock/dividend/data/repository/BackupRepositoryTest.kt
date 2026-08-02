@@ -8,6 +8,7 @@ import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
+import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
@@ -145,6 +146,10 @@ class BackupRepositoryTest {
                     createdAt = 7000L,
                     updatedAt = 8000L
                 )
+            ),
+            industryTargets = listOf(
+                IndustryTargetEntity(industry = "银行", targetWeight = 40.0),
+                IndustryTargetEntity(industry = "电力", targetWeight = 15.0)
             )
         )
 
@@ -201,6 +206,10 @@ class BackupRepositoryTest {
         assertThat(restored.tradeStrategies[0].direction).isEqualTo("BUY")
         assertThat(restored.tradeStrategies[0].risks).isEqualTo("[\"息差收窄\"]")
         assertThat(restored.tradeStrategies[0].validUntil).isEqualTo("2026-09-01")
+
+        assertThat(restored.industryTargets).hasSize(2)
+        assertThat(restored.industryTargets.map { it.industry to it.targetWeight })
+            .containsExactly("银行" to 40.0, "电力" to 15.0)
     }
 
     @Test
@@ -270,5 +279,37 @@ class BackupRepositoryTest {
         } catch (e: Exception) {
             assertThat(e).isInstanceOf(com.google.gson.JsonSyntaxException::class.java)
         }
+    }
+
+    /**
+     * 旧版本（v1）导出的备份不含 industryTargets 字段。
+     * Gson 绕过构造函数反序列化，缺失字段为 null；BackupRepository 用 orEmpty() 兜底，
+     * 这里直接断言 null（提醒调用方必须做空安全处理）。
+     */
+    @Test
+    fun `legacy backup without industryTargets field deserializes to null`() {
+        val legacyJson = """
+            {
+              "metadata": {"appVersion": "1.0.0", "versionCode": 1, "exportTimestamp": 0, "dbVersion": 14},
+              "stocks": [],
+              "dividends": [],
+              "fireGoals": [],
+              "dividendIncomeRecords": [],
+              "transactions": [],
+              "achievements": [],
+              "livingExpenseItems": [],
+              "notificationRules": [],
+              "stockTags": [],
+              "tradeStrategies": []
+            }
+        """.trimIndent()
+
+        val restored = gson.fromJson(legacyJson, BackupContainer::class.java)
+
+        assertThat(restored).isNotNull()
+        // 关键：旧备份缺失该字段 → null（非 emptyList），调用方需 orEmpty()
+        assertThat(restored.industryTargets).isNull()
+        // 模拟 BackupRepository 的兜底逻辑
+        assertThat(restored.industryTargets.orEmpty()).isEmpty()
     }
 }
