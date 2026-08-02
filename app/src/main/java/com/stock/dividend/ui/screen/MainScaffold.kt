@@ -178,10 +178,28 @@ fun MainScaffold(
             }
             composable("settings") {
                 SettingsScreen(
-                    onOpenDataManagement = { rootNavController.navigate(Routes.BACKUP_RESTORE) },
-                    onOpenOcrDebug = { tabNavController.navigate("ocrDebug") },
-                    onOpenNotificationReliability = { tabNavController.navigate("notificationReliability") },
+                    onOpenAlertEvalSettings = { tabNavController.navigate("alertEvalSettings") },
+                    onOpenLlmStrategySettings = { tabNavController.navigate("llmStrategySettings") },
+                    onOpenDataSettings = { tabNavController.navigate("dataSettings") }
+                )
+            }
+            composable("alertEvalSettings") {
+                AlertEvalSettingsScreen(
+                    onBack = { tabNavController.popBackStack() },
+                    onOpenNotificationReliability = { tabNavController.navigate("notificationReliability") }
+                )
+            }
+            composable("llmStrategySettings") {
+                LlmStrategySettingsScreen(
+                    onBack = { tabNavController.popBackStack() },
                     onOpenStrategyLibrary = { rootNavController.navigate(Routes.TRADE_STRATEGY_LIST) }
+                )
+            }
+            composable("dataSettings") {
+                DataSettingsScreen(
+                    onBack = { tabNavController.popBackStack() },
+                    onOpenDataManagement = { rootNavController.navigate(Routes.BACKUP_RESTORE) },
+                    onOpenOcrDebug = { tabNavController.navigate("ocrDebug") }
                 )
             }
             composable("addStock") {
