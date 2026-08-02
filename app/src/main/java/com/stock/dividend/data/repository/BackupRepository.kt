@@ -8,11 +8,14 @@ import com.google.gson.GsonBuilder
 import com.google.gson.JsonSyntaxException
 import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.backup.BackupContainer
+import com.stock.dividend.data.local.backup.BackupCounts
 import com.stock.dividend.data.local.backup.BackupMetadata
+import com.stock.dividend.data.local.backup.BackupSummary
 import com.stock.dividend.data.local.dao.AchievementDao
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FireGoalDao
+import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.NotificationRuleDao
 import com.stock.dividend.data.local.dao.StockDao
@@ -39,7 +42,8 @@ class BackupRepository @Inject constructor(
     private val livingExpenseItemDao: LivingExpenseItemDao,
     private val notificationRuleDao: NotificationRuleDao,
     private val stockTagDao: StockTagDao,
-    private val tradeStrategyDao: TradeStrategyDao
+    private val tradeStrategyDao: TradeStrategyDao,
+    private val industryTargetDao: IndustryTargetDao
 ) {
     private val gson = GsonBuilder().setPrettyPrinting().create()
 
@@ -56,6 +60,7 @@ class BackupRepository @Inject constructor(
                 val rules = async { notificationRuleDao.getAll() }
                 val stockTags = async { stockTagDao.getAll() }
                 val tradeStrategies = async { tradeStrategyDao.getAllForBackup() }
+                val industryTargets = async { industryTargetDao.getAll() }
 
                 BackupContainer(
                     metadata = BackupMetadata(
@@ -83,7 +88,8 @@ class BackupRepository @Inject constructor(
                     livingExpenseItems = expenses.await(),
                     notificationRules = rules.await(),
                     stockTags = stockTags.await(),
-                    tradeStrategies = tradeStrategies.await()
+                    tradeStrategies = tradeStrategies.await(),
+                    industryTargets = industryTargets.await()
                 )
             }
 
@@ -122,6 +128,8 @@ class BackupRepository @Inject constructor(
                 livingExpenseItemDao.deleteAll()
                 fireGoalDao.delete()
                 stockDao.deleteAll()
+                // industry_targets 无 FK，清空安全
+                industryTargetDao.clear()
 
                 // Insert parents first, then children
                 stockDao.insertAll(container.stocks)
@@ -135,6 +143,8 @@ class BackupRepository @Inject constructor(
                 // stock_tags 必须在 stocks 之后（FK），IGNORE 防御重复主键
                 stockTagDao.insertAll(container.stockTags)
                 tradeStrategyDao.insertAll(container.tradeStrategies)
+                // 旧备份可能不含 industryTargets 字段（Gson 绕过构造函数 → null），orEmpty 兜底
+                industryTargetDao.insertAll(container.industryTargets.orEmpty())
 
                 // 交易记录已全部回灌，按移动加权平均重算每只股票的持仓量与成本，
                 // 确保旧备份恢复后立即使用统一算法（避免沿用快照里的旧算法值）。
@@ -151,7 +161,7 @@ class BackupRepository @Inject constructor(
         }
     }
 
-    suspend fun validateBackup(context: Context, uri: Uri): Result<BackupMetadata> = withContext(Dispatchers.IO) {
+    suspend fun validateBackup(context: Context, uri: Uri): Result<BackupSummary> = withContext(Dispatchers.IO) {
         try {
             val json = context.contentResolver.openInputStream(uri)?.use { inputStream ->
                 inputStream.bufferedReader(Charsets.UTF_8).readText()
@@ -163,7 +173,19 @@ class BackupRepository @Inject constructor(
                 return@withContext Result.failure(IllegalArgumentException("无效的备份文件格式"))
             }
 
-            Result.success(container.metadata)
+            // container 本身或字段可能因旧备份缺失而被 Gson 置 null，统一 orEmpty 兜底
+            val safeContainer = container ?: return@withContext Result.failure(
+                IllegalArgumentException("无效的备份文件格式")
+            )
+            val counts = BackupCounts(
+                stocks = safeContainer.stocks.orEmpty().size,
+                dividends = safeContainer.dividends.orEmpty().size,
+                transactions = safeContainer.transactions.orEmpty().size,
+                dividendIncomeRecords = safeContainer.dividendIncomeRecords.orEmpty().size,
+                tradeStrategies = safeContainer.tradeStrategies.orEmpty().size,
+                industryTargets = safeContainer.industryTargets.orEmpty().size
+            )
+            Result.success(BackupSummary(metadata = safeContainer.metadata, counts = counts))
         } catch (e: Exception) {
             Result.failure(e)
         }

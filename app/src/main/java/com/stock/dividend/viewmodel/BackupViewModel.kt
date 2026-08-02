@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.backup.BackupMetadata
+import com.stock.dividend.data.local.backup.BackupSummary
 import com.stock.dividend.data.repository.BackupRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,10 +18,13 @@ data class BackupUiState(
     val isLoading: Boolean = false,
     val message: String? = null,
     val isError: Boolean = false,
-    val backupMetadata: BackupMetadata? = null,
+    val backupSummary: BackupSummary? = null,
     val showConfirmRestoreDialog: Boolean = false,
     val pendingRestoreUri: Uri? = null
-)
+) {
+    /** 便捷访问器：兼容旧 UI 仅用 metadata 的场景。 */
+    val backupMetadata: BackupMetadata? get() = backupSummary?.metadata
+}
 
 @HiltViewModel
 class BackupViewModel @Inject constructor(
@@ -56,10 +60,10 @@ class BackupViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, message = null)
             backupRepository.validateBackup(context, uri).fold(
-                onSuccess = { metadata ->
+                onSuccess = { summary ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        backupMetadata = metadata,
+                        backupSummary = summary,
                         showConfirmRestoreDialog = true,
                         pendingRestoreUri = uri
                     )
@@ -105,7 +109,7 @@ class BackupViewModel @Inject constructor(
     fun dismissConfirmDialog() {
         _uiState.value = _uiState.value.copy(
             showConfirmRestoreDialog = false,
-            backupMetadata = null,
+            backupSummary = null,
             pendingRestoreUri = null
         )
     }

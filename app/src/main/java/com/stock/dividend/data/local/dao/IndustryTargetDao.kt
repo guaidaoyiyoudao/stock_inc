@@ -22,6 +22,14 @@ interface IndustryTargetDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: IndustryTargetEntity)
 
+    /** 备份恢复专用：批量回灌（REPLACE 防御主键冲突）。 */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(entities: List<IndustryTargetEntity>)
+
     @Query("DELETE FROM industry_targets WHERE industry = :industry")
     suspend fun deleteByIndustry(industry: String)
+
+    /** 备份恢复专用：导入前清空旧数据。 */
+    @Query("DELETE FROM industry_targets")
+    suspend fun clear()
 }

@@ -4,7 +4,9 @@ import android.content.Context
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
+import com.stock.dividend.data.local.backup.BackupCounts
 import com.stock.dividend.data.local.backup.BackupMetadata
+import com.stock.dividend.data.local.backup.BackupSummary
 import com.stock.dividend.data.repository.BackupRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -35,6 +37,13 @@ class BackupViewModelTest {
         versionCode = 3,
         exportTimestamp = 1700000000000L,
         dbVersion = 10
+    )
+    private val summary = BackupSummary(
+        metadata = metadata,
+        counts = BackupCounts(
+            stocks = 5, dividends = 10, transactions = 8,
+            dividendIncomeRecords = 4, tradeStrategies = 2, industryTargets = 3
+        )
     )
 
     @Before
@@ -77,7 +86,7 @@ class BackupViewModelTest {
 
     @Test
     fun `select import file with valid backup shows confirm dialog`() = runTest {
-        coEvery { repository.validateBackup(context, uri) } returns Result.success(metadata)
+        coEvery { repository.validateBackup(context, uri) } returns Result.success(summary)
         val viewModel = BackupViewModel(repository)
 
         viewModel.selectImportFile(context, uri)
@@ -107,7 +116,7 @@ class BackupViewModelTest {
 
     @Test
     fun `confirm restore success updates state`() = runTest {
-        coEvery { repository.validateBackup(context, uri) } returns Result.success(metadata)
+        coEvery { repository.validateBackup(context, uri) } returns Result.success(summary)
         coEvery { repository.importFromJson(context, uri) } returns Result.success(Unit)
         val viewModel = BackupViewModel(repository)
 
@@ -124,7 +133,7 @@ class BackupViewModelTest {
 
     @Test
     fun `confirm restore failure updates state with error`() = runTest {
-        coEvery { repository.validateBackup(context, uri) } returns Result.success(metadata)
+        coEvery { repository.validateBackup(context, uri) } returns Result.success(summary)
         coEvery { repository.importFromJson(context, uri) } returns
             Result.failure(Exception("数据库写入失败"))
         val viewModel = BackupViewModel(repository)
@@ -142,7 +151,7 @@ class BackupViewModelTest {
 
     @Test
     fun `dismiss confirm dialog clears metadata and pending uri`() = runTest {
-        coEvery { repository.validateBackup(context, uri) } returns Result.success(metadata)
+        coEvery { repository.validateBackup(context, uri) } returns Result.success(summary)
         val viewModel = BackupViewModel(repository)
 
         viewModel.selectImportFile(context, uri)
@@ -192,7 +201,7 @@ class BackupViewModelTest {
 
     @Test
     fun `import validation invokes repository method`() = runTest {
-        coEvery { repository.validateBackup(context, uri) } returns Result.success(metadata)
+        coEvery { repository.validateBackup(context, uri) } returns Result.success(summary)
         val viewModel = BackupViewModel(repository)
 
         viewModel.selectImportFile(context, uri)

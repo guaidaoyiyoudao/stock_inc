@@ -69,8 +69,10 @@ fun BackupRestoreScreen(
         LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
     }.json"
 
-    if (state.showConfirmRestoreDialog && state.backupMetadata != null) {
-        val metadata = state.backupMetadata!!
+    if (state.showConfirmRestoreDialog && state.backupSummary != null) {
+        val summary = state.backupSummary!!
+        val metadata = summary.metadata
+        val counts = summary.counts
         val exportTime = LocalDateTime.ofInstant(
             Instant.ofEpochMilli(metadata.exportTimestamp),
             ZoneId.systemDefault()
@@ -80,14 +82,39 @@ fun BackupRestoreScreen(
             onDismissRequest = { viewModel.dismissConfirmDialog() },
             title = { Text("确认导入备份") },
             text = {
-                Text(
-                    "导入将覆盖当前所有数据。\n\n" +
-                        "备份信息：\n" +
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "导入将覆盖当前所有数据。备份信息：",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
                         "应用版本：${metadata.appVersion}\n" +
-                        "导出时间：$exportTime\n" +
-                        "数据库版本：${metadata.dbVersion}\n\n" +
-                        "此操作不可撤销，确定继续？"
-                )
+                            "导出时间：$exportTime\n" +
+                            "数据库版本：${metadata.dbVersion}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    androidx.compose.material3.HorizontalDivider()
+                    Text(
+                        "数据预览（共 ${counts.total} 条）：",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Text(
+                        "· 自选股：${counts.stocks} 只\n" +
+                            "· 分红记录：${counts.dividends} 条\n" +
+                            "· 交易记录：${counts.transactions} 条\n" +
+                            "· 股息到账：${counts.dividendIncomeRecords} 条\n" +
+                            "· 交易策略：${counts.tradeStrategies} 条\n" +
+                            "· 行业配比：${counts.industryTargets} 项",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "此操作不可撤销，确定继续？",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             },
             confirmButton = {
                 AppTextButton(
