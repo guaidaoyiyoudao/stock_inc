@@ -3,6 +3,7 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.google.gson.GsonBuilder
 import com.stock.dividend.data.local.backup.BackupContainer
+import com.stock.dividend.data.local.backup.BackupCounts
 import com.stock.dividend.data.local.backup.BackupMetadata
 import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
@@ -311,5 +312,65 @@ class BackupRepositoryTest {
         assertThat(restored.industryTargets).isNull()
         // 模拟 BackupRepository 的兜底逻辑
         assertThat(restored.industryTargets.orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun `prefs field round-trips through json`() {
+        val container = BackupContainer(
+            metadata = BackupMetadata("1.0.0", 1, 0, 15),
+            stocks = emptyList(),
+            dividends = emptyList(),
+            fireGoals = emptyList(),
+            dividendIncomeRecords = emptyList(),
+            transactions = emptyList(),
+            achievements = emptyList(),
+            livingExpenseItems = emptyList(),
+            notificationRules = emptyList(),
+            prefs = mapOf(
+                "llm_prefs" to mapOf(
+                    "llm_base_url" to "https://api.deepseek.com/v1/",
+                    "llm_api_key" to "sk-xxx",
+                    "llm_model" to "deepseek-chat"
+                ),
+                "ai_agent_prefs" to mapOf(
+                    "system_prompt" to "回答加 emoji",
+                    "temperature" to "0.7",
+                    "max_tokens" to "2048"
+                )
+            )
+        )
+        val restored = gson.fromJson(gson.toJson(container), BackupContainer::class.java)
+        assertThat(restored.prefs).hasSize(2)
+        assertThat(restored.prefs["llm_prefs"]?.get("llm_api_key")).isEqualTo("sk-xxx")
+        assertThat(restored.prefs["ai_agent_prefs"]?.get("system_prompt")).isEqualTo("回答加 emoji")
+    }
+
+    @Test
+    fun `legacy backup without prefs field deserializes to null`() {
+        // 旧版本导出的备份无 prefs 字段，恢复时 orEmpty() 兜底为空（跳过配置恢复，不崩）
+        val legacyJson = """
+            {
+              "metadata": {"appVersion": "1.0.0", "versionCode": 1, "exportTimestamp": 0, "dbVersion": 14},
+              "stocks": [], "dividends": [], "fireGoals": [], "dividendIncomeRecords": [],
+              "transactions": [], "achievements": [], "livingExpenseItems": [],
+              "notificationRules": [], "stockTags": [], "tradeStrategies": []
+            }
+        """.trimIndent()
+        val restored = gson.fromJson(legacyJson, BackupContainer::class.java)
+        assertThat(restored.prefs).isNull()
+        assertThat(restored.prefs.orEmpty()).isEmpty()
+    }
+
+    @Test
+    fun `BackupCounts settings sums all prefs entries`() {
+        val counts = BackupCounts(
+            settings = mapOf(
+                "llm_prefs" to mapOf("a" to "1", "b" to "2"),
+                "ai_agent_prefs" to mapOf("c" to "3")
+            ).values.sumOf { it.size }
+        )
+        assertThat(counts.settings).isEqualTo(3)
+        // settings 不计入 total（语义上是配置项，非业务记录）
+        assertThat(counts.total).isEqualTo(0)
     }
 }

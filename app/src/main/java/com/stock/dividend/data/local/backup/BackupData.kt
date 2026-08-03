@@ -35,9 +35,11 @@ data class BackupCounts(
     val transactions: Int = 0,
     val dividendIncomeRecords: Int = 0,
     val tradeStrategies: Int = 0,
-    val industryTargets: Int = 0
+    val industryTargets: Int = 0,
+    /** 用户配置项数（LLM 端点 / AI 助手设置等 SharedPreferences 键值对总数）。 */
+    val settings: Int = 0
 ) {
-    /** 业务记录总数（用于一句话摘要）。 */
+    /** 业务记录总数（用于一句话摘要，不含 settings，避免与「记录数」语义混淆）。 */
     val total: Int get() = stocks + dividends + transactions +
         dividendIncomeRecords + tradeStrategies + industryTargets
 }
@@ -55,5 +57,11 @@ data class BackupContainer(
     val stockTags: List<StockTagEntity> = emptyList(),
     val tradeStrategies: List<TradeStrategyEntity> = emptyList(),
     // 行业目标配比：v2 起新增，默认空以保证旧备份向后兼容（反序列化缺失字段 → null → emptyList）
-    val industryTargets: List<IndustryTargetEntity> = emptyList()
+    val industryTargets: List<IndustryTargetEntity> = emptyList(),
+    /**
+     * 用户配置（SharedPreferences）：外层 key 为 prefs 文件名（如 "llm_prefs"），
+     * 内层为该文件全部 key→value。默认空 Map 保证旧备份向后兼容。
+     * 仅备份真正的用户配置（LLM 端点 / AI 助手设置），不含可重建的缓存。
+     */
+    val prefs: Map<String, Map<String, Any?>> = emptyMap()
 )

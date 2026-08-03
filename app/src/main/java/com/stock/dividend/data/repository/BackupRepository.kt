@@ -47,6 +47,13 @@ class BackupRepository @Inject constructor(
 ) {
     private val gson = GsonBuilder().setPrettyPrinting().create()
 
+    /**
+     * 需要备份的 SharedPreferences 文件名清单（真正的用户配置，不含可重建的缓存）。
+     * - llm_prefs：LLM 端点（baseUrl/apiKey/model）
+     * - ai_agent_prefs：AI 助手设置（系统提示词/温度/maxTokens）
+     */
+    private val backedUpPrefsFiles = listOf("llm_prefs", "ai_agent_prefs")
+
     suspend fun exportToJson(context: Context, uri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val container = coroutineScope {
@@ -89,7 +96,8 @@ class BackupRepository @Inject constructor(
                     notificationRules = rules.await(),
                     stockTags = stockTags.await(),
                     tradeStrategies = tradeStrategies.await(),
-                    industryTargets = industryTargets.await()
+                    industryTargets = industryTargets.await(),
+                    prefs = readPrefsForBackup(context)
                 )
             }
 
@@ -155,6 +163,10 @@ class BackupRepository @Inject constructor(
                 }
             }
 
+            // 恢复用户配置（SharedPreferences，非 Room，在事务外）。
+            // 旧备份可能不含 prefs 字段（Gson → null），orEmpty 兜底为空即跳过。
+            restorePrefs(context, container.prefs.orEmpty())
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -183,11 +195,54 @@ class BackupRepository @Inject constructor(
                 transactions = safeContainer.transactions.orEmpty().size,
                 dividendIncomeRecords = safeContainer.dividendIncomeRecords.orEmpty().size,
                 tradeStrategies = safeContainer.tradeStrategies.orEmpty().size,
-                industryTargets = safeContainer.industryTargets.orEmpty().size
+                industryTargets = safeContainer.industryTargets.orEmpty().size,
+                settings = safeContainer.prefs.orEmpty().values.sumOf { it.size }
             )
             Result.success(BackupSummary(metadata = safeContainer.metadata, counts = counts))
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /** 读取所有需备份的 SharedPreferences 文件 → Map<文件名, Map<key, value>>。 */
+    private fun readPrefsForBackup(context: Context): Map<String, Map<String, Any?>> =
+        backedUpPrefsFiles.mapNotNull { name ->
+            val all = runCatching {
+                context.getSharedPreferences(name, Context.MODE_PRIVATE).all
+            }.getOrDefault(emptyMap())
+            if (all.isEmpty()) null else name to all
+        }.toMap()
+
+    /**
+     * 把备份的 SharedPreferences 写回设备。仅恢复在 [backedUpPrefsFiles] 清单内的文件，
+     * 避免备份文件被篡改后注入任意 prefs。按值运行时类型选对应 putXxx，
+     * 兼容 Gson 反序列化后 Number/String/Boolean/Collection 的实际类型。
+     */
+    private fun restorePrefs(context: Context, prefs: Map<String, Map<String, Any?>>) {
+        backedUpPrefsFiles.forEach { name ->
+            val entries = prefs[name] ?: return@forEach
+            val editor = context.getSharedPreferences(name, Context.MODE_PRIVATE).edit()
+            entries.forEach { (key, value) -> applyTyped(editor, key, value) }
+            editor.apply()
+        }
+    }
+
+    /** 按值运行时类型选对应 putXxx；Double 无原生存储，转 String（读取处用 toDoubleOrNull）。 */
+    private fun applyTyped(
+        editor: android.content.SharedPreferences.Editor,
+        key: String,
+        value: Any?
+    ) {
+        when (value) {
+            is Boolean -> editor.putBoolean(key, value)
+            is Int -> editor.putInt(key, value)
+            is Long -> editor.putLong(key, value)
+            is Float -> editor.putFloat(key, value)
+            is Number -> editor.putString(key, value.toString())
+            is String -> editor.putString(key, value)
+            is Collection<*> -> editor.putStringSet(key, value.mapNotNull { it?.toString() }.toSet())
+            null -> editor.remove(key)
+            else -> editor.putString(key, value.toString())
         }
     }
 }

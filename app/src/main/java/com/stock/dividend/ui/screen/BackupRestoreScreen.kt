@@ -105,7 +105,9 @@ fun BackupRestoreScreen(
                             "· 交易记录：${counts.transactions} 条\n" +
                             "· 股息到账：${counts.dividendIncomeRecords} 条\n" +
                             "· 交易策略：${counts.tradeStrategies} 条\n" +
-                            "· 行业配比：${counts.industryTargets} 项",
+                            "· 行业配比：${counts.industryTargets} 项\n" +
+                            (if (counts.settings > 0) "· 配置项：${counts.settings} 项（LLM/AI 设置）\n" else "") +
+                            "此备份包含大模型与 AI 助手配置",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
