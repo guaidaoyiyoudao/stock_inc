@@ -372,7 +372,7 @@ private fun ToolCallPill(toolCall: ToolCallUi) {
     val alpha = if (isRunning) 1f else 0.6f
     val trailing = when (toolCall.status) {
         ToolCallStatus.RUNNING -> "…"
-        ToolCallStatus.DONE -> null
+        ToolCallStatus.DONE -> ""
         ToolCallStatus.FAILED -> "（失败）"
     }
     Row(
