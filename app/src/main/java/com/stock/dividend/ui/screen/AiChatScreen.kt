@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,7 +51,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardTone
-import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.viewmodel.AiChatUiState
 import com.stock.dividend.viewmodel.AiChatViewModel
 import com.stock.dividend.viewmodel.ChatMessageUi
@@ -94,18 +94,30 @@ fun AiChatScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            EmptyStateView()
+            Icon(
+                imageVector = Icons.Filled.SmartToy,
+                contentDescription = null,
+                modifier = Modifier.size(72.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.size(16.dp))
             Text(
-                text = "AI 助手需要先配置大模型（DeepSeek / 智谱 / 通义 / 自定义）",
+                text = "AI 助手待启用",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                text = "需要先配置一个大模型（DeepSeek / 智谱 / 通义 / 自定义），\n配置后即可查询持仓、估值、行情并自动记账",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 32.dp)
             )
-            Spacer(Modifier.size(16.dp))
+            Spacer(Modifier.size(20.dp))
             AppButton(
                 onClick = onGoSettings,
-                text = "去设置配置 LLM",
+                text = "去配置大模型",
             )
         }
         return
