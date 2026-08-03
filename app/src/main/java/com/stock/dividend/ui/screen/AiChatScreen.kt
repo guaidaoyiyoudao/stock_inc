@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -41,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -53,6 +56,8 @@ import com.stock.dividend.viewmodel.AiChatViewModel
 import com.stock.dividend.viewmodel.ChatMessageUi
 import com.stock.dividend.viewmodel.ChatRole
 import com.stock.dividend.viewmodel.ConfirmationUi
+import com.stock.dividend.viewmodel.ToolCallStatus
+import com.stock.dividend.viewmodel.ToolCallUi
 import com.stock.dividend.viewmodel.canRenderMarkdown
 import java.text.DateFormat
 import java.util.Date
@@ -341,6 +346,64 @@ private fun MessageBubble(message: ChatMessageUi) {
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth()
         )
+        ChatRole.TOOL -> message.toolCall?.let { ToolCallPill(it) }
+    }
+}
+
+/**
+ * 工具调用胶囊：居中、淡背景圆角，左侧状态图标（进行中转圈 / 完成 ✓ / 失败 ✗）。
+ * 完成态整体淡化（alpha 0.6），让历史记录里多个工具调用不打扰阅读。
+ */
+@Composable
+private fun ToolCallPill(toolCall: ToolCallUi) {
+    val isRunning = toolCall.status == ToolCallStatus.RUNNING
+    val alpha = if (isRunning) 1f else 0.6f
+    val trailing = when (toolCall.status) {
+        ToolCallStatus.RUNNING -> "…"
+        ToolCallStatus.DONE -> null
+        ToolCallStatus.FAILED -> "（失败）"
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center
+    ) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = alpha * 0.7f),
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.alpha(alpha)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            val iconTint = MaterialTheme.colorScheme.onSecondaryContainer
+            when (toolCall.status) {
+                ToolCallStatus.RUNNING -> CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 2.dp,
+                    color = iconTint
+                )
+                ToolCallStatus.DONE -> Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = iconTint
+                )
+                ToolCallStatus.FAILED -> Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+            Text(
+                text = toolCall.displayName + trailing,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+    }
     }
 }
 

@@ -7,6 +7,7 @@ import com.stock.dividend.data.agent.AiChatEvent
 import com.stock.dividend.data.agent.AiChatRepository
 import com.stock.dividend.data.agent.AiSessionMessage
 import com.stock.dividend.data.agent.AiSessionSummary
+import com.stock.dividend.data.agent.ToolDisplayName
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,7 +17,16 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class ChatRole { USER, AGENT, SYSTEM }
+enum class ChatRole { USER, AGENT, SYSTEM, TOOL }
+
+/** 工具调用气泡的状态：进行中转圈，完成打勾，失败打叉。 */
+enum class ToolCallStatus { RUNNING, DONE, FAILED }
+
+@Stable
+data class ToolCallUi(
+    val displayName: String,
+    val status: ToolCallStatus,
+)
 
 @Stable
 data class ChatMessageUi(
@@ -24,6 +34,8 @@ data class ChatMessageUi(
     val text: String,
     /** true 表示流式半成品：UI 应显示纯文本，禁止 Markdown 渲染。 */
     val streaming: Boolean = false,
+    /** 仅 [ChatRole.TOOL] 有效：工具调用的展示名与状态。 */
+    val toolCall: ToolCallUi? = null,
 )
 
 @Stable
@@ -179,11 +191,16 @@ class AiChatViewModel @Inject constructor(
                         is AiChatEvent.Final -> {
                             finalText = event.text
                             _uiState.update {
-                                it.copy(messages = it.messages.appendAgentText(event.text, replace = true, streaming = false))
+                                it.copy(messages = it.messages
+                                    .finalizeToolCalls(ToolCallStatus.DONE)
+                                    .appendAgentText(event.text, replace = true, streaming = false))
                             }
                         }
                         is AiChatEvent.ToolStatus -> _uiState.update {
-                            it.copy(messages = it.messages + ChatMessageUi(ChatRole.SYSTEM, "正在处理：${event.toolName}…"))
+                            // 新工具开始 → 之前的进行中工具视为已完成，再追加一条新的工具气泡
+                            it.copy(messages = it.messages
+                                .finalizeToolCalls(ToolCallStatus.DONE)
+                                .appendToolCall(ToolDisplayName.name(event.toolName)))
                         }
                         is AiChatEvent.ConfirmationRequest -> _uiState.update {
                             it.copy(
@@ -195,7 +212,9 @@ class AiChatViewModel @Inject constructor(
                             )
                         }
                         is AiChatEvent.Error -> _uiState.update {
-                            it.copy(messages = it.messages + ChatMessageUi(ChatRole.SYSTEM, event.message))
+                            it.copy(messages = it.messages
+                                .finalizeToolCalls(ToolCallStatus.FAILED)
+                                .appendSystemError(event.message))
                         }
                     }
                 }
@@ -242,3 +261,23 @@ private fun List<ChatMessageUi>.appendAgentText(
         this + ChatMessageUi(ChatRole.AGENT, text, streaming = streaming)
     }
 }
+
+/** 追加一条 RUNNING 的工具调用气泡。 */
+private fun List<ChatMessageUi>.appendToolCall(displayName: String): List<ChatMessageUi> =
+    this + ChatMessageUi(
+        role = ChatRole.TOOL,
+        text = "",
+        toolCall = ToolCallUi(displayName, ToolCallStatus.RUNNING),
+    )
+
+/** 把所有 RUNNING 的工具气泡收尾为 [status]（新工具开始/回复结束/出错时调用）。 */
+private fun List<ChatMessageUi>.finalizeToolCalls(status: ToolCallStatus): List<ChatMessageUi> =
+    map { msg ->
+        if (msg.role == ChatRole.TOOL && msg.toolCall?.status == ToolCallStatus.RUNNING) {
+            msg.copy(toolCall = msg.toolCall.copy(status = status))
+        } else msg
+    }
+
+/** 追加一条 SYSTEM 错误/提示文本（区别于工具气泡）。 */
+private fun List<ChatMessageUi>.appendSystemError(message: String): List<ChatMessageUi> =
+    this + ChatMessageUi(ChatRole.SYSTEM, message)

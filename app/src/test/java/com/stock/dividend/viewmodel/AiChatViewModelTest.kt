@@ -256,4 +256,52 @@ class AiChatViewModelTest {
         advanceUntilIdle()
         coVerify(exactly = 1) { repository.deleteSession("s1") }
     }
+
+    @Test
+    fun toolStatus_sequenceFinalizesPreviousAndAppendsChineseName() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        // 两个工具接连调用，最后回复：第一个工具应在第二个开始时被标记完成
+        coEvery { repository.send(any(), any()) } returns flowOf(
+            AiChatEvent.ToolStatus("get_holdings"),
+            AiChatEvent.ToolStatus("get_kline"),
+            AiChatEvent.Final("分析完成")
+        )
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        vm.onInputChanged("分析下")
+        vm.onSend()
+        advanceUntilIdle()
+
+        val toolMsgs = vm.uiState.value.messages.filter { it.role == ChatRole.TOOL }
+        assertThat(toolMsgs).hasSize(2)
+        // 中文动作名（非原始 snake_case）
+        assertThat(toolMsgs[0].toolCall?.displayName).isEqualTo("查询持仓")
+        assertThat(toolMsgs[1].toolCall?.displayName).isEqualTo("查询 K 线")
+        // 第一个被后续工具标记完成，第二个被 Final 标记完成
+        assertThat(toolMsgs[0].toolCall?.status).isEqualTo(ToolCallStatus.DONE)
+        assertThat(toolMsgs[1].toolCall?.status).isEqualTo(ToolCallStatus.DONE)
+    }
+
+    @Test
+    fun errorEvent_finalizesRunningToolsAsFailed() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        coEvery { repository.send(any(), any()) } returns flowOf(
+            AiChatEvent.ToolStatus("get_holdings"),
+            AiChatEvent.Error("网络失败")
+        )
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        vm.onInputChanged("x")
+        vm.onSend()
+        advanceUntilIdle()
+
+        val toolMsg = vm.uiState.value.messages.single { it.role == ChatRole.TOOL }
+        assertThat(toolMsg.toolCall?.status).isEqualTo(ToolCallStatus.FAILED)
+    }
 }
