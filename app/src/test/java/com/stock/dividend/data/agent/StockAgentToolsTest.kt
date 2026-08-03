@@ -1131,6 +1131,7 @@ class StockAgentToolsTest {
         assertThat(result["cnGovBond10Y"]).isEqualTo(1.71)
         assertThat(result["cnGovBond30Y"]).isEqualTo(2.19)
         assertThat(result["lpr5Y"]).isEqualTo(4.75)
+    }
 
     @Test
     fun addTradeStrategyTool_declaration_requiresCoreFields() {
