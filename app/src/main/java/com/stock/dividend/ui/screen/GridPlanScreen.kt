@@ -311,13 +311,26 @@ private fun GridGeneratorSheet(
                 PreviewBlock(preview)
             }
 
+            // 保存失败提示（参数不完整/无效时可见，不再静默无反应）
+            state.saveError?.let { err ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = err,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 AppTextButton(onClick = onDismiss, modifier = Modifier.weight(1f), text = "取消")
                 AppButton(
                     onClick = viewModel::savePlan,
                     modifier = Modifier.weight(1f),
-                    enabled = state.preview?.validationError == null && state.selectedStockCode.isNotBlank(),
+                    // preview 为 null（参数未填全/非法）时禁用，避免「按钮可点但保存静默失败」
+                    enabled = state.preview != null &&
+                        state.preview?.validationError == null &&
+                        state.selectedStockCode.isNotBlank(),
                     text = "保存"
                 )
             }

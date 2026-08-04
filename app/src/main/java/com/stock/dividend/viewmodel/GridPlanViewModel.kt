@@ -61,6 +61,8 @@ data class GridPlanUiState(
     val anchorError: String? = null,
     /** 生成器预览结果（随参数实时重算）。 */
     val preview: GridResult? = null,
+    /** 保存失败原因（参数不完整/非法时提示，避免静默无反应）。 */
+    val saveError: String? = null,
     val editingId: String? = null
 )
 
@@ -168,7 +170,8 @@ class GridPlanViewModel @Inject constructor(
             targetYieldInput = "6",
             anchorInfo = null,
             isAnchoring = false,
-            anchorError = null
+            anchorError = null,
+            saveError = null
         )
         recalculatePreview()
     }
@@ -240,7 +243,7 @@ class GridPlanViewModel @Inject constructor(
     }
 
     private fun update(transform: GridPlanUiState.() -> GridPlanUiState) {
-        _uiState.value = _uiState.value.transform()
+        _uiState.value = _uiState.value.transform().copy(saveError = null)
         recalculatePreview()
     }
 
@@ -264,12 +267,20 @@ class GridPlanViewModel @Inject constructor(
     /** 保存当前生成器参数为计划（新建或覆盖编辑）。 */
     fun savePlan() {
         val s = _uiState.value
-        val base = s.basePriceInput.toDoubleOrNull() ?: return
-        val low = s.lowPriceInput.toDoubleOrNull() ?: return
-        val high = s.highPriceInput.toDoubleOrNull() ?: return
-        val grids = s.gridsInput.toIntOrNull() ?: return
-        val capital = s.totalCapitalInput.toDoubleOrNull() ?: return
-        if (s.selectedStockCode.isBlank()) return
+        val base = s.basePriceInput.toDoubleOrNull()
+        val low = s.lowPriceInput.toDoubleOrNull()
+        val high = s.highPriceInput.toDoubleOrNull()
+        val grids = s.gridsInput.toIntOrNull()
+        val capital = s.totalCapitalInput.toDoubleOrNull()
+        // 校验失败给出可见提示，绝不静默无反应（曾因按钮可点但 savePlan 静默 return 导致「不能保存」）
+        when {
+            s.selectedStockCode.isBlank() ->
+                return setSaveError("请先选择标的股票")
+            base == null || low == null || high == null || grids == null || capital == null ->
+                return setSaveError("请完整填写基准价、上下界、档数与资金")
+            s.preview?.validationError != null ->
+                return setSaveError("参数无效：${s.preview!!.validationError}")
+        }
 
         val stockName = s.stocks.firstOrNull { it.code == s.selectedStockCode }?.name
             ?: s.selectedStockCode
@@ -290,6 +301,10 @@ class GridPlanViewModel @Inject constructor(
             gridPlanRepository.upsert(plan)
             _uiState.value = _uiState.value.copy(showGenerator = false, editingId = null, preview = null)
         }
+    }
+
+    private fun setSaveError(message: String) {
+        _uiState.value = _uiState.value.copy(saveError = message)
     }
 
     fun editPlan(plan: GridPlanEntity) {

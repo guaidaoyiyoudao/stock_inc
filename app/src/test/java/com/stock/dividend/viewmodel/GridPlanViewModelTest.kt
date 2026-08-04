@@ -125,6 +125,32 @@ class GridPlanViewModelTest {
         coVerify(exactly = 0) { gridRepo.upsert(any()) }
     }
 
+    /** 回归保护：参数不完整时 savePlan 必须给出可见错误（曾静默 return 导致「不能保存」）。 */
+    @Test
+    fun `savePlan with incomplete params sets visible error instead of silent noop`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        val divRepo = mockk<DividendRepository>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
+        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
+
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        // 只填了部分参数（缺 highPrice/grids/capital）
+        vm.onBasePriceChanged("10")
+        vm.onLowPriceChanged("8")
+        vm.savePlan()
+        advanceUntilIdle()
+
+        // 保存失败必须可见，且不落库
+        assertThat(vm.uiState.value.saveError).isNotNull()
+        assertThat(vm.uiState.value.showGenerator).isTrue()
+        coVerify(exactly = 0) { gridRepo.upsert(any()) }
+    }
+
     @Test
     fun `deletePlan calls repository delete`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
