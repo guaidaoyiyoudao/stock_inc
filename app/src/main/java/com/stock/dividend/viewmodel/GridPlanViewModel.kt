@@ -5,9 +5,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.GridAnchor
+import com.stock.dividend.data.repository.GridAnchorCalculator
 import com.stock.dividend.data.repository.GridCalculator
 import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.GridResult
+import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
@@ -17,6 +22,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -45,6 +51,13 @@ data class GridPlanUiState(
     val highPriceInput: String = "",
     val gridsInput: String = "4",
     val totalCapitalInput: String = "100000",
+    /** 用户目标股息率（%，到达即网格资金用完位）。 */
+    val targetYieldInput: String = "6",
+    /** 智能锚定结果（BOLL+目标股息率自动填充后）；null=未锚定或失败。 */
+    val anchorInfo: GridAnchor? = null,
+    /** 锚定按钮 loading（拉 BOLL/分红网络中）。 */
+    val isAnchoring: Boolean = false,
+    val anchorError: String? = null,
     /** 生成器预览结果（随参数实时重算）。 */
     val preview: GridResult? = null,
     val editingId: String? = null
@@ -57,7 +70,8 @@ data class GridPlanUiState(
 @HiltViewModel
 class GridPlanViewModel @Inject constructor(
     private val gridPlanRepository: GridPlanRepository,
-    private val stockRepository: StockRepository
+    private val stockRepository: StockRepository,
+    private val dividendRepository: DividendRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GridPlanUiState())
@@ -130,7 +144,11 @@ class GridPlanViewModel @Inject constructor(
             lowPriceInput = "",
             highPriceInput = "",
             gridsInput = "4",
-            totalCapitalInput = "100000"
+            totalCapitalInput = "100000",
+            targetYieldInput = "6",
+            anchorInfo = null,
+            isAnchoring = false,
+            anchorError = null
         )
         recalculatePreview()
     }
@@ -155,6 +173,51 @@ class GridPlanViewModel @Inject constructor(
     fun onHighPriceChanged(v: String) = update { copy(highPriceInput = v) }
     fun onGridsChanged(v: String) = update { copy(gridsInput = v) }
     fun onTotalCapitalChanged(v: String) = update { copy(totalCapitalInput = v) }
+    fun onTargetYieldChanged(v: String) = update { copy(targetYieldInput = v) }
+
+    /**
+     * 智能锚定：拉取选定标的的周线 BOLL + 历史分红，结合用户目标股息率
+     * （= 资金用完位）自动填充基准价/上下界。网络失败或数据不全时静默提示，不崩。
+     */
+    fun autoAnchor() {
+        val code = _uiState.value.selectedStockCode
+        if (code.isBlank()) {
+            _uiState.value = _uiState.value.copy(anchorError = "请先选择标的股票")
+            return
+        }
+        val targetYield = _uiState.value.targetYieldInput.toDoubleOrNull()
+        if (targetYield == null || targetYield <= 0.0) {
+            _uiState.value = _uiState.value.copy(anchorError = "请输入有效的目标股息率")
+            return
+        }
+        _uiState.value = _uiState.value.copy(isAnchoring = true, anchorError = null)
+        viewModelScope.launch {
+            // 并发拉 BOLL + 分红，任一失败吞异常（§4.3）
+            val band = runCatching { stockRepository.fetchBoll(code, KlinePeriod.WEEKLY) }.getOrNull()
+            val dividends = runCatching { dividendRepository.observeDividends(code).first() }.getOrDefault(emptyList())
+            val latestDps = ForecastCalculator.latestYearlyCashPerShare(dividends)
+            val anchor = if (band != null && latestDps != null) {
+                GridAnchorCalculator.anchor(band, latestDps, targetYield)
+            } else null
+
+            if (anchor == null) {
+                _uiState.value = _uiState.value.copy(
+                    isAnchoring = false,
+                    anchorError = "数据不足（需周线 BOLL + 历史分红），请手动填参"
+                )
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(
+                isAnchoring = false,
+                anchorInfo = anchor,
+                anchorError = null,
+                basePriceInput = String.format(java.util.Locale.US, "%.2f", anchor.basePrice),
+                lowPriceInput = String.format(java.util.Locale.US, "%.2f", anchor.lowPrice),
+                highPriceInput = String.format(java.util.Locale.US, "%.2f", anchor.highPrice)
+            )
+            recalculatePreview()
+        }
+    }
 
     private fun update(transform: GridPlanUiState.() -> GridPlanUiState) {
         _uiState.value = _uiState.value.transform()

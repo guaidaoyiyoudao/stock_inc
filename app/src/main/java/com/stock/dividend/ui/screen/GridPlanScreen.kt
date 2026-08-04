@@ -291,9 +291,13 @@ private fun GridGeneratorSheet(
             )
             Spacer(modifier = Modifier.height(12.dp))
 
+            // ── 智能锚定（BOLL 中轨=基准 / 上轨=上界 / 目标股息率=下界资金用完位）──
+            AnchorSection(state, viewModel)
+            Spacer(modifier = Modifier.height(12.dp))
+
             ParamField("基准价（中轴）", state.basePriceInput, viewModel::onBasePriceChanged, "元/股")
             Spacer(modifier = Modifier.height(10.dp))
-            ParamField("网格下界", state.lowPriceInput, viewModel::onLowPriceChanged, "元/股")
+            ParamField("网格下界（资金用完位）", state.lowPriceInput, viewModel::onLowPriceChanged, "元/股")
             Spacer(modifier = Modifier.height(10.dp))
             ParamField("网格上界", state.highPriceInput, viewModel::onHighPriceChanged, "元/股")
             Spacer(modifier = Modifier.height(10.dp))
@@ -317,6 +321,75 @@ private fun GridGeneratorSheet(
                     text = "保存"
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AnchorSection(
+    state: GridPlanUiState,
+    viewModel: GridPlanViewModel
+) {
+    val extendedColors = LocalExtendedColors.current
+    Column {
+        Text(
+            text = "智能锚定（BOLL + 目标股息率）",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            AppTextField(
+                value = state.targetYieldInput,
+                onValueChange = viewModel::onTargetYieldChanged,
+                label = { Text("目标股息率") },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                suffix = { Text("%") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+            )
+            AppButton(
+                onClick = viewModel::autoAnchor,
+                modifier = Modifier,
+                enabled = !state.isAnchoring && state.selectedStockCode.isNotBlank(),
+                text = if (state.isAnchoring) "锁定中…" else "自动锁定"
+            )
+        }
+        // 锚定结果说明：基准=BOLL 中轨、下界来源（技术面/价值底）
+        state.anchorInfo?.let { anchor ->
+            Spacer(modifier = Modifier.height(8.dp))
+            AppCard(elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
+                    val source = if (anchor.lowAnchoredByDividend) {
+                        "下界由目标股息率 ${"%.1f".format(anchor.targetYieldPercent)}% 锁定（价值底 ${MoneyFormatter.withSymbol(anchor.dividendFloorPrice)}，资金用完位）"
+                    } else {
+                        "下界由 BOLL 下轨 ${MoneyFormatter.withSymbol(anchor.bollLower)} 锁定（目标股息率底 ${MoneyFormatter.withSymbol(anchor.dividendFloorPrice)} 更高，震荡超卖位优先）"
+                    }
+                    Text(
+                        text = "基准 = BOLL 中轨 ${MoneyFormatter.withSymbol(anchor.basePrice)}\n$source",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "到达下界 ${MoneyFormatter.withSymbol(anchor.lowPrice)} 时股息率达 ${"%.1f".format(anchor.targetYieldPercent)}%，网格资金用完。",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = extendedColors.positive
+                    )
+                }
+            }
+        }
+        state.anchorError?.let { err ->
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = err,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
         }
     }
 }

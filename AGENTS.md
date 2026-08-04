@@ -175,6 +175,7 @@ stock_inc/
         │   │   │   │   ├── RealizedPnlCalculator.kt      # FIFO 已实现盈亏（独立于摊薄成本，A 股法定口径，2026-08-04 新增）
         │   │   │   │   ├── DripCalculator.kt     # 分红再投资（DRIP）复利模拟（按年再投，可配置再投价，2026-08-04 新增）
         │   │   │   │   ├── GridCalculator.kt     # 网格交易档位表（等差网格 + 当前价下一档提示，2026-08-04 新增）
+        │   │   │   │   ├── GridAnchorCalculator.kt       # 网格智能锚定（BOLL中轨=基准/上轨=上界/目标股息率=下界，2026-08-04 新增）
         │   │   │   │   ├── HoldingRecommender.kt         # 单股评估：BOLL+股息率门槛 → BUY/HOLD/SELL
         │   │   │   │   ├── PortfolioAdvisor.kt           # 组合层仓位控制 + 三周期共振买点
         │   │   │   │   ├── Fundamentals.kt               # 基本面数据类 + Builder/enrichPayoutRatio/趋势
@@ -345,6 +346,7 @@ stock_inc/
 | `RealizedPnlCalculator` | FIFO 已实现盈亏（A 股法定口径，独立于摊薄成本法） |
 | `DripCalculator` | 分红再投资（DRIP）复利模拟：按年把分红以可配置再投价买入，对比「再投」与「现金分红」两条路径 |
 | `GridCalculator` | 网格交易档位表：等差网格分档（1/price 反比分配资金）+ 当前价「下一档买/卖」提示 |
+| `GridAnchorCalculator` | 网格智能锚定：BOLL 中轨=基准价/上轨=上界/用户目标股息率=下界（资金用完位） |
 | `LlmPromptBuilder` | 评估数据 → LLM prompt（纯函数 + 降级兜底） |
 | `LlmAnalysisParser` | LLM 响应 → 结构化结果 |
 | `applyPortfolioFilter`（顶层函数） | 行业/标签筛选 |
@@ -533,3 +535,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-04：新增「全局交易流水 + 交易笔记（复盘）」功能。DB version 18→19（transactions 表加可空 `note` 列，`MIGRATION_18_19`）；`TransactionHistoryViewModel`（combine 全量交易 + 股票名映射 → 按日期倒序流水，累计买卖金额汇总）+ `TransactionHistoryScreen`（流水卡片 + 资金流水汇总 + 备注编辑弹窗 + 专属空状态）+ 5 单测；`EditHoldingViewModel`/`TransactionSheet` 新增/编辑交易均支持备注字段，`TransactionCard` 展示备注；导航 `Routes.TRANSACTION_HISTORY` + 设置页「交易记录」入口。备份自动覆盖 note（BackupContainer 直存 TransactionEntity）。
 - 2026-08-04：新增「分红再投资（DRIP）复利模拟」功能。落地纯函数 `DripCalculator`（按年把分红以可配置再投价全额买入，逐年扩股；对比「分红再投」与「现金分红」两条路径的期末市值与超额收益）+ 9 单测（含手算金标准/涨跌场景/再投禁用退化/年份过滤/窗口截取）；`DripSimulationViewModel`（复用 dividends 数据，参数可调即时重算）+ `DripSimulationScreen`（汇总卡 + 参数卡 + 逐年明细表 + 诚实的简化口径说明）；导航 `dripSimulation/{code}` + 个股详情页「分红再投模拟」入口。**不改 schema**（复用 dividends 表）。再投价采用单值简化口径（非逐日真实价），UI 明确标注假设，遵守宪法原则 III（不臆造数据）。
 - 2026-08-04：新增「网格交易计划（计算器）」功能。DB version 19→20（新增 `grid_plans` 表，`MIGRATION_19_20`）；落地纯函数 `GridCalculator`（等差网格分档：[low,high] 等分 grids 份，1/price 反比分配资金，低价多配；当前价「下一档买/卖」提示；A 股 100 股整手取整）+ 13 单测；`GridPlanEntity`/`GridPlanDao`/`GridPlanRepository`（CRUD）；`GridPlanViewModel`（列表 + 生成器参数实时预览 + 保存/编辑/删除）+ `GridPlanScreen`（计划卡 + 下一档提示 + 档位表 + 生成器 ModalBottomSheet + 专属空状态）+ 5 VM 单测；导航 `Routes.GRID_PLAN` + 设置页「网格交易」入口；备份覆盖 grid_plans。**重要定位**：仅做档位生成与提示，**不联网下单**——网格实际执行由用户在券商端手动完成。
+- 2026-08-04：网格结合股息 + 布林带。落地纯函数 `GridAnchorCalculator`（基准价=BOLL 中轨、上界=BOLL 上轨、下界=用户目标股息率对应价 `P=D/(yield/100)`，取 min(BOLL下轨, 股息底)；**到达目标股息率=网格资金用完位**）+ 9 单测；`GridPlanViewModel.autoAnchor()`：拉周线 BOLL + 历史分红，按用户目标股息率自动填充基准/上下界 + 锁定来源说明；`GridPlanScreen` 生成器新增「目标股息率」输入 + 「自动锁定」按钮 + 锚定结果卡片（说明下界由技术面/价值底哪侧决定）；+3 VM 单测（成功锚定/数据不足降级/未选标的报错）。语义：用户调高目标股息率 → 下界价更低 → 同资金买到更多股（更深安全垫），网格区间不再凭空手填。
