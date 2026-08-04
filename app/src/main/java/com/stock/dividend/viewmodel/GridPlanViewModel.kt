@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.GridAnchor
@@ -15,6 +16,7 @@ import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.GridResult
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
 import javax.inject.Inject
@@ -75,7 +77,8 @@ class GridPlanViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val gridPlanRepository: GridPlanRepository,
     private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository
+    private val dividendRepository: DividendRepository,
+    private val transactionRepository: TransactionRepository
 ) : ViewModel() {
 
     /** 从个股详情页跳转时携带的 stockCode（gridPlanFor/{code} 路由参数）；全局入口为空。 */
@@ -88,29 +91,36 @@ class GridPlanViewModel @Inject constructor(
     private val pricesByCode = MutableStateFlow<Map<String, Double>>(emptyMap())
 
     init {
-        // 列表 + 自选股：combine 计划、股票、当前价 → 带「下一档」提示的列表项
+        // 列表 + 自选股 + 交易流水：combine 计划、股票、当前价、交易 → 带触发状态的列表项
         viewModelScope.launch {
             combine(
                 gridPlanRepository.observeAll(),
                 stockRepository.observeAllStocks(),
-                pricesByCode
-            ) { plans, stocks, prices ->
+                pricesByCode,
+                transactionRepository.observeAll()
+            ) { plans, stocks, prices, transactions ->
                 val codeToName = stocks.associate { it.code to it.name }
-                Triple(plans, stocks, codeToName to prices)
-            }.collect { (plans, stocks, namesAndPrices) ->
+                val transactionsByStock = transactions.groupBy { it.stockCode }
+                GridPlanUiStateHolder(plans, stocks, codeToName to prices, transactionsByStock)
+            }.collect { holder ->
+                val (plans, stocks, namesAndPrices, transactionsByStock) = holder
                 val (codeToName, prices) = namesAndPrices
                 val items = plans.map { plan ->
                     val price = prices[plan.stockCode]
+                    // 关联该股实际交易记录，标记各档位是否已触发（实际买入）
                     GridPlanItem(
                         plan = plan,
                         currentPrice = price,
-                        result = GridCalculator.generate(
-                            basePrice = plan.basePrice,
-                            lowPrice = plan.lowPrice,
-                            highPrice = plan.highPrice,
-                            grids = plan.grids,
-                            totalCapital = plan.totalCapital,
-                            currentPrice = price
+                        result = GridCalculator.markTriggeredLevels(
+                            GridCalculator.generate(
+                                basePrice = plan.basePrice,
+                                lowPrice = plan.lowPrice,
+                                highPrice = plan.highPrice,
+                                grids = plan.grids,
+                                totalCapital = plan.totalCapital,
+                                currentPrice = price
+                            ),
+                            transactionsByStock[plan.stockCode].orEmpty()
                         )
                     )
                 }
@@ -136,6 +146,14 @@ class GridPlanViewModel @Inject constructor(
             }
         }
     }
+
+    /** combine 5 流的中间数据载体（避免 Pair/Triple 嵌套）。 */
+    private data class GridPlanUiStateHolder(
+        val plans: List<GridPlanEntity>,
+        val stocks: List<StockEntity>,
+        val namesAndPrices: Pair<Map<String, String>, Map<String, Double>>,
+        val transactionsByStock: Map<String, List<TransactionEntity>>
+    )
 
     /** 防止 initialStockCode 的自动锚定在每次自选股发射时重复触发。 */
     private var initialStockHandled = false

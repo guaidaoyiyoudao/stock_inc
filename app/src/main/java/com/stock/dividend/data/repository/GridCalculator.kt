@@ -33,7 +33,9 @@ data class GridLevel(
     val side: String,           // 恒为 "BUY"
     val shares: Int,
     val amount: Double,
-    val deviation: Double       // (price - base) / base * 100
+    val deviation: Double,      // (price - base) / base * 100
+    /** 该档是否已被实际成交触发（价格跌到该档并发生买入交易）；仅运行时标记，计算器默认 false。 */
+    val triggered: Boolean = false
 ) {
     val isBuy: Boolean get() = side == "BUY"
 }
@@ -157,4 +159,46 @@ object GridCalculator {
 
     private fun round2(v: Double): Double =
         kotlin.math.round(v * 100.0) / 100.0
+
+    /**
+     * 关联实际交易记录，标记每个买入档位是否已触发（纯函数，无 Android 依赖）。
+     *
+     * **语义**：某档位被触发 = 该股票存在一笔 **BUY 交易**，成交价落在该档位的
+     * 「触发区间」内。触发区间以档位价为中心、半径 = 相邻档位价差的一半（半步长）：
+     * 价格跌进此区间即认为该档被执行（网格分档的合理容差，避免因价格微小抖动漏判）。
+     *
+     * 匹配只针对买入交易（纯买入模型，卖出记录不参与档位触发判定——卖出是独立的
+     * 持仓管理动作，不是网格买入档的执行）。
+     *
+     * 返回带 [GridLevel.triggered] 标记的 [GridResult] 副本；不修改原对象。
+     *
+     * @param result       网格计算结果（[GridCalculator.generate] 产出）。
+     * @param transactions 该股票的全部交易记录（BUY/SELL 均可，内部只取 BUY）。
+     */
+    fun markTriggeredLevels(
+        result: GridResult,
+        transactions: List<com.stock.dividend.data.local.entity.TransactionEntity>
+    ): GridResult {
+        if (result.levels.isEmpty()) return result
+
+        // 相邻档位价差的一半作为触发区间半径；档位等分时价差一致
+        val levelPrices = result.levels.map { it.price }
+        val halfStep = levelPrices.zipWithNext().minOfOrNull { (a, b) -> (b - a) / 2.0 }
+            ?: return result
+
+        // 所有 BUY 成交价
+        val buyPrices = transactions
+            .filter { it.type == "BUY" && it.price > 0.0 }
+            .map { it.price }
+
+        val triggeredByPrice = result.levels.associate { level ->
+            val hit = buyPrices.any { buy -> abs(buy - level.price) <= halfStep }
+            level.price to hit
+        }
+
+        val updatedLevels = result.levels.map { level ->
+            if (triggeredByPrice[level.price] == true) level.copy(triggered = true) else level
+        }
+        return result.copy(levels = updatedLevels, buyLevels = updatedLevels)
+    }
 }

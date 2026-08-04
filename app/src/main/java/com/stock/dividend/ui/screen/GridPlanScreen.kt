@@ -211,11 +211,24 @@ private fun GridPlanCard(
             // 档位表（紧凑双列：价格 / 方向 / 股数）
             if (result.levels.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = "档位表（步长 ${"%.1f".format(result.stepPercent)}%）",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                // 触发进度：已触发档 / 总档（关联实际交易记录）
+                val triggeredCount = result.levels.count { it.triggered }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        text = "档位表（步长 ${"%.1f".format(result.stepPercent)}%）",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = if (triggeredCount > 0) {
+                            "已触发 $triggeredCount/${result.levels.size}"
+                        } else {
+                            "均未触发"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (triggeredCount > 0) extendedColors.positive else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(modifier = Modifier.height(6.dp))
                 result.levels.forEach { level -> GridLevelRow(level, item.currentPrice) }
             }
@@ -238,13 +251,18 @@ private fun GridLevelRow(level: GridLevel, currentPrice: Double?) {
             text = MoneyFormatter.withSymbol(level.price),
             style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
             fontWeight = if (near) FontWeight.Bold else FontWeight.Normal,
-            color = if (near) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            // 已触发档位价格淡化（已被实际买入执行）
+            color = when {
+                level.triggered -> MaterialTheme.colorScheme.outline
+                near -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurface
+            }
         )
-        // 纯买入模型：所有档位均为「买」
+        // 纯买入模型：所有档位均为「买」；已触发档标记 ✓
         Text(
-            text = "买",
+            text = if (level.triggered) "买✓" else "买",
             style = MaterialTheme.typography.labelSmall,
-            color = extendedColors.positive,
+            color = if (level.triggered) extendedColors.positive else extendedColors.positive,
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
         )
         Text(

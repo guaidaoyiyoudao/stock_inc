@@ -152,4 +152,64 @@ class GridCalculatorTest {
         // 整手取整有少量误差，允许 ±10% 容差
         assertThat(buyTotal).isWithin(10000.0).of(100000.0)
     }
+
+    private fun tx(type: String, price: Double) = com.stock.dividend.data.local.entity.TransactionEntity(
+        id = 0L, stockCode = "sh.600000", type = type, shares = 100, price = price, date = "2026-01-01"
+    )
+
+    /** 关联交易：BUY 成交价落在档位触发区间（档位价 ± 半步长）→ 标记已触发。 */
+    @Test
+    fun `buy transactions mark matching levels triggered`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        // 档位 8/8.67/9.33/10，半步长 = (10-8)/3/2 = 0.333
+        // BUY @ 9.5 → 落在 9.33 ± 0.333 区间内 → 9.33 档触发
+        val marked = GridCalculator.markTriggeredLevels(
+            base,
+            listOf(tx("BUY", 9.5), tx("BUY", 12.0))  // 12 不在任何档位区间（参考上界）
+        )
+        assertThat(marked.levels.first { it.price == 9.33 }.triggered).isTrue()
+        assertThat(marked.levels.first { it.price == 8.0 }.triggered).isFalse()
+        assertThat(marked.levels.first { it.price == 10.0 }.triggered).isFalse()
+    }
+
+    /** SELL 交易不参与档位触发判定（纯买入模型，卖出是独立持仓管理动作）。 */
+    @Test
+    fun `sell transactions do not trigger levels`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val marked = GridCalculator.markTriggeredLevels(
+            base,
+            listOf(tx("SELL", 9.4))  // 价格落在 9.33 档区间，但类型是 SELL
+        )
+        assertThat(marked.levels.all { !it.triggered }).isTrue()
+    }
+
+    /** 无交易 → 无档位触发。 */
+    @Test
+    fun `no transactions trigger nothing`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val marked = GridCalculator.markTriggeredLevels(base, emptyList())
+        assertThat(marked.levels.all { !it.triggered }).isTrue()
+    }
+
+    /** 多个 BUY 命中多个档位。 */
+    @Test
+    fun `multiple buys trigger multiple levels`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val marked = GridCalculator.markTriggeredLevels(
+            base,
+            listOf(tx("BUY", 8.1), tx("BUY", 10.0))  // 8.1→8 档；10.0→10 档
+        )
+        assertThat(marked.levels.first { it.price == 8.0 }.triggered).isTrue()
+        assertThat(marked.levels.first { it.price == 10.0 }.triggered).isTrue()
+        assertThat(marked.levels.first { it.price == 9.33 }.triggered).isFalse()
+    }
+
+    /** 档位触发不影响原对象（纯函数，返回副本）。 */
+    @Test
+    fun `markTriggered returns new instances`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val marked = GridCalculator.markTriggeredLevels(base, listOf(tx("BUY", 8.1)))
+        assertThat(base.levels.all { !it.triggered }).isTrue()          // 原对象不变
+        assertThat(marked.levels.any { it.triggered }).isTrue()         // 副本有标记
+    }
 }
