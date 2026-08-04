@@ -4,6 +4,7 @@ import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
+import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
@@ -58,6 +59,8 @@ data class BackupContainer(
     val tradeStrategies: List<TradeStrategyEntity> = emptyList(),
     // 行业目标配比：v2 起新增，默认空以保证旧备份向后兼容（反序列化缺失字段 → null → emptyList）
     val industryTargets: List<IndustryTargetEntity> = emptyList(),
+    /** 网格交易计划：v20 起新增，旧备份缺失 → null → orEmpty 兜底。 */
+    val gridPlans: List<GridPlanEntity> = emptyList(),
     /**
      * 用户配置（SharedPreferences）：外层 key 为 prefs 文件名（如 "llm_prefs"），
      * 内层为该文件全部 key→value。默认空 Map 保证旧备份向后兼容。

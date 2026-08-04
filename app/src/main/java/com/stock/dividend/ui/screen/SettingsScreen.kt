@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -34,6 +35,7 @@ internal val settingsGroupTitles = listOf(
     "AI 与策略",
     "数据",
     "交易记录",
+    "网格交易",
 )
 
 /**
@@ -50,6 +52,7 @@ fun SettingsScreen(
     onOpenLlmStrategySettings: () -> Unit,
     onOpenDataSettings: () -> Unit,
     onOpenTransactionHistory: () -> Unit,
+    onOpenGridPlan: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -81,6 +84,12 @@ fun SettingsScreen(
             description = "全局买卖流水、复盘备注",
             icon = Icons.Filled.ReceiptLong,
             onClick = onOpenTransactionHistory
+        )
+        SettingsNavRow(
+            title = settingsGroupTitles[4],
+            description = "网格档位表、下一档提示（仅计划，不下单）",
+            icon = Icons.Filled.GridOn,
+            onClick = onOpenGridPlan
         )
     }
 }

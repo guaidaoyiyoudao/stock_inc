@@ -9,6 +9,7 @@ import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FinancialStatementsCacheDao
 import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.FundamentalsCacheDao
+import com.stock.dividend.data.local.dao.GridPlanDao
 import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.LlmAnalysisCacheDao
@@ -39,7 +40,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "stock_dividend.db"
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11, AppDatabase.MIGRATION_11_12, AppDatabase.MIGRATION_12_13, AppDatabase.MIGRATION_13_14, AppDatabase.MIGRATION_14_15, AppDatabase.MIGRATION_15_16, AppDatabase.MIGRATION_16_17, AppDatabase.MIGRATION_17_18, AppDatabase.MIGRATION_18_19)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11, AppDatabase.MIGRATION_11_12, AppDatabase.MIGRATION_12_13, AppDatabase.MIGRATION_13_14, AppDatabase.MIGRATION_14_15, AppDatabase.MIGRATION_15_16, AppDatabase.MIGRATION_16_17, AppDatabase.MIGRATION_17_18, AppDatabase.MIGRATION_18_19, AppDatabase.MIGRATION_19_20)
             .build()
     }
 
@@ -93,6 +94,9 @@ object DatabaseModule {
         db.financialStatementsCacheDao()
 
     @Provides
+    fun provideGridPlanDao(db: AppDatabase): GridPlanDao = db.gridPlanDao()
+
+    @Provides
     @Singleton
     fun provideBackupRepository(
         db: AppDatabase,
@@ -106,13 +110,14 @@ object DatabaseModule {
         notificationRuleDao: NotificationRuleDao,
         stockTagDao: StockTagDao,
         tradeStrategyDao: TradeStrategyDao,
-        industryTargetDao: IndustryTargetDao
+        industryTargetDao: IndustryTargetDao,
+        gridPlanDao: GridPlanDao
     ): BackupRepository {
         return BackupRepository(
             db, stockDao, dividendDao, fireGoalDao,
             dividendIncomeRecordDao, transactionDao,
             achievementDao, livingExpenseItemDao, notificationRuleDao,
-            stockTagDao, tradeStrategyDao, industryTargetDao
+            stockTagDao, tradeStrategyDao, industryTargetDao, gridPlanDao
         )
     }
 }

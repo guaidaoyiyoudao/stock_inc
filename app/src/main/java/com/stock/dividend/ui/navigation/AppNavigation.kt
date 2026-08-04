@@ -11,6 +11,7 @@ import com.stock.dividend.ui.screen.MainScaffold
 import com.stock.dividend.ui.screen.ScreenshotImportScreen
 import com.stock.dividend.ui.screen.TradeStrategyListScreen
 import com.stock.dividend.ui.screen.TransactionHistoryScreen
+import com.stock.dividend.ui.screen.GridPlanScreen
 
 object Routes {
     const val MAIN = "main"
@@ -20,6 +21,7 @@ object Routes {
     const val TRADE_STRATEGY_LIST = "tradeStrategyList"
     const val SCREENSHOT_IMPORT = "screenshotImport"
     const val TRANSACTION_HISTORY = "transactionHistory"
+    const val GRID_PLAN = "gridPlan"
 }
 
 @Composable
@@ -70,6 +72,11 @@ fun AppNavigation(
         }
         composable(Routes.TRANSACTION_HISTORY) {
             TransactionHistoryScreen(
+                onBack = { rootNavController.popBackStack() }
+            )
+        }
+        composable(Routes.GRID_PLAN) {
+            GridPlanScreen(
                 onBack = { rootNavController.popBackStack() }
             )
         }

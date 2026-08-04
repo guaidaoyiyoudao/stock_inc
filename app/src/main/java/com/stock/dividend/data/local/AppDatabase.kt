@@ -10,6 +10,7 @@ import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
 import com.stock.dividend.data.local.dao.FinancialStatementsCacheDao
 import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.FundamentalsCacheDao
+import com.stock.dividend.data.local.dao.GridPlanDao
 import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.LlmAnalysisCacheDao
@@ -26,6 +27,7 @@ import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FinancialStatementsCacheEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.FundamentalsCacheEntity
+import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.LlmAnalysisCacheEntity
@@ -54,9 +56,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         TradeStrategyEntity::class,
         FundamentalsCacheEntity::class,
         LlmAnalysisCacheEntity::class,
-        FinancialStatementsCacheEntity::class
+        FinancialStatementsCacheEntity::class,
+        GridPlanEntity::class
     ],
-    version = 19,
+    version = 20,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -76,6 +79,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun fundamentalsCacheDao(): FundamentalsCacheDao
     abstract fun llmAnalysisCacheDao(): LlmAnalysisCacheDao
     abstract fun financialStatementsCacheDao(): FinancialStatementsCacheDao
+    abstract fun gridPlanDao(): GridPlanDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -333,6 +337,29 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // 交易备注/复盘笔记：用户自由填写，可空
                 db.execSQL("ALTER TABLE transactions ADD COLUMN note TEXT")
+            }
+        }
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 网格交易计划：用户为某标的设定的网格参数（仅计划/提示，不联网下单）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `grid_plans` (" +
+                        "`id` TEXT NOT NULL PRIMARY KEY, " +
+                        "`stockCode` TEXT NOT NULL, " +
+                        "`stockName` TEXT NOT NULL, " +
+                        "`basePrice` REAL NOT NULL, " +
+                        "`lowPrice` REAL NOT NULL, " +
+                        "`highPrice` REAL NOT NULL, " +
+                        "`grids` INTEGER NOT NULL, " +
+                        "`totalCapital` REAL NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, " +
+                        "FOREIGN KEY(`stockCode`) REFERENCES `stocks`(`code`) ON DELETE CASCADE)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_grid_plans_stockCode` ON `grid_plans`(`stockCode`)"
+                )
             }
         }
     }

@@ -43,7 +43,8 @@ class BackupRepository @Inject constructor(
     private val notificationRuleDao: NotificationRuleDao,
     private val stockTagDao: StockTagDao,
     private val tradeStrategyDao: TradeStrategyDao,
-    private val industryTargetDao: IndustryTargetDao
+    private val industryTargetDao: IndustryTargetDao,
+    private val gridPlanDao: com.stock.dividend.data.local.dao.GridPlanDao
 ) {
     private val gson = GsonBuilder().setPrettyPrinting().create()
 
@@ -68,6 +69,7 @@ class BackupRepository @Inject constructor(
                 val stockTags = async { stockTagDao.getAll() }
                 val tradeStrategies = async { tradeStrategyDao.getAllForBackup() }
                 val industryTargets = async { industryTargetDao.getAll() }
+                val gridPlans = async { gridPlanDao.getAllForBackup() }
 
                 BackupContainer(
                     metadata = BackupMetadata(
@@ -97,6 +99,7 @@ class BackupRepository @Inject constructor(
                     stockTags = stockTags.await(),
                     tradeStrategies = tradeStrategies.await(),
                     industryTargets = industryTargets.await(),
+                    gridPlans = gridPlans.await(),
                     prefs = readPrefsForBackup(context)
                 )
             }
@@ -128,6 +131,7 @@ class BackupRepository @Inject constructor(
                 // Delete children first (foreign key safety)
                 stockTagDao.deleteAll()
                 tradeStrategyDao.clear()
+                gridPlanDao.clear()
                 dividendIncomeRecordDao.deleteAll()
                 dividendDao.deleteAll()
                 transactionDao.deleteAll()
@@ -153,6 +157,8 @@ class BackupRepository @Inject constructor(
                 tradeStrategyDao.insertAll(container.tradeStrategies)
                 // 旧备份可能不含 industryTargets 字段（Gson 绕过构造函数 → null），orEmpty 兜底
                 industryTargetDao.insertAll(container.industryTargets.orEmpty())
+                // grid_plans v20 起新增，旧备份无此字段 → null → orEmpty 兜底
+                gridPlanDao.insertAll(container.gridPlans.orEmpty())
 
                 // 交易记录已全部回灌，按移动加权平均重算每只股票的持仓量与成本，
                 // 确保旧备份恢复后立即使用统一算法（避免沿用快照里的旧算法值）。

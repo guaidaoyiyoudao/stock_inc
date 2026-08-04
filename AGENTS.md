@@ -26,7 +26,7 @@
 | 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.0.21-1.0.28 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.6.1，**当前 DB version = 19** |
+| 本地存储 | Room (SQLite) | 2.6.1，**当前 DB version = 20** |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
 | 导航 | Navigation Compose（单 Activity + 多 Composable） | 2.8.5 |
@@ -66,7 +66,7 @@ stock_inc/
         │   │   │
         │   │   ├── data/
         │   │   │   ├── local/
-        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=19）+ 全部 Migration（红线 #1）
+        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=20）+ 全部 Migration（红线 #1）
         │   │   │   │   ├── backup/BackupData.kt # 备份/恢复的数据载体（JSON 序列化）
         │   │   │   │   ├── dao/                 # Room DAO 接口（@Dao）
         │   │   │   │   │   ├── StockDao.kt                  # 自选股（含 observeAll/observeByCode/getByCode）
@@ -84,7 +84,8 @@ stock_inc/
         │   │   │   │   │   ├── LlmAnalysisCacheDao.kt       # LLM 解读结果缓存（24h TTL）
         │   │   │   │   │   ├── FireGoalDao.kt               # FIRE 财务自由目标
         │   │   │   │   │   ├── LivingExpenseItemDao.kt      # 生活支出项
-        │   │   │   │   │   └── AchievementDao.kt            # 成就解锁记录
+        │   │   │   │   │   ├── AchievementDao.kt            # 成就解锁记录
+        │   │   │   │   │   └── GridPlanDao.kt               # 网格交易计划（2026-08-04 新增）
         │   │   │   │   └── entity/             # @Entity（表名下划线、字段驼峰，Room 注解映射）
         │   │   │   │       ├── StockEntity.kt              # stocks：含 shares/costPerShare/industry/buyThresholdMultiplier
         │   │   │   │       ├── DividendEntity.kt          # dividends：报告期/每股分红/股息率/除权日
@@ -101,7 +102,8 @@ stock_inc/
         │   │   │   │       ├── LlmAnalysisCacheEntity.kt
         │   │   │   │       ├── FireGoalEntity.kt
         │   │   │   │       ├── LivingExpenseItemEntity.kt      # 含 EXPENSE_PERIOD_MONTHLY 常量
-        │   │   │   │       └── AchievementEntity.kt
+        │   │   │   │       ├── AchievementEntity.kt
+        │   │   │   │       └── GridPlanEntity.kt               # 网格交易计划（仅计划/提示，不下单，2026-08-04 新增）
         │   │   │   │
         │   │   │   ├── remote/                  # Retrofit 接口（DI 在 NetworkModule 装配，见 §4.7/§4.9）
         │   │   │   │   ├── SearchApi.kt         # 东财 searchapi（搜索）
@@ -148,6 +150,7 @@ stock_inc/
         │   │   │   │   ├── BackupRepository.kt             # 备份/恢复（事务式批量）
         │   │   │   │   ├── WidgetDataRepository.kt         # 桌面小组件数据
         │   │   │   │   ├── ScreenshotStrategyRepository.kt # 截图策略持久化
+        │   │   │   │   ├── GridPlanRepository.kt   # 网格交易计划 CRUD（2026-08-04 新增）
         │   │   │   │   ├── LlmConfigRepository.kt          # LLM 配置（provider/key/url）
         │   │   │   │   ├── LlmAnalysisRepository.kt        # 组合级 LLM 解读编排
         │   │   │   │   ├── LlmAnalysisCacheStore.kt       # LLM 解读缓存读写
@@ -170,6 +173,8 @@ stock_inc/
         │   │   │   │   ├── DividendMetricsCalculator.kt  # 分红深度（连续年数/CAGR/稳定性，2026-08-02 新增）
         │   │   │   │   ├── HoldingCalculator.kt          # 摊薄成本法持仓成本（已实现盈亏藏入成本）
         │   │   │   │   ├── RealizedPnlCalculator.kt      # FIFO 已实现盈亏（独立于摊薄成本，A 股法定口径，2026-08-04 新增）
+        │   │   │   │   ├── DripCalculator.kt     # 分红再投资（DRIP）复利模拟（按年再投，可配置再投价，2026-08-04 新增）
+        │   │   │   │   ├── GridCalculator.kt     # 网格交易档位表（等差网格 + 当前价下一档提示，2026-08-04 新增）
         │   │   │   │   ├── HoldingRecommender.kt         # 单股评估：BOLL+股息率门槛 → BUY/HOLD/SELL
         │   │   │   │   ├── PortfolioAdvisor.kt           # 组合层仓位控制 + 三周期共振买点
         │   │   │   │   ├── Fundamentals.kt               # 基本面数据类 + Builder/enrichPayoutRatio/趋势
@@ -263,6 +268,7 @@ stock_inc/
         │   │   │       ├── ExpenseCoverageScreen.kt    # 支出覆盖率
         │   │   │       ├── ScreenshotImportScreen.kt / PortfolioImportScreen.kt  # 截图/批量导入
         │   │   │       ├── TransactionHistoryScreen.kt  # 全局交易流水 + 复盘备注（2026-08-04 新增）
+        │   │   │       ├── GridPlanScreen.kt    # 网格交易计划（档位表 + 下一档提示，仅计划不下单，2026-08-04 新增）
         │   │   │       ├── TradeStrategyListScreen.kt  # 策略库
         │   │   │       ├── NotificationSettingsScreen.kt / StockNotificationSettingsScreen.kt / NotificationReliabilityScreen.kt
         │   │   │       ├── BackupRestoreScreen.kt / FireGoalSetupScreen.kt / OcrDebugScreen.kt
@@ -281,6 +287,7 @@ stock_inc/
         │   │       ├── TradeStrategyListViewModel.kt
         │   │       ├── NotificationSettingsViewModel.kt / StockNotificationSettingsViewModel.kt
         │   │       ├── TransactionHistoryViewModel.kt  # 全局交易流水 + 复盘备注（2026-08-04 新增）
+        │   │       ├── GridPlanViewModel.kt   # 网格计划列表 + 生成器（参数实时预览，2026-08-04 新增）
         │   │       ├── FireGoalViewModel.kt / BackupViewModel.kt / OcrDebugViewModel.kt
         │   │       ├── AchievementViewModel.kt + AchievementChecker.kt + AchievementDef.kt + AchievementCategory.kt  # 成就
         │   │       └── MarkdownRenderGuard.kt    # Markdown 渲染安全（防注入）
@@ -294,7 +301,7 @@ stock_inc/
             └── viewmodel/         # 19 个：PortfolioViewModelTest 等（Robolectric + MockK + Turbine）
 ```
 
-**文件规模速览**（2026-08-04）：main 源集约 130 个 .kt，测试约 67 个 .kt；DB 16 张表/19 个 Migration；AI Agent 43 个工具（31 读 + 12 写）。
+**文件规模速览**（2026-08-04）：main 源集约 135 个 .kt，测试约 72 个 .kt；DB 17 张表/20 个 Migration；AI Agent 43 个工具（31 读 + 12 写）。
 
 ---
 
@@ -336,6 +343,8 @@ stock_inc/
 | `DripCalculator` | 分红再投资（DRIP）复利模拟：按年把分红以可配置再投价买入，对比「再投」与「现金分红」两条路径 |
 | `HoldingCalculator` | 摊薄成本法持仓成本（卖出盈亏藏入成本，不独立展示） |
 | `RealizedPnlCalculator` | FIFO 已实现盈亏（A 股法定口径，独立于摊薄成本法） |
+| `DripCalculator` | 分红再投资（DRIP）复利模拟：按年把分红以可配置再投价买入，对比「再投」与「现金分红」两条路径 |
+| `GridCalculator` | 网格交易档位表：等差网格分档（1/price 反比分配资金）+ 当前价「下一档买/卖」提示 |
 | `LlmPromptBuilder` | 评估数据 → LLM prompt（纯函数 + 降级兜底） |
 | `LlmAnalysisParser` | LLM 响应 → 结构化结果 |
 | `applyPortfolioFilter`（顶层函数） | 行业/标签筛选 |
@@ -523,3 +532,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-04：新增「已实现盈亏（FIFO）」功能。落地纯函数 `RealizedPnlCalculator`（先进先出结转，A 股个人转让所得法定口径）+ 11 单测；`TransactionDao.observeAll()` / `TransactionRepository.observeAll()` 响应式全量交易流水；`PortfolioViewModel` Collector 8 订阅 → UiState 注入组合级合计 + 个股已实现盈亏；`PortfolioScreen` 摘要卡「累计已实现盈亏」行 + 持仓卡「已实现」指标。**不改 schema**（复用 transactions 表），与 `HoldingCalculator` 摊薄成本法并存（摊薄用于持仓成本展示、FIFO 用于已实现盈亏展示）。
 - 2026-08-04：新增「全局交易流水 + 交易笔记（复盘）」功能。DB version 18→19（transactions 表加可空 `note` 列，`MIGRATION_18_19`）；`TransactionHistoryViewModel`（combine 全量交易 + 股票名映射 → 按日期倒序流水，累计买卖金额汇总）+ `TransactionHistoryScreen`（流水卡片 + 资金流水汇总 + 备注编辑弹窗 + 专属空状态）+ 5 单测；`EditHoldingViewModel`/`TransactionSheet` 新增/编辑交易均支持备注字段，`TransactionCard` 展示备注；导航 `Routes.TRANSACTION_HISTORY` + 设置页「交易记录」入口。备份自动覆盖 note（BackupContainer 直存 TransactionEntity）。
 - 2026-08-04：新增「分红再投资（DRIP）复利模拟」功能。落地纯函数 `DripCalculator`（按年把分红以可配置再投价全额买入，逐年扩股；对比「分红再投」与「现金分红」两条路径的期末市值与超额收益）+ 9 单测（含手算金标准/涨跌场景/再投禁用退化/年份过滤/窗口截取）；`DripSimulationViewModel`（复用 dividends 数据，参数可调即时重算）+ `DripSimulationScreen`（汇总卡 + 参数卡 + 逐年明细表 + 诚实的简化口径说明）；导航 `dripSimulation/{code}` + 个股详情页「分红再投模拟」入口。**不改 schema**（复用 dividends 表）。再投价采用单值简化口径（非逐日真实价），UI 明确标注假设，遵守宪法原则 III（不臆造数据）。
+- 2026-08-04：新增「网格交易计划（计算器）」功能。DB version 19→20（新增 `grid_plans` 表，`MIGRATION_19_20`）；落地纯函数 `GridCalculator`（等差网格分档：[low,high] 等分 grids 份，1/price 反比分配资金，低价多配；当前价「下一档买/卖」提示；A 股 100 股整手取整）+ 13 单测；`GridPlanEntity`/`GridPlanDao`/`GridPlanRepository`（CRUD）；`GridPlanViewModel`（列表 + 生成器参数实时预览 + 保存/编辑/删除）+ `GridPlanScreen`（计划卡 + 下一档提示 + 档位表 + 生成器 ModalBottomSheet + 专属空状态）+ 5 VM 单测；导航 `Routes.GRID_PLAN` + 设置页「网格交易」入口；备份覆盖 grid_plans。**重要定位**：仅做档位生成与提示，**不联网下单**——网格实际执行由用户在券商端手动完成。
