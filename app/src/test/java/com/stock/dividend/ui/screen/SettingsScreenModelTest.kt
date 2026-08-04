@@ -15,11 +15,12 @@ class SettingsScreenModelTest {
 
     @Test
     fun `settings page groups entries by function in fixed order`() {
-        // 按渲染顺序：提醒与评估 / AI 与策略 / 数据
+        // 按渲染顺序：提醒与评估 / AI 与策略 / 数据 / 交易记录
         assertThat(settingsGroupTitles).containsExactly(
             "提醒与评估",
             "AI 与策略",
             "数据",
+            "交易记录",
         ).inOrder()
     }
 }

@@ -56,7 +56,7 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         LlmAnalysisCacheEntity::class,
         FinancialStatementsCacheEntity::class
     ],
-    version = 18,
+    version = 19,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -326,6 +326,13 @@ abstract class AppDatabase : RoomDatabase() {
                         "`payload` TEXT NOT NULL, " +
                         "`fetchedAt` INTEGER NOT NULL)"
                 )
+            }
+        }
+
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 交易备注/复盘笔记：用户自由填写，可空
+                db.execSQL("ALTER TABLE transactions ADD COLUMN note TEXT")
             }
         }
     }

@@ -184,7 +184,8 @@ fun MainScaffold(
                 SettingsScreen(
                     onOpenAlertEvalSettings = { tabNavController.navigate("alertEvalSettings") },
                     onOpenLlmStrategySettings = { tabNavController.navigate("llmStrategySettings") },
-                    onOpenDataSettings = { tabNavController.navigate("dataSettings") }
+                    onOpenDataSettings = { tabNavController.navigate("dataSettings") },
+                    onOpenTransactionHistory = { rootNavController.navigate(Routes.TRANSACTION_HISTORY) }
                 )
             }
             composable("alertEvalSettings") {

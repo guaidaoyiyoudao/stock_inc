@@ -26,7 +26,7 @@
 | 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.0.21-1.0.28 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.6.1，**当前 DB version = 18** |
+| 本地存储 | Room (SQLite) | 2.6.1，**当前 DB version = 19** |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
 | 导航 | Navigation Compose（单 Activity + 多 Composable） | 2.8.5 |
@@ -66,7 +66,7 @@ stock_inc/
         │   │   │
         │   │   ├── data/
         │   │   │   ├── local/
-        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=18）+ 全部 Migration（红线 #1）
+        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=19）+ 全部 Migration（红线 #1）
         │   │   │   │   ├── backup/BackupData.kt # 备份/恢复的数据载体（JSON 序列化）
         │   │   │   │   ├── dao/                 # Room DAO 接口（@Dao）
         │   │   │   │   │   ├── StockDao.kt                  # 自选股（含 observeAll/observeByCode/getByCode）
@@ -260,6 +260,7 @@ stock_inc/
         │   │   │       ├── PortfolioEvaluationScreen.kt  # 持仓一键评估
         │   │   │       ├── ExpenseCoverageScreen.kt    # 支出覆盖率
         │   │   │       ├── ScreenshotImportScreen.kt / PortfolioImportScreen.kt  # 截图/批量导入
+        │   │   │       ├── TransactionHistoryScreen.kt  # 全局交易流水 + 复盘备注（2026-08-04 新增）
         │   │   │       ├── TradeStrategyListScreen.kt  # 策略库
         │   │   │       ├── NotificationSettingsScreen.kt / StockNotificationSettingsScreen.kt / NotificationReliabilityScreen.kt
         │   │   │       ├── BackupRestoreScreen.kt / FireGoalSetupScreen.kt / OcrDebugScreen.kt
@@ -276,6 +277,7 @@ stock_inc/
         │   │       ├── PortfolioImportViewModel.kt / ScreenshotImportViewModel.kt
         │   │       ├── TradeStrategyListViewModel.kt
         │   │       ├── NotificationSettingsViewModel.kt / StockNotificationSettingsViewModel.kt
+        │   │       ├── TransactionHistoryViewModel.kt  # 全局交易流水 + 复盘备注（2026-08-04 新增）
         │   │       ├── FireGoalViewModel.kt / BackupViewModel.kt / OcrDebugViewModel.kt
         │   │       ├── AchievementViewModel.kt + AchievementChecker.kt + AchievementDef.kt + AchievementCategory.kt  # 成就
         │   │       └── MarkdownRenderGuard.kt    # Markdown 渲染安全（防注入）
@@ -289,7 +291,7 @@ stock_inc/
             └── viewmodel/         # 19 个：PortfolioViewModelTest 等（Robolectric + MockK + Turbine）
 ```
 
-**文件规模速览**（2026-08-02）：main 源集约 130 个 .kt，测试约 65 个 .kt；DB 16 张表/18 个 Migration；AI Agent 43 个工具（31 读 + 12 写）。
+**文件规模速览**（2026-08-04）：main 源集约 130 个 .kt，测试约 67 个 .kt；DB 16 张表/19 个 Migration；AI Agent 43 个工具（31 读 + 12 写）。
 
 ---
 
@@ -515,3 +517,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-02：新增 §4.9「外部数据接口单位与解析纪律」+ §8 红线 #11，沉淀数据准确性实践经验（东财 push2 三接口单位规则差异/资金流字段编号/腾讯交叉验证/fixture 单测）；落地 AI Agent 新增 13 个股票信息工具（估值指标/资金流/财务三表/分红深度/行业对比/资讯研报/市场广度），DB version 15→18（新增 `financial_statements_cache` 表），配套纯函数 `DividendMetricsCalculator` + 真实 fixture 解析单测。修正：AGENTS.md 原写 DB version=15 已过时，实际 18（含历史 16/17 的 trade_strategies、fundamentals_cache、llm_analysis_cache 表）。
 - 2026-08-02：§3 目录结构从「目录级简述」升级为「完整文件清单 + 每个文件作用」，覆盖 main 全部 ~130 个 .kt（data/local|remote|repository|agent|notification|scan|widget、di、ui/component|screen|theme|navigation、viewmodel）+ test ~65 个 .kt，含本次新增的财务三表/资金流/分红深度等文件。新增「文件规模速览」速记。
 - 2026-08-04：新增「已实现盈亏（FIFO）」功能。落地纯函数 `RealizedPnlCalculator`（先进先出结转，A 股个人转让所得法定口径）+ 11 单测；`TransactionDao.observeAll()` / `TransactionRepository.observeAll()` 响应式全量交易流水；`PortfolioViewModel` Collector 8 订阅 → UiState 注入组合级合计 + 个股已实现盈亏；`PortfolioScreen` 摘要卡「累计已实现盈亏」行 + 持仓卡「已实现」指标。**不改 schema**（复用 transactions 表），与 `HoldingCalculator` 摊薄成本法并存（摊薄用于持仓成本展示、FIFO 用于已实现盈亏展示）。
+- 2026-08-04：新增「全局交易流水 + 交易笔记（复盘）」功能。DB version 18→19（transactions 表加可空 `note` 列，`MIGRATION_18_19`）；`TransactionHistoryViewModel`（combine 全量交易 + 股票名映射 → 按日期倒序流水，累计买卖金额汇总）+ `TransactionHistoryScreen`（流水卡片 + 资金流水汇总 + 备注编辑弹窗 + 专属空状态）+ 5 单测；`EditHoldingViewModel`/`TransactionSheet` 新增/编辑交易均支持备注字段，`TransactionCard` 展示备注；导航 `Routes.TRANSACTION_HISTORY` + 设置页「交易记录」入口。备份自动覆盖 note（BackupContainer 直存 TransactionEntity）。

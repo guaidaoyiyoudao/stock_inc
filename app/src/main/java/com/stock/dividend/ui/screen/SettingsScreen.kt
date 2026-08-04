@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +33,7 @@ internal val settingsGroupTitles = listOf(
     "提醒与评估",
     "AI 与策略",
     "数据",
+    "交易记录",
 )
 
 /**
@@ -47,6 +49,7 @@ fun SettingsScreen(
     onOpenAlertEvalSettings: () -> Unit,
     onOpenLlmStrategySettings: () -> Unit,
     onOpenDataSettings: () -> Unit,
+    onOpenTransactionHistory: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -72,6 +75,12 @@ fun SettingsScreen(
             description = "备份/恢复、OCR 调试",
             icon = Icons.Filled.CloudSync,
             onClick = onOpenDataSettings
+        )
+        SettingsNavRow(
+            title = settingsGroupTitles[3],
+            description = "全局买卖流水、复盘备注",
+            icon = Icons.Filled.ReceiptLong,
+            onClick = onOpenTransactionHistory
         )
     }
 }

@@ -282,12 +282,14 @@ fun EditHoldingScreen(
             sharesInput = uiState.addSharesInput,
             priceInput = uiState.addPriceInput,
             dateInput = uiState.addDateInput,
+            noteInput = uiState.addNoteInput,
             sharesError = uiState.addSharesError,
             priceError = uiState.addPriceError,
             onTypeChanged = viewModel::onTransactionTypeChanged,
             onSharesChanged = viewModel::onAddSharesChanged,
             onPriceChanged = viewModel::onAddPriceChanged,
             onDateChanged = viewModel::onAddDateChanged,
+            onNoteChanged = viewModel::onAddNoteChanged,
             onConfirm = { viewModel.confirmAddTransaction() },
             onDismiss = { viewModel.dismissDialog() }
         )
@@ -303,12 +305,14 @@ fun EditHoldingScreen(
                 sharesInput = uiState.editSharesInput,
                 priceInput = uiState.editPriceInput,
                 dateInput = uiState.editDateInput,
+                noteInput = uiState.editNoteInput,
                 sharesError = uiState.editSharesError,
                 priceError = uiState.editPriceError,
                 onTypeChanged = { },
                 onSharesChanged = viewModel::onEditSharesChanged,
                 onPriceChanged = viewModel::onEditPriceChanged,
                 onDateChanged = viewModel::onEditDateChanged,
+                onNoteChanged = viewModel::onEditNoteChanged,
                 onConfirm = { viewModel.confirmEditTransaction() },
                 onDismiss = { viewModel.dismissDialog() }
             )
@@ -382,6 +386,13 @@ private fun TransactionCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                 }
+                transaction.note?.takeIf { it.isNotBlank() }?.let { note ->
+                    Text(
+                        text = "📝 $note",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             IconButton(onClick = onEdit) {
@@ -417,12 +428,14 @@ private fun TransactionSheet(
     sharesInput: String,
     priceInput: String,
     dateInput: String,
+    noteInput: String,
     sharesError: String?,
     priceError: String?,
     onTypeChanged: (Boolean) -> Unit,
     onSharesChanged: (String) -> Unit,
     onPriceChanged: (String) -> Unit,
     onDateChanged: (String) -> Unit,
+    onNoteChanged: (String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -513,6 +526,18 @@ private fun TransactionSheet(
                 value = dateInput,
                 errorText = if (dateInput.isBlank()) "请选择日期" else null,
                 onClick = { showDatePicker = true }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 备注/复盘笔记（选填，多行）
+            AppTextField(
+                value = noteInput,
+                onValueChange = onNoteChanged,
+                label = { Text("备注（选填）") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions.Default,
             )
 
             // 合计金额预览

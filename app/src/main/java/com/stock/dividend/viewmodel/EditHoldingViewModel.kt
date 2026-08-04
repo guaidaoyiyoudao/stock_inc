@@ -28,6 +28,7 @@ data class EditHoldingUiState(
     val addSharesInput: String = "",
     val addPriceInput: String = "",
     val addDateInput: String = LocalDate.now().toString(),
+    val addNoteInput: String = "",
     val addSharesError: String? = null,
     val addPriceError: String? = null,
     // ── 编辑已有交易（方向锁定，不可切换）──
@@ -36,6 +37,7 @@ data class EditHoldingUiState(
     val editSharesInput: String = "",
     val editPriceInput: String = "",
     val editDateInput: String = "",
+    val editNoteInput: String = "",
     val editSharesError: String? = null,
     val editPriceError: String? = null,
     // ── 标签 ──────────────────────────────────────────
@@ -155,6 +157,7 @@ class EditHoldingViewModel @Inject constructor(
             addSharesInput = "",
             addPriceInput = "",
             addDateInput = LocalDate.now().toString(),
+            addNoteInput = "",
             addSharesError = null,
             addPriceError = null
         )
@@ -199,6 +202,10 @@ class EditHoldingViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(addDateInput = input)
     }
 
+    fun onAddNoteChanged(input: String) {
+        _uiState.value = _uiState.value.copy(addNoteInput = input)
+    }
+
     fun confirmAddTransaction() {
         val state = _uiState.value
         val isBuy = state.isBuyInput
@@ -220,6 +227,7 @@ class EditHoldingViewModel @Inject constructor(
         }
 
         val type = if (isBuy) "BUY" else "SELL"
+        val note = state.addNoteInput.trim().takeIf { it.isNotEmpty() }
         viewModelScope.launch {
             transactionRepository.addTransaction(
                 TransactionEntity(
@@ -227,7 +235,8 @@ class EditHoldingViewModel @Inject constructor(
                     type = type,
                     shares = shares!!,
                     price = price,
-                    date = date
+                    date = date,
+                    note = note
                 )
             )
             refreshHoldingState {
@@ -248,6 +257,7 @@ class EditHoldingViewModel @Inject constructor(
             editSharesInput = transaction.shares.toString(),
             editPriceInput = if (transaction.price > 0.0) transaction.price.toString() else "",
             editDateInput = transaction.date,
+            editNoteInput = transaction.note.orEmpty(),
             editSharesError = null,
             editPriceError = null
         )
@@ -271,6 +281,10 @@ class EditHoldingViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(editDateInput = input)
     }
 
+    fun onEditNoteChanged(input: String) {
+        _uiState.value = _uiState.value.copy(editNoteInput = input)
+    }
+
     fun confirmEditTransaction() {
         val transaction = _uiState.value.editingTransaction ?: return
         val shares = _uiState.value.editSharesInput.toIntOrNull()
@@ -291,11 +305,13 @@ class EditHoldingViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            val note = _uiState.value.editNoteInput.trim().takeIf { it.isNotEmpty() }
             transactionRepository.updateTransaction(
                 transaction.copy(
                     shares = shares!!,
                     price = price,
-                    date = date
+                    date = date,
+                    note = note
                 )
             )
             refreshHoldingState {

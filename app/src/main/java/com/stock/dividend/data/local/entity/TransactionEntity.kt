@@ -25,5 +25,7 @@ data class TransactionEntity(
     val shares: Int,
     val price: Double = 0.0,
     val date: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /** 交易备注/复盘笔记（用户自由填写，可为空）。v19 新增。 */
+    val note: String? = null
 )
