@@ -22,6 +22,7 @@ object Routes {
     const val SCREENSHOT_IMPORT = "screenshotImport"
     const val TRANSACTION_HISTORY = "transactionHistory"
     const val GRID_PLAN = "gridPlan"
+    const val GRID_PLAN_FOR_STOCK = "gridPlanFor/{code}"
 }
 
 @Composable

@@ -231,6 +231,7 @@ fun MainScaffold(
                     onEditHolding = { c -> tabNavController.navigate("editHolding/$c") },
                     onOpenDividendValuation = { c -> tabNavController.navigate("dividendValuation/$c") },
                     onOpenDripSimulation = { c -> tabNavController.navigate("dripSimulation/$c") },
+                    onOpenGridPlan = { c -> tabNavController.navigate("gridPlanFor/$c") },
                     onOpenNotificationSettings = { c -> tabNavController.navigate("stockNotificationSettings/$c") }
                 )
             }
@@ -245,6 +246,12 @@ fun MainScaffold(
                 arguments = listOf(navArgument("code") { type = NavType.StringType })
             ) {
                 DripSimulationScreen(onBack = { tabNavController.popBackStack() })
+            }
+            composable(
+                route = "gridPlanFor/{code}",
+                arguments = listOf(navArgument("code") { type = NavType.StringType })
+            ) {
+                GridPlanScreen(onBack = { tabNavController.popBackStack() })
             }
             composable(
                 route = "editHolding/{code}",

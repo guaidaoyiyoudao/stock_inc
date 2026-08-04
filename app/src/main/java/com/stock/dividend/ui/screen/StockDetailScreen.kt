@@ -98,6 +98,7 @@ fun StockDetailScreen(
     onEditHolding: (String) -> Unit = {},
     onOpenDividendValuation: (String) -> Unit = {},
     onOpenDripSimulation: (String) -> Unit = {},
+    onOpenGridPlan: (String) -> Unit = {},
     onOpenNotificationSettings: (String) -> Unit = {},
     viewModel: StockDetailViewModel = hiltViewModel()
 ) {
@@ -254,6 +255,14 @@ fun StockDetailScreen(
                         item {
                             DripSimulationEntryCard(
                                 onClick = { onOpenDripSimulation(stockCode) }
+                            )
+                        }
+                    }
+
+                    if (stock != null) {
+                        item {
+                            GridPlanEntryCard(
+                                onClick = { onOpenGridPlan(stockCode) }
                             )
                         }
                     }
@@ -484,6 +493,43 @@ private fun DripSimulationEntryCard(onClick: () -> Unit) {
             AppTextButton(
                 onClick = onClick,
                 text = "查看",
+            )
+        }
+    }
+}
+
+@Composable
+private fun GridPlanEntryCard(onClick: () -> Unit) {
+    AppCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(AppCardDefaults.ListPadding),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "网格交易计划",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "结合 BOLL + 目标股息率自动锚定档位（仅计划，不下单）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppTextButton(
+                onClick = onClick,
+                text = "设置",
             )
         }
     }

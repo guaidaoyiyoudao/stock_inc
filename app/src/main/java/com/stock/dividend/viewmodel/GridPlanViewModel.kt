@@ -1,6 +1,7 @@
 package com.stock.dividend.viewmodel
 
 import androidx.compose.runtime.Stable
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.GridPlanEntity
@@ -69,10 +70,14 @@ data class GridPlanUiState(
  */
 @HiltViewModel
 class GridPlanViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
     private val gridPlanRepository: GridPlanRepository,
     private val stockRepository: StockRepository,
     private val dividendRepository: DividendRepository
 ) : ViewModel() {
+
+    /** 从个股详情页跳转时携带的 stockCode（gridPlanFor/{code} 路由参数）；全局入口为空。 */
+    private val initialStockCode: String = savedStateHandle["code"] ?: ""
 
     private val _uiState = MutableStateFlow(GridPlanUiState())
     val uiState: StateFlow<GridPlanUiState> = _uiState.asStateFlow()
@@ -114,9 +119,24 @@ class GridPlanViewModel @Inject constructor(
                 )
                 // 后台刷新计划涉及股票的当前价（吞异常，§4.3）
                 refreshPricesFor(plans.map { it.stockCode }.distinct())
+
+                // 个股详情页入口：首次拿到自选股且 initialStockCode 命中时，
+                // 自动打开生成器、预选该标的，并立即触发 BOLL+股息率智能锚定。
+                if (!initialStockHandled && initialStockCode.isNotBlank() &&
+                    stocks.any { it.code == initialStockCode }
+                ) {
+                    initialStockHandled = true
+                    showGenerator()
+                    onStockSelected(initialStockCode)
+                    // 预填默认目标股息率后自动锚定（数据不足会静默提示，用户可改手填）
+                    autoAnchor()
+                }
             }
         }
     }
+
+    /** 防止 initialStockCode 的自动锚定在每次自选股发射时重复触发。 */
+    private var initialStockHandled = false
 
     private fun refreshPricesFor(codes: List<String>) {
         if (codes.isEmpty()) return

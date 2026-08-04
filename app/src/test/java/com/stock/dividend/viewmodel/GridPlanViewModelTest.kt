@@ -46,6 +46,11 @@ class GridPlanViewModelTest {
         code = code, name = name, marketCode = "1", shares = 0, costPerShare = 0.0
     )
 
+    /** 构造 SavedStateHandle（可选携带 stockCode，模拟个股详情页入口）。 */
+    private fun savedStateHandle(code: String? = null) = androidx.lifecycle.SavedStateHandle(
+        mutableMapOf<String, Any>().apply { code?.let { put("code", it) } }
+    )
+
     @Test
     fun `observeAll renders plans with grid result`() = runTest {
         val gridRepo = mockk<GridPlanRepository>()
@@ -56,7 +61,7 @@ class GridPlanViewModelTest {
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
         coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
 
-        val vm = GridPlanViewModel(gridRepo, stockRepo, divRepo)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.uiState.test {
             var state = awaitItem()
             if (state.items.isEmpty()) state = awaitItem()
@@ -79,7 +84,7 @@ class GridPlanViewModelTest {
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
         coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
 
-        val vm = GridPlanViewModel(gridRepo, stockRepo, divRepo)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.showGenerator()
         vm.onStockSelected("sh.600036")
         vm.onBasePriceChanged("10")
@@ -107,7 +112,7 @@ class GridPlanViewModelTest {
         coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
 
-        val vm = GridPlanViewModel(gridRepo, stockRepo, divRepo)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.showGenerator()
         // 不选标的，直接保存
         vm.onBasePriceChanged("10")
@@ -129,7 +134,7 @@ class GridPlanViewModelTest {
         coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
 
-        val vm = GridPlanViewModel(gridRepo, stockRepo, divRepo)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.deletePlan("abc")
         advanceUntilIdle()
         coVerify { gridRepo.delete("abc") }
@@ -144,7 +149,7 @@ class GridPlanViewModelTest {
         coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
 
-        val vm = GridPlanViewModel(gridRepo, stockRepo, divRepo)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.showGenerator()
         // 参数不全时 preview 为 null
         assertThat(vm.uiState.value.preview).isNull()
@@ -172,7 +177,7 @@ class GridPlanViewModelTest {
             listOf(com.stock.dividend.data.local.entity.DividendEntity(id = "1", stockCode = "sh.600036", reportDate = "2024", cashPerShare = 0.6))
         )
 
-        val vm = GridPlanViewModel(gridRepo, stockRepo, divRepo)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.showGenerator()
         vm.onStockSelected("sh.600036")
         vm.onTargetYieldChanged("6")
@@ -204,7 +209,7 @@ class GridPlanViewModelTest {
         coEvery { stockRepo.fetchBoll(any(), any()) } returns null
         coEvery { divRepo.observeDividends(any()) } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(gridRepo, stockRepo, divRepo)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.showGenerator()
         vm.onStockSelected("sh.600036")
         vm.onTargetYieldChanged("6")
@@ -225,7 +230,7 @@ class GridPlanViewModelTest {
         coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
 
-        val vm = GridPlanViewModel(gridRepo, stockRepo, divRepo)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.showGenerator()
         // 不选标的直接锚定
         vm.onTargetYieldChanged("6")
@@ -234,5 +239,49 @@ class GridPlanViewModelTest {
 
         assertThat(vm.uiState.value.anchorError).contains("选择标的")
         assertThat(vm.uiState.value.anchorInfo).isNull()
+    }
+
+    /** 个股详情页入口：携带 code 创建 VM → 自动打开生成器、预选标的并触发锚定。 */
+    @Test
+    fun `initial stock code auto-opens generator and anchors`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        val divRepo = mockk<DividendRepository>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
+        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { stockRepo.fetchBoll(any(), any()) } returns com.stock.dividend.data.repository.BollBand(10.0, 12.0, 8.0)
+        coEvery { divRepo.observeDividends(any()) } returns flowOf(
+            listOf(com.stock.dividend.data.local.entity.DividendEntity(id = "1", stockCode = "sh.600036", reportDate = "2024", cashPerShare = 0.6))
+        )
+
+        // 关键：携带 code 构造，模拟从个股详情页进入
+        val vm = GridPlanViewModel(savedStateHandle("sh.600036"), gridRepo, stockRepo, divRepo)
+        // init 的 collector 需先跑到（发射自选股 → 触发自动打开+锚定）
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertThat(state.showGenerator).isTrue()                       // 生成器自动打开
+        assertThat(state.selectedStockCode).isEqualTo("sh.600036")     // 自动预选该股
+        assertThat(state.anchorInfo).isNotNull()                       // 自动锚定成功
+        assertThat(state.basePriceInput).isEqualTo("10.00")
+        assertThat(state.anchorError).isNull()
+    }
+
+    /** 携带不存在的 code → 不触发自动打开（等用户手动操作）。 */
+    @Test
+    fun `unknown initial code does not auto-open generator`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        val divRepo = mockk<DividendRepository>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock("sh.600000", "浦发银行")))
+        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+
+        val vm = GridPlanViewModel(savedStateHandle("sz.999999"), gridRepo, stockRepo, divRepo)
+        advanceUntilIdle()
+
+        assertThat(vm.uiState.value.showGenerator).isFalse()
+        assertThat(vm.uiState.value.selectedStockCode).isEmpty()
     }
 }
