@@ -345,8 +345,8 @@ stock_inc/
 | `HoldingCalculator` | 摊薄成本法持仓成本（卖出盈亏藏入成本，不独立展示） |
 | `RealizedPnlCalculator` | FIFO 已实现盈亏（A 股法定口径，独立于摊薄成本法） |
 | `DripCalculator` | 分红再投资（DRIP）复利模拟：按年把分红以可配置再投价买入，对比「再投」与「现金分红」两条路径 |
-| `GridCalculator` | 网格交易档位表：等差网格分档（1/price 反比分配资金）+ 当前价「下一档买/卖」提示 |
-| `GridAnchorCalculator` | 网格智能锚定：BOLL 中轨=基准价/上轨=上界/用户目标股息率=下界（资金用完位） |
+| `GridCalculator` | 网格（纯买入）档位表：买入区间等分档、1/price 反比分配资金、**无卖出档**、「下一档买」提示 |
+| `GridAnchorCalculator` | 网格智能锚定：买入起点=min(日/周 BOLL 下轨, 月 BOLL 中轨)、资金用完位=min(三周期下轨最低, 目标股息率底)、参考上界=月 BOLL 上轨 |
 | `LlmPromptBuilder` | 评估数据 → LLM prompt（纯函数 + 降级兜底） |
 | `LlmAnalysisParser` | LLM 响应 → 结构化结果 |
 | `applyPortfolioFilter`（顶层函数） | 行业/标签筛选 |
@@ -538,3 +538,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-04：网格结合股息 + 布林带。落地纯函数 `GridAnchorCalculator`（基准价=BOLL 中轨、上界=BOLL 上轨、下界=用户目标股息率对应价 `P=D/(yield/100)`，取 min(BOLL下轨, 股息底)；**到达目标股息率=网格资金用完位**）+ 9 单测；`GridPlanViewModel.autoAnchor()`：拉周线 BOLL + 历史分红，按用户目标股息率自动填充基准/上下界 + 锁定来源说明；`GridPlanScreen` 生成器新增「目标股息率」输入 + 「自动锁定」按钮 + 锚定结果卡片（说明下界由技术面/价值底哪侧决定）；+3 VM 单测（成功锚定/数据不足降级/未选标的报错）。语义：用户调高目标股息率 → 下界价更低 → 同资金买到更多股（更深安全垫），网格区间不再凭空手填。
 - 2026-08-04：网格入口上个股详情页 + 按股独立设置。`StockDetailScreen` 新增「网格交易计划」入口卡（`onOpenGridPlan`）；新路由 `gridPlanFor/{code}`；`GridPlanViewModel` 经 `SavedStateHandle["code"]` 读取入口标的——命中自选股时**自动打开生成器、预选该股并立即触发 BOLL+股息率智能锚定**（每只股票独立锚定到自己的 BOLL/分红，参数互不串扰）；+2 VM 单测（携带 code 自动预选+锚定/未知 code 不触发）。
 - 2026-08-04：修复「网格设置后不能保存」。根因：保存按钮 enabled 表达式 `preview?.validationError == null` 在 **preview=null（参数未填全/非法）时误判为 true** → 按钮可点但 `savePlan()` 里 `toDoubleOrNull() ?: return` **静默 return**，点击毫无反应。修复：① 按钮在 preview=null 时禁用（`preview != null && ...`）；② `savePlan` 参数校验失败改为设置**可见 `saveError`**（不静默）；③ UI 在保存按钮上方展示 `saveError`；+1 回归单测（参数不完整 → saveError 可见且不落库）。
+- 2026-08-04：网格改**纯买入模型**（收息仓定位，杜绝「买了涨了就卖」）。`GridCalculator` 移除卖出档语义：买入区间 `[资金用完位, 买入起点]` 等分 grids 档、**档位全部为 BUY**（无 sellLevels/nextSellHint），资金 1/price 反比（越便宜买越多），`highPrice` 降级为「参考上界（超过不追买）」；`nextBuyHint`=现价下方最近买入档、现价跌破资金用完位返回 null。`GridAnchorCalculator` 改**三周期 BOLL 锚定**：买入起点 = min(日 BOLL 下轨, 周 BOLL 下轨, 月 BOLL 中轨)（**「月线中枢及以下」防守型建仓**，而非一回到中枢就买）、资金用完位 = min(三周期下轨最低, 目标股息率底)、参考上界 = 月 BOLL 上轨；周期缺失跳过。`GridPlanViewModel.autoAnchor()` 并发拉日/周/月三周期 BOLL。UI：去「下一卖」提示、档位表全「买」、预览区展示「参考上界（不追买）」、锚定卡说明三周期来源。测试重写：GridCalculator 12 / GridAnchor 10（含「股息底 ≥ 起点 → null 提示调高目标股息率」）/ VM 11。

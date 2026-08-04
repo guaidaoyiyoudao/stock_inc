@@ -197,8 +197,13 @@ class GridPlanViewModelTest {
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
         coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
-        // BOLL 8/10/12，股息 0.6/股
-        coEvery { stockRepo.fetchBoll(any(), any()) } returns com.stock.dividend.data.repository.BollBand(10.0, 12.0, 8.0)
+        // 三周期 BOLL：日(9/10/11)、周(8/10/12)、月(9/11/13)；股息 0.6/股
+        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
+            com.stock.dividend.data.repository.BollBand(10.0, 11.0, 9.0)
+        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns
+            com.stock.dividend.data.repository.BollBand(10.0, 12.0, 8.0)
+        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns
+            com.stock.dividend.data.repository.BollBand(11.0, 13.0, 9.0)
         coEvery { divRepo.observeDividends(any()) } returns flowOf(
             listOf(com.stock.dividend.data.local.entity.DividendEntity(id = "1", stockCode = "sh.600036", reportDate = "2024", cashPerShare = 0.6))
         )
@@ -206,20 +211,21 @@ class GridPlanViewModelTest {
         val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo)
         vm.showGenerator()
         vm.onStockSelected("sh.600036")
-        vm.onTargetYieldChanged("6")
+        vm.onTargetYieldChanged("8")   // 股息底 7.5 < 起点 8
         vm.autoAnchor()
         advanceUntilIdle()
 
-        // 锚定应填充：基准 10、下界 min(8, 10)=8、上界 12
+        // 买入起点 = min(日下轨9, 周下轨8, 月BOLL中轨11) = 8；资金用完位 = min(技术下轨8, 股息底7.5) = 7.5；
+        // 参考上界 = 月BOLL上轨 13
         val state = vm.uiState.value
         assertThat(state.isAnchoring).isFalse()
         assertThat(state.anchorInfo).isNotNull()
-        assertThat(state.anchorInfo?.basePrice).isEqualTo(10.0)
-        assertThat(state.anchorInfo?.lowPrice).isEqualTo(8.0)
-        assertThat(state.anchorInfo?.highPrice).isEqualTo(12.0)
-        assertThat(state.basePriceInput).isEqualTo("10.00")
-        assertThat(state.lowPriceInput).isEqualTo("8.00")
-        assertThat(state.highPriceInput).isEqualTo("12.00")
+        assertThat(state.anchorInfo?.basePrice).isEqualTo(8.0)
+        assertThat(state.anchorInfo?.lowPrice).isEqualTo(7.5)
+        assertThat(state.anchorInfo?.highPrice).isEqualTo(13.0)
+        assertThat(state.basePriceInput).isEqualTo("8.00")
+        assertThat(state.lowPriceInput).isEqualTo("7.50")
+        assertThat(state.highPriceInput).isEqualTo("13.00")
         assertThat(state.anchorError).isNull()
     }
 
@@ -276,7 +282,14 @@ class GridPlanViewModelTest {
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
         coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
-        coEvery { stockRepo.fetchBoll(any(), any()) } returns com.stock.dividend.data.repository.BollBand(10.0, 12.0, 8.0)
+        // 三周期 BOLL：日(11/12/13)、周(10.5/11.5/12.5)、月(10/11/12)
+        // 默认目标 6% → 股息底 10 < 起点 min(11, 10.5, 月BOLL中轨11) = 10.5
+        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
+            com.stock.dividend.data.repository.BollBand(12.0, 13.0, 11.0)
+        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns
+            com.stock.dividend.data.repository.BollBand(11.5, 12.5, 10.5)
+        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns
+            com.stock.dividend.data.repository.BollBand(11.0, 12.0, 10.0)
         coEvery { divRepo.observeDividends(any()) } returns flowOf(
             listOf(com.stock.dividend.data.local.entity.DividendEntity(id = "1", stockCode = "sh.600036", reportDate = "2024", cashPerShare = 0.6))
         )
@@ -290,7 +303,8 @@ class GridPlanViewModelTest {
         assertThat(state.showGenerator).isTrue()                       // 生成器自动打开
         assertThat(state.selectedStockCode).isEqualTo("sh.600036")     // 自动预选该股
         assertThat(state.anchorInfo).isNotNull()                       // 自动锚定成功
-        assertThat(state.basePriceInput).isEqualTo("10.00")
+        // 买入起点 = min(日下轨11, 周下轨10.5, 月BOLL中轨11) = 10.5
+        assertThat(state.basePriceInput).isEqualTo("10.50")
         assertThat(state.anchorError).isNull()
     }
 

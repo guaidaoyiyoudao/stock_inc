@@ -522,7 +522,7 @@ private fun GridPlanEntryCard(onClick: () -> Unit) {
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "结合 BOLL + 目标股息率自动锚定档位（仅计划，不下单）",
+                    text = "日/周/月 BOLL + 目标股息率自动锚定纯买入档位（仅计划，不下单）",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

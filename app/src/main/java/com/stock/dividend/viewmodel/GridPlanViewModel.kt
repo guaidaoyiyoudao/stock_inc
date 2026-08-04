@@ -215,18 +215,21 @@ class GridPlanViewModel @Inject constructor(
         }
         _uiState.value = _uiState.value.copy(isAnchoring = true, anchorError = null)
         viewModelScope.launch {
-            // 并发拉 BOLL + 分红，任一失败吞异常（§4.3）
-            val band = runCatching { stockRepository.fetchBoll(code, KlinePeriod.WEEKLY) }.getOrNull()
+            // 并发拉日/周/月三周期 BOLL + 分红，任一失败吞异常（§4.3）
+            val dailyBand = runCatching { stockRepository.fetchBoll(code, KlinePeriod.DAILY) }.getOrNull()
+            val weeklyBand = runCatching { stockRepository.fetchBoll(code, KlinePeriod.WEEKLY) }.getOrNull()
+            val monthlyBand = runCatching { stockRepository.fetchBoll(code, KlinePeriod.MONTHLY) }.getOrNull()
             val dividends = runCatching { dividendRepository.observeDividends(code).first() }.getOrDefault(emptyList())
             val latestDps = ForecastCalculator.latestYearlyCashPerShare(dividends)
-            val anchor = if (band != null && latestDps != null) {
-                GridAnchorCalculator.anchor(band, latestDps, targetYield)
+            val anchor = if (latestDps != null) {
+                // 三周期缺省时锚定内部跳过缺失周期，至少一个周期 + 分红即可
+                GridAnchorCalculator.anchor(dailyBand, weeklyBand, monthlyBand, latestDps, targetYield)
             } else null
 
             if (anchor == null) {
                 _uiState.value = _uiState.value.copy(
                     isAnchoring = false,
-                    anchorError = "数据不足（需周线 BOLL + 历史分红），请手动填参"
+                    anchorError = "数据不足（需 BOLL + 历史分红），请手动填参"
                 )
                 return@launch
             }

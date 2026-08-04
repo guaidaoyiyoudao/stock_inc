@@ -111,7 +111,7 @@ fun GridPlanScreen(
         ) {
             item {
                 Text(
-                    text = "以下计划仅用于档位生成与「下一档」提示，不会自动下单。请在券商端手动执行。",
+                    text = "纯买入网格：从买入起点分档买入到资金用完位，不设卖出档，不会自动下单。请在券商端手动执行。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
@@ -195,11 +195,11 @@ private fun GridPlanCard(
                             color = extendedColors.positive
                         )
                     }
-                    result.nextSellHint?.let { sell ->
+                    if (result.nextBuyHint == null) {
                         Text(
-                            text = "下一卖 ${MoneyFormatter.withSymbol(sell)}",
+                            text = "已到/跌破资金用完位",
                             style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
-                            color = extendedColors.negative
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -225,7 +225,6 @@ private fun GridLevelRow(level: GridLevel, currentPrice: Double?) {
     // 当前价恰好落在该档附近（误差 < 0.5%）时高亮
     val near = currentPrice != null && kotlin.math.abs(level.price - currentPrice) / level.price < 0.005
     val extendedColors = LocalExtendedColors.current
-    val sideColor = if (level.isBuy) extendedColors.positive else extendedColors.negative
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -238,10 +237,11 @@ private fun GridLevelRow(level: GridLevel, currentPrice: Double?) {
             fontWeight = if (near) FontWeight.Bold else FontWeight.Normal,
             color = if (near) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
         )
+        // 纯买入模型：所有档位均为「买」
         Text(
-            text = if (level.isBuy) "买" else "卖",
+            text = "买",
             style = MaterialTheme.typography.labelSmall,
-            color = sideColor,
+            color = extendedColors.positive,
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
         )
         Text(
@@ -254,7 +254,7 @@ private fun GridLevelRow(level: GridLevel, currentPrice: Double?) {
         Text(
             text = "${if (level.deviation >= 0) "+" else ""}${"%.1f".format(level.deviation)}%",
             style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
-            color = sideColor,
+            color = extendedColors.positive,
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f)
         )
@@ -291,17 +291,17 @@ private fun GridGeneratorSheet(
             )
             Spacer(modifier = Modifier.height(12.dp))
 
-            // ── 智能锚定（BOLL 中轨=基准 / 上轨=上界 / 目标股息率=下界资金用完位）──
+            // ── 智能锚定（日/周/月 BOLL + 目标股息率 → 纯买入网格）──
             AnchorSection(state, viewModel)
             Spacer(modifier = Modifier.height(12.dp))
 
-            ParamField("基准价（中轴）", state.basePriceInput, viewModel::onBasePriceChanged, "元/股")
+            ParamField("买入起点（第一档）", state.basePriceInput, viewModel::onBasePriceChanged, "元/股")
             Spacer(modifier = Modifier.height(10.dp))
-            ParamField("网格下界（资金用完位）", state.lowPriceInput, viewModel::onLowPriceChanged, "元/股")
+            ParamField("资金用完位（最后一档）", state.lowPriceInput, viewModel::onLowPriceChanged, "元/股")
             Spacer(modifier = Modifier.height(10.dp))
-            ParamField("网格上界", state.highPriceInput, viewModel::onHighPriceChanged, "元/股")
+            ParamField("参考上界（超过不追买）", state.highPriceInput, viewModel::onHighPriceChanged, "元/股")
             Spacer(modifier = Modifier.height(10.dp))
-            ParamField("网格档数", state.gridsInput, viewModel::onGridsChanged, "档", KeyboardType.Number)
+            ParamField("买入档数", state.gridsInput, viewModel::onGridsChanged, "档", KeyboardType.Number)
             Spacer(modifier = Modifier.height(10.dp))
             ParamField("投入总资金", state.totalCapitalInput, viewModel::onTotalCapitalChanged, "元")
 
@@ -346,7 +346,7 @@ private fun AnchorSection(
     val extendedColors = LocalExtendedColors.current
     Column {
         Text(
-            text = "智能锚定（BOLL + 目标股息率）",
+            text = "智能锚定（日/周/月 BOLL + 目标股息率）",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -372,23 +372,24 @@ private fun AnchorSection(
                 text = if (state.isAnchoring) "锁定中…" else "自动锁定"
             )
         }
-        // 锚定结果说明：基准=BOLL 中轨、下界来源（技术面/价值底）
+        // 锚定结果说明：买入起点=日/周下轨、月BOLL中轨及以下；资金用完位来源（技术面/价值底）
         state.anchorInfo?.let { anchor ->
             Spacer(modifier = Modifier.height(8.dp))
             AppCard(elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                 Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
                     val source = if (anchor.lowAnchoredByDividend) {
-                        "下界由目标股息率 ${"%.1f".format(anchor.targetYieldPercent)}% 锁定（价值底 ${MoneyFormatter.withSymbol(anchor.dividendFloorPrice)}，资金用完位）"
+                        "资金用完位由目标股息率 ${"%.1f".format(anchor.targetYieldPercent)}% 锁定（价值底 ${MoneyFormatter.withSymbol(anchor.dividendFloorPrice)}）"
                     } else {
-                        "下界由 BOLL 下轨 ${MoneyFormatter.withSymbol(anchor.bollLower)} 锁定（目标股息率底 ${MoneyFormatter.withSymbol(anchor.dividendFloorPrice)} 更高，震荡超卖位优先）"
+                        "资金用完位由 BOLL 下轨 ${MoneyFormatter.withSymbol(anchor.bollLower)} 锁定（目标股息率底 ${MoneyFormatter.withSymbol(anchor.dividendFloorPrice)} 更高，技术超卖位优先）"
                     }
                     Text(
-                        text = "基准 = BOLL 中轨 ${MoneyFormatter.withSymbol(anchor.basePrice)}\n$source",
+                        text = "买入起点 = 日/周 BOLL 下轨、月 BOLL 中轨及以下 → ${MoneyFormatter.withSymbol(anchor.basePrice)}" +
+                            "（月线中枢 ${MoneyFormatter.withSymbol(anchor.monthlyMiddle)}）\n$source",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "到达下界 ${MoneyFormatter.withSymbol(anchor.lowPrice)} 时股息率达 ${"%.1f".format(anchor.targetYieldPercent)}%，网格资金用完。",
+                        text = "纯买入网格：跌到起点分档买入，跌到 ${MoneyFormatter.withSymbol(anchor.lowPrice)}（股息率 ${"%.1f".format(anchor.targetYieldPercent)}%）资金用完，不设卖出档。",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                         color = extendedColors.positive
@@ -483,12 +484,12 @@ private fun PreviewBlock(result: GridResult) {
                 return@AppCard
             }
             Text(
-                text = "预览：${result.levels.size} 档（买 ${result.buyLevels.size} / 卖 ${result.sellLevels.size}）",
+                text = "预览：${result.levels.size} 档全部为买入（资金用完位前分批建仓）",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(6.dp))
-            // 买卖资金合计
+            // 纯买入：显示总买入资金 + 参考上界
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FinanceMetric(
                     label = "买入资金",
@@ -496,8 +497,8 @@ private fun PreviewBlock(result: GridResult) {
                     modifier = Modifier.weight(1f)
                 )
                 FinanceMetric(
-                    label = "卖出可挂",
-                    value = MoneyFormatter.withSymbol(result.sellLevels.sumOf { it.amount }),
+                    label = "参考上界（不追买）",
+                    value = MoneyFormatter.withSymbol(result.highPrice),
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.End
                 )
