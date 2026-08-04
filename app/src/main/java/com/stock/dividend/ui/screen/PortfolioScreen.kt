@@ -182,6 +182,8 @@ fun PortfolioScreen(
                     totalCost = uiState.totalCost,
                     totalPnl = uiState.totalPnl,
                     totalPnlRate = uiState.totalPnlRate,
+                    totalRealizedPnl = uiState.totalRealizedPnl,
+                    totalRealizedPnlRate = uiState.totalRealizedPnlRate,
                     targetWeightSum = uiState.industryTargetSum,
                     targetWeightLabel = "行业目标合计",
                     onEditTotalAssets = viewModel::showEditTotalAssetsDialog,
@@ -362,6 +364,8 @@ private fun PortfolioSummaryCard(
     totalCost: Double,
     totalPnl: Double,
     totalPnlRate: Double,
+    totalRealizedPnl: Double?,
+    totalRealizedPnlRate: Double?,
     targetWeightSum: Double,
     targetWeightLabel: String = "目标权重合计",
     onEditTotalAssets: () -> Unit,
@@ -448,6 +452,38 @@ private fun PortfolioSummaryCard(
                     valueColor = pnlColor,
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            // 已实现盈亏（FIFO）：仅在有卖出记录时展示，区分于上方的浮动盈亏。
+            if (totalRealizedPnl != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "累计已实现盈亏",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = portfolioFormatSignedPnl(totalRealizedPnl),
+                            style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
+                            fontWeight = FontWeight.SemiBold,
+                            color = pnlColor(totalRealizedPnl)
+                        )
+                        totalRealizedPnlRate?.let { rate ->
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "(${portfolioFormatPercent(rate)})",
+                                style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                                color = pnlColor(totalRealizedPnl)
+                            )
+                        }
+                    }
+                }
             }
 
             if (targetWeightSum > 0.0 && !targetWeightSum.isApproximately(100.0)) {
@@ -583,6 +619,16 @@ private fun PortfolioHoldingCard(
                             },
                             style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    // 已实现盈亏（FIFO）：仅在该股有过卖出时展示，区分于头部浮动盈亏。
+                    item.realizedPnl?.let { realized ->
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "已实现 ${portfolioFormatSignedPnl(realized)}",
+                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                            fontWeight = FontWeight.SemiBold,
+                            color = pnlColor(realized)
                         )
                     }
                 }

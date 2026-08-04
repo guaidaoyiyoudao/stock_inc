@@ -31,6 +31,8 @@ import com.stock.dividend.data.repository.PortfolioLlmInput
 import com.stock.dividend.data.repository.PortfolioLlmStockDetail
 import com.stock.dividend.data.repository.PortfolioSignals
 import com.stock.dividend.data.repository.QuoteSnapshot
+import com.stock.dividend.data.repository.RealizedPnl
+import com.stock.dividend.data.repository.RealizedPnlCalculator
 import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
@@ -42,6 +44,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -79,6 +82,8 @@ data class PortfolioItem(
     val totalCost: Double,
     val unrealizedPnl: Double? = null,
     val unrealizedPnlRate: Double? = null,
+    /** 该股票累计已实现盈亏（FIFO 结转，仅含已平仓部分）；null = 无卖出记录或未加载。 */
+    val realizedPnl: Double? = null,
     val actualWeight: Double? = null,
     /** 个股目标：占其所属行业的 %（两层配比模型，行业主个股次）。 */
     val targetWeight: Double,
@@ -142,6 +147,10 @@ data class PortfolioUiState(
     val totalCost: Double = 0.0,
     val totalPnl: Double = 0.0,
     val totalPnlRate: Double = 0.0,
+    /** 全组合累计已实现盈亏（FIFO）；null = 无任何卖出记录或尚未加载交易流水。 */
+    val totalRealizedPnl: Double? = null,
+    /** 已实现盈亏率（%）= 累计已实现盈亏 / 累计结转成本；无结转成本时为 null。 */
+    val totalRealizedPnlRate: Double? = null,
     /** 总成本息率 = Σ(最新年度每股股息 × 持仓股数) / Σ(成本价 × 持仓股数)，无数据/分母为 0 时为 null。 */
     val costDividendYield: Double? = null,
     val targetWeightSum: Double = 0.0,
@@ -327,6 +336,17 @@ class PortfolioViewModel @Inject constructor(
     /** 所有出现过的标签（去重排序）。 */
     private val allTagsFlow = stockRepository.observeAllTags()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
+     * 全量交易流水（响应式），按 stockCode 分组后用 [RealizedPnlCalculator]（FIFO）
+     * 计算每只股票的累计已实现盈亏。供组合摘要 + 持仓卡片展示。
+     */
+    private val realizedPnlByCodeFlow: Flow<Map<String, RealizedPnl>> = transactionDao.observeAll()
+        .map { all ->
+            all.groupBy { it.stockCode }
+                .mapValues { (_, txs) -> RealizedPnlCalculator.calculate(txs) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     init {
         currentTotalAssets = readTotalAssetsFromPrefs()
@@ -521,6 +541,31 @@ class PortfolioViewModel @Inject constructor(
                 .collect { thresholds ->
                     _evalThresholds.value = thresholds
                 }
+        }
+
+        // Collector 8: 全量交易流水 → FIFO 已实现盈亏（组合级合计 + 注入持仓卡片）
+        // 独立 collector 订阅 realizedPnlByCodeFlow，只更新自己负责的字段（§4.2 多 collector 约定）。
+        viewModelScope.launch {
+            realizedPnlByCodeFlow.collect { pnlByCode: Map<String, RealizedPnl> ->
+                // 组合级合计：仅累加有结转成本的股票（卖出过的）。
+                val totalCostBasis: Double = pnlByCode.values.sumOf { it.totalCostBasis }
+                val totalRealized: Double = pnlByCode.values.sumOf { it.totalRealizedPnl }
+                val hasAnyRealized: Boolean = pnlByCode.values.any { it.trades.isNotEmpty() }
+                _uiState.update { state ->
+                    state.copy(
+                        items = state.items.map { item ->
+                            val rpnl = pnlByCode[item.code]
+                            item.copy(
+                                realizedPnl = if (rpnl != null && rpnl.trades.isNotEmpty()) rpnl.totalRealizedPnl else null
+                            )
+                        },
+                        totalRealizedPnl = if (hasAnyRealized) totalRealized else null,
+                        totalRealizedPnlRate = if (hasAnyRealized && totalCostBasis > 0.0) {
+                            totalRealized / totalCostBasis * 100.0
+                        } else null
+                    )
+                }
+            }
         }
     }
 

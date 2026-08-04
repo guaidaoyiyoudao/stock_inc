@@ -93,6 +93,8 @@ class PortfolioViewModelTest {
         coEvery { stockRepository.fetchBoll(any()) } returns null
         coEvery { stockRepository.fetchBoll(any(), any()) } returns null
         coEvery { transactionDao.getByStock(any()) } returns emptyList()
+        // 已实现盈亏 collector 订阅全量交易流水；默认返回空列表（无卖出 → 无已实现盈亏）。
+        every { transactionDao.observeAll() } returns MutableStateFlow(emptyList())
     }
 
     @After

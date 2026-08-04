@@ -36,4 +36,8 @@ class TransactionRepository @Inject constructor(
 
     suspend fun getAll(): List<TransactionEntity> =
         transactionDao.getAll()
+
+    /** 全量交易流水（响应式），供组合级已实现盈亏 FIFO 计算订阅。 */
+    fun observeAll(): Flow<List<TransactionEntity>> =
+        transactionDao.observeAll()
 }

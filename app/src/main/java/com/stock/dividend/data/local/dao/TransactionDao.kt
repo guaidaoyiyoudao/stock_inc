@@ -32,6 +32,10 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions ORDER BY date ASC, createdAt ASC")
     suspend fun getAll(): List<TransactionEntity>
 
+    /** 全量交易流水（响应式），按 date/createdAt 升序，供组合级已实现盈亏 FIFO 计算订阅。 */
+    @Query("SELECT * FROM transactions ORDER BY date ASC, createdAt ASC")
+    fun observeAll(): Flow<List<TransactionEntity>>
+
     @Query(
         """SELECT COALESCE(SUM(CASE WHEN type = 'BUY' THEN shares ELSE 0 END), 0) -
                   COALESCE(SUM(CASE WHEN type = 'SELL' THEN shares ELSE 0 END), 0)

@@ -167,6 +167,8 @@ stock_inc/
         │   │   │   │   ├── BuyThresholdCalculator.kt     # 10Y 国债 × 倍数 → 买入价
         │   │   │   │   ├── DividendDiscountCalculator.kt # DDM 估值
         │   │   │   │   ├── DividendMetricsCalculator.kt  # 分红深度（连续年数/CAGR/稳定性，2026-08-02 新增）
+        │   │   │   │   ├── HoldingCalculator.kt          # 摊薄成本法持仓成本（已实现盈亏藏入成本）
+        │   │   │   │   ├── RealizedPnlCalculator.kt      # FIFO 已实现盈亏（独立于摊薄成本，A 股法定口径，2026-08-04 新增）
         │   │   │   │   ├── HoldingRecommender.kt         # 单股评估：BOLL+股息率门槛 → BUY/HOLD/SELL
         │   │   │   │   ├── PortfolioAdvisor.kt           # 组合层仓位控制 + 三周期共振买点
         │   │   │   │   ├── Fundamentals.kt               # 基本面数据类 + Builder/enrichPayoutRatio/趋势
@@ -326,6 +328,8 @@ stock_inc/
 | `ForecastCalculator` | 历史分红 → 年均每股 + 预测收入 |
 | `DividendDiscountCalculator` | DDM 估值 |
 | `BuyThresholdCalculator` | 10Y 国债 × 倍数 → 买入价 |
+| `HoldingCalculator` | 摊薄成本法持仓成本（卖出盈亏藏入成本，不独立展示） |
+| `RealizedPnlCalculator` | FIFO 已实现盈亏（A 股法定口径，独立于摊薄成本法） |
 | `LlmPromptBuilder` | 评估数据 → LLM prompt（纯函数 + 降级兜底） |
 | `LlmAnalysisParser` | LLM 响应 → 结构化结果 |
 | `applyPortfolioFilter`（顶层函数） | 行业/标签筛选 |
@@ -510,3 +514,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-01：新增 `DESIGN.md` 设计系统文档（双主题/Inter 字体/核心组件/格式化器）；§4.5 改为引用该文档；落地基建：`AppComponents.kt`（AppCard/AmountText/PercentText 等）+ `Formatters.kt`（MoneyFormatter/PercentFormatter + 26 单测）+ `Gradient.kt`（CompositionLocal 扩展主题）+ 双主题（亮/暗）+ Inter 可变字体（子集化 210KB，含 tnum）。
 - 2026-08-02：新增 §4.9「外部数据接口单位与解析纪律」+ §8 红线 #11，沉淀数据准确性实践经验（东财 push2 三接口单位规则差异/资金流字段编号/腾讯交叉验证/fixture 单测）；落地 AI Agent 新增 13 个股票信息工具（估值指标/资金流/财务三表/分红深度/行业对比/资讯研报/市场广度），DB version 15→18（新增 `financial_statements_cache` 表），配套纯函数 `DividendMetricsCalculator` + 真实 fixture 解析单测。修正：AGENTS.md 原写 DB version=15 已过时，实际 18（含历史 16/17 的 trade_strategies、fundamentals_cache、llm_analysis_cache 表）。
 - 2026-08-02：§3 目录结构从「目录级简述」升级为「完整文件清单 + 每个文件作用」，覆盖 main 全部 ~130 个 .kt（data/local|remote|repository|agent|notification|scan|widget、di、ui/component|screen|theme|navigation、viewmodel）+ test ~65 个 .kt，含本次新增的财务三表/资金流/分红深度等文件。新增「文件规模速览」速记。
+- 2026-08-04：新增「已实现盈亏（FIFO）」功能。落地纯函数 `RealizedPnlCalculator`（先进先出结转，A 股个人转让所得法定口径）+ 11 单测；`TransactionDao.observeAll()` / `TransactionRepository.observeAll()` 响应式全量交易流水；`PortfolioViewModel` Collector 8 订阅 → UiState 注入组合级合计 + 个股已实现盈亏；`PortfolioScreen` 摘要卡「累计已实现盈亏」行 + 持仓卡「已实现」指标。**不改 schema**（复用 transactions 表），与 `HoldingCalculator` 摊薄成本法并存（摊薄用于持仓成本展示、FIFO 用于已实现盈亏展示）。
