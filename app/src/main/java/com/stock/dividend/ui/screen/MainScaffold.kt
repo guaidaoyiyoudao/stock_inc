@@ -229,6 +229,7 @@ fun MainScaffold(
                     onBack = { tabNavController.popBackStack() },
                     onEditHolding = { c -> tabNavController.navigate("editHolding/$c") },
                     onOpenDividendValuation = { c -> tabNavController.navigate("dividendValuation/$c") },
+                    onOpenDripSimulation = { c -> tabNavController.navigate("dripSimulation/$c") },
                     onOpenNotificationSettings = { c -> tabNavController.navigate("stockNotificationSettings/$c") }
                 )
             }
@@ -237,6 +238,12 @@ fun MainScaffold(
                 arguments = listOf(navArgument("code") { type = NavType.StringType })
             ) {
                 DividendValuationScreen(onBack = { tabNavController.popBackStack() })
+            }
+            composable(
+                route = "dripSimulation/{code}",
+                arguments = listOf(navArgument("code") { type = NavType.StringType })
+            ) {
+                DripSimulationScreen(onBack = { tabNavController.popBackStack() })
             }
             composable(
                 route = "editHolding/{code}",

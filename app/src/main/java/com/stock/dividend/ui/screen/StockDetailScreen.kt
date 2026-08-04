@@ -97,6 +97,7 @@ fun StockDetailScreen(
     onBack: () -> Unit,
     onEditHolding: (String) -> Unit = {},
     onOpenDividendValuation: (String) -> Unit = {},
+    onOpenDripSimulation: (String) -> Unit = {},
     onOpenNotificationSettings: (String) -> Unit = {},
     viewModel: StockDetailViewModel = hiltViewModel()
 ) {
@@ -245,6 +246,14 @@ fun StockDetailScreen(
                         item {
                             DividendValuationEntryCard(
                                 onClick = { onOpenDividendValuation(stockCode) }
+                            )
+                        }
+                    }
+
+                    if (stock != null) {
+                        item {
+                            DripSimulationEntryCard(
+                                onClick = { onOpenDripSimulation(stockCode) }
                             )
                         }
                     }
@@ -431,6 +440,43 @@ private fun DividendValuationEntryCard(onClick: () -> Unit) {
                 )
                 Text(
                     text = "基于近 5 年股息和未来增长假设评估合理价值",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppTextButton(
+                onClick = onClick,
+                text = "查看",
+            )
+        }
+    }
+}
+
+@Composable
+private fun DripSimulationEntryCard(onClick: () -> Unit) {
+    AppCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(AppCardDefaults.ListPadding),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "分红再投模拟",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "对比「分红再投」与「现金分红」的复利效果",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

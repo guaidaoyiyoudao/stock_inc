@@ -166,6 +166,7 @@ stock_inc/
         │   │   │   │   ├── ForecastCalculator.kt          # 历史分红 → 年均每股 + 预测收入
         │   │   │   │   ├── BuyThresholdCalculator.kt     # 10Y 国债 × 倍数 → 买入价
         │   │   │   │   ├── DividendDiscountCalculator.kt # DDM 估值
+        │   │   │   │   ├── DripCalculator.kt     # 分红再投资（DRIP）复利模拟（按年再投，可配置再投价，2026-08-04 新增）
         │   │   │   │   ├── DividendMetricsCalculator.kt  # 分红深度（连续年数/CAGR/稳定性，2026-08-02 新增）
         │   │   │   │   ├── HoldingCalculator.kt          # 摊薄成本法持仓成本（已实现盈亏藏入成本）
         │   │   │   │   ├── RealizedPnlCalculator.kt      # FIFO 已实现盈亏（独立于摊薄成本，A 股法定口径，2026-08-04 新增）
@@ -257,6 +258,7 @@ stock_inc/
         │   │   │       ├── AddStockScreen.kt / EditHoldingScreen.kt  # 加股/改持仓
         │   │   │       ├── DividendCalendarScreen.kt  # 股息日历
         │   │   │       ├── DividendValuationScreen.kt # 股息估值
+        │   │   │       ├── DripSimulationScreen.kt    # 分红再投（DRIP）复利模拟（2026-08-04 新增）
         │   │   │       ├── PortfolioEvaluationScreen.kt  # 持仓一键评估
         │   │   │       ├── ExpenseCoverageScreen.kt    # 支出覆盖率
         │   │   │       ├── ScreenshotImportScreen.kt / PortfolioImportScreen.kt  # 截图/批量导入
@@ -272,6 +274,7 @@ stock_inc/
         │   │       ├── AiChatViewModel.kt        # AI 会话 VM
         │   │       ├── AddStockViewModel.kt / EditHoldingViewModel.kt
         │   │       ├── DividendCalendarViewModel.kt / DividendValuationViewModel.kt
+        │   │       ├── DripSimulationViewModel.kt       # 分红再投模拟（参数可调，纯函数重算，2026-08-04 新增）
         │   │       ├── DividendIncomeViewModel.kt
         │   │       ├── ExpenseCoverageViewModel.kt + ExpenseCoverageCalculator.kt  # 支出覆盖率 VM + 纯函数
         │   │       ├── PortfolioImportViewModel.kt / ScreenshotImportViewModel.kt
@@ -330,6 +333,7 @@ stock_inc/
 | `ForecastCalculator` | 历史分红 → 年均每股 + 预测收入 |
 | `DividendDiscountCalculator` | DDM 估值 |
 | `BuyThresholdCalculator` | 10Y 国债 × 倍数 → 买入价 |
+| `DripCalculator` | 分红再投资（DRIP）复利模拟：按年把分红以可配置再投价买入，对比「再投」与「现金分红」两条路径 |
 | `HoldingCalculator` | 摊薄成本法持仓成本（卖出盈亏藏入成本，不独立展示） |
 | `RealizedPnlCalculator` | FIFO 已实现盈亏（A 股法定口径，独立于摊薄成本法） |
 | `LlmPromptBuilder` | 评估数据 → LLM prompt（纯函数 + 降级兜底） |
@@ -518,3 +522,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-02：§3 目录结构从「目录级简述」升级为「完整文件清单 + 每个文件作用」，覆盖 main 全部 ~130 个 .kt（data/local|remote|repository|agent|notification|scan|widget、di、ui/component|screen|theme|navigation、viewmodel）+ test ~65 个 .kt，含本次新增的财务三表/资金流/分红深度等文件。新增「文件规模速览」速记。
 - 2026-08-04：新增「已实现盈亏（FIFO）」功能。落地纯函数 `RealizedPnlCalculator`（先进先出结转，A 股个人转让所得法定口径）+ 11 单测；`TransactionDao.observeAll()` / `TransactionRepository.observeAll()` 响应式全量交易流水；`PortfolioViewModel` Collector 8 订阅 → UiState 注入组合级合计 + 个股已实现盈亏；`PortfolioScreen` 摘要卡「累计已实现盈亏」行 + 持仓卡「已实现」指标。**不改 schema**（复用 transactions 表），与 `HoldingCalculator` 摊薄成本法并存（摊薄用于持仓成本展示、FIFO 用于已实现盈亏展示）。
 - 2026-08-04：新增「全局交易流水 + 交易笔记（复盘）」功能。DB version 18→19（transactions 表加可空 `note` 列，`MIGRATION_18_19`）；`TransactionHistoryViewModel`（combine 全量交易 + 股票名映射 → 按日期倒序流水，累计买卖金额汇总）+ `TransactionHistoryScreen`（流水卡片 + 资金流水汇总 + 备注编辑弹窗 + 专属空状态）+ 5 单测；`EditHoldingViewModel`/`TransactionSheet` 新增/编辑交易均支持备注字段，`TransactionCard` 展示备注；导航 `Routes.TRANSACTION_HISTORY` + 设置页「交易记录」入口。备份自动覆盖 note（BackupContainer 直存 TransactionEntity）。
+- 2026-08-04：新增「分红再投资（DRIP）复利模拟」功能。落地纯函数 `DripCalculator`（按年把分红以可配置再投价全额买入，逐年扩股；对比「分红再投」与「现金分红」两条路径的期末市值与超额收益）+ 9 单测（含手算金标准/涨跌场景/再投禁用退化/年份过滤/窗口截取）；`DripSimulationViewModel`（复用 dividends 数据，参数可调即时重算）+ `DripSimulationScreen`（汇总卡 + 参数卡 + 逐年明细表 + 诚实的简化口径说明）；导航 `dripSimulation/{code}` + 个股详情页「分红再投模拟」入口。**不改 schema**（复用 dividends 表）。再投价采用单值简化口径（非逐日真实价），UI 明确标注假设，遵守宪法原则 III（不臆造数据）。
