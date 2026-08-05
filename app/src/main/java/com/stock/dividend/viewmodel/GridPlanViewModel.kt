@@ -12,6 +12,8 @@ import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.GridAnchor
 import com.stock.dividend.data.repository.GridAnchorCalculator
 import com.stock.dividend.data.repository.GridCalculator
+import com.stock.dividend.data.repository.GridExecution
+import com.stock.dividend.data.repository.GridExecutionCalculator
 import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.GridResult
 import com.stock.dividend.data.repository.KlinePeriod
@@ -30,13 +32,16 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * 已保存的网格计划 + 其对应的当前价（用于「下一档」提示）。
+ * 已保存的网格计划 + 其对应的当前价（用于「下一档」提示）+ 执行跟踪。
  */
 @Stable
 data class GridPlanItem(
     val plan: GridPlanEntity,
     val currentPrice: Double?,
-    val result: GridResult
+    val result: GridResult,
+    val execution: GridExecution,
+    /** 计划过期提示：现价远高于买入起点（行情已远离当初锚定的支撑位）时非空，建议重新锚定。 */
+    val stalenessHint: String? = null
 )
 
 @Stable
@@ -107,21 +112,26 @@ class GridPlanViewModel @Inject constructor(
                 val (codeToName, prices) = namesAndPrices
                 val items = plans.map { plan ->
                     val price = prices[plan.stockCode]
+                    val planTxs = transactionsByStock[plan.stockCode].orEmpty()
                     // 关联该股实际交易记录，标记各档位是否已触发（实际买入）
+                    val result = GridCalculator.markTriggeredLevels(
+                        GridCalculator.generate(
+                            basePrice = plan.basePrice,
+                            lowPrice = plan.lowPrice,
+                            highPrice = plan.highPrice,
+                            grids = plan.grids,
+                            totalCapital = plan.totalCapital,
+                            currentPrice = price
+                        ),
+                        planTxs
+                    )
                     GridPlanItem(
                         plan = plan,
                         currentPrice = price,
-                        result = GridCalculator.markTriggeredLevels(
-                            GridCalculator.generate(
-                                basePrice = plan.basePrice,
-                                lowPrice = plan.lowPrice,
-                                highPrice = plan.highPrice,
-                                grids = plan.grids,
-                                totalCapital = plan.totalCapital,
-                                currentPrice = price
-                            ),
-                            transactionsByStock[plan.stockCode].orEmpty()
-                        )
+                        result = result,
+                        execution = GridExecutionCalculator.calculate(result, plan.totalCapital, planTxs, price),
+                        // 动态重锚定预警：现价远高于买入起点（行情已远离支撑位）→ 计划可能过期
+                        stalenessHint = stalenessHint(price, plan.basePrice)
                     )
                 }
                 _uiState.value = _uiState.value.copy(
@@ -157,6 +167,18 @@ class GridPlanViewModel @Inject constructor(
 
     /** 防止 initialStockCode 的自动锚定在每次自选股发射时重复触发。 */
     private var initialStockHandled = false
+
+    /**
+     * 计划过期判断：现价远高于买入起点（涨幅超过 15%）说明行情已远离当初锚定的
+     * BOLL 支撑位，计划可能失真，建议重新锚定。现价低于/接近买入起点时返回 null（无需重锚）。
+     */
+    private fun stalenessHint(currentPrice: Double?, basePrice: Double): String? {
+        if (currentPrice == null || currentPrice <= 0.0 || basePrice <= 0.0) return null
+        val deviation = (currentPrice - basePrice) / basePrice * 100.0
+        return if (deviation > 15.0) {
+            "现价已高于买入起点 ${"%.1f".format(deviation)}%，行情偏离当初锚定，建议重新锁定"
+        } else null
+    }
 
     private fun refreshPricesFor(codes: List<String>) {
         if (codes.isEmpty()) return

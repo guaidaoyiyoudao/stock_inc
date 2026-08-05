@@ -95,4 +95,42 @@ class EditHoldingViewModelTest {
         assertThat(viewModel.uiState.value.editSharesError).isNull()
         assertThat(viewModel.uiState.value.editPriceError).isNull()
     }
+
+    /** 一键记账：携带 buyPrice/buyShares query 参数创建 VM → 自动打开买入表单并预填。 */
+    @Test
+    fun `prefill opens buy sheet with grid price and shares`() = runTest {
+        val viewModel = EditHoldingViewModel(
+            SavedStateHandle(
+                mapOf(
+                    "code" to "sz.000001",
+                    "buyPrice" to "9.33",
+                    "buyShares" to "300"
+                )
+            ),
+            stockRepository,
+            transactionRepository
+        )
+        stockFlow.value = StockEntity("sz.000001", "平安银行", "0")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertThat(state.showTransactionSheet).isTrue()      // 表单自动打开
+        assertThat(state.isBuyInput).isTrue()                // 方向=买入
+        assertThat(state.addPriceInput).isEqualTo("9.33")    // 预填档位价
+        assertThat(state.addSharesInput).isEqualTo("300")    // 预填建议股数
+    }
+
+    /** 无 query 参数 → 不自动打开表单（保持原有行为）。 */
+    @Test
+    fun `no query params keeps sheet closed`() = runTest {
+        val viewModel = EditHoldingViewModel(
+            SavedStateHandle(mapOf("code" to "sz.000001")),
+            stockRepository,
+            transactionRepository
+        )
+        stockFlow.value = StockEntity("sz.000001", "平安银行", "0")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.showTransactionSheet).isFalse()
+    }
 }

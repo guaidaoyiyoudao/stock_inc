@@ -60,6 +60,13 @@ class EditHoldingViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(EditHoldingUiState(stockCode = stockCode))
     val uiState: StateFlow<EditHoldingUiState> = _uiState.asStateFlow()
 
+    /** 解析 query 参数 buyPrice/buyShares；任一缺失返回 null（不预填）。 */
+    private val prefilledTransaction: Pair<String, String>? by lazy {
+        val price = savedStateHandle.get<String>("buyPrice")
+        val shares = savedStateHandle.get<String>("buyShares")
+        if (!price.isNullOrBlank() && !shares.isNullOrBlank()) price to shares else null
+    }
+
     init {
         viewModelScope.launch {
             stockRepository.observeStock(stockCode).collect { stock ->
@@ -76,6 +83,20 @@ class EditHoldingViewModel @Inject constructor(
                     )
                 }
             }
+        }
+        // 从个股详情/网格页跳转携带的预填参数（query string）：buyPrice / buyShares
+        // 命中时自动打开买入表单并预填，实现「下一档一键记账」闭环。
+        // 仅首次进入生效（query 参数一次性），避免每次订阅都重开表单。
+        prefilledTransaction?.let { (price, shares) ->
+            _uiState.value = _uiState.value.copy(
+                showTransactionSheet = true,
+                isBuyInput = true,
+                addPriceInput = price,
+                addSharesInput = shares,
+                addDateInput = LocalDate.now().toString(),
+                addSharesError = null,
+                addPriceError = null
+            )
         }
         // 订阅当前股票标签 + 全局已有标签（用于输入建议）
         viewModelScope.launch {

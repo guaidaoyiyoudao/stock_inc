@@ -251,11 +251,22 @@ fun MainScaffold(
                 route = "gridPlanFor/{code}",
                 arguments = listOf(navArgument("code") { type = NavType.StringType })
             ) {
-                GridPlanScreen(onBack = { tabNavController.popBackStack() })
+                GridPlanScreen(
+                    onBack = { tabNavController.popBackStack() },
+                    onAddTransaction = { code, price, shares ->
+                        tabNavController.navigate(
+                            "editHolding/$code?buyPrice=${"%.2f".format(price)}&buyShares=$shares"
+                        )
+                    }
+                )
             }
             composable(
-                route = "editHolding/{code}",
-                arguments = listOf(navArgument("code") { type = NavType.StringType })
+                route = "editHolding/{code}?buyPrice={buyPrice}&buyShares={buyShares}",
+                arguments = listOf(
+                    navArgument("code") { type = NavType.StringType },
+                    navArgument("buyPrice") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("buyShares") { type = NavType.StringType; defaultValue = "" }
+                )
             ) {
                 EditHoldingScreen(onBack = { tabNavController.popBackStack() })
             }

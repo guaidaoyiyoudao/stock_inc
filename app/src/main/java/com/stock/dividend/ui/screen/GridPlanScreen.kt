@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.data.repository.GridExecution
 import com.stock.dividend.data.repository.GridLevel
 import com.stock.dividend.data.repository.GridResult
 import com.stock.dividend.data.repository.MoneyFormatter
@@ -75,6 +77,7 @@ import com.stock.dividend.viewmodel.GridPlanViewModel
 @Composable
 fun GridPlanScreen(
     onBack: () -> Unit,
+    onAddTransaction: (stockCode: String, price: Double, shares: Int) -> Unit = { _, _, _ -> },
     viewModel: GridPlanViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -123,7 +126,8 @@ fun GridPlanScreen(
                 GridPlanCard(
                     item = item,
                     onEdit = { viewModel.editPlan(item.plan) },
-                    onDelete = { viewModel.deletePlan(item.plan.id) }
+                    onDelete = { viewModel.deletePlan(item.plan.id) },
+                    onAddTransaction = onAddTransaction
                 )
             }
         }
@@ -138,7 +142,8 @@ fun GridPlanScreen(
 private fun GridPlanCard(
     item: GridPlanItem,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onAddTransaction: (stockCode: String, price: Double, shares: Int) -> Unit
 ) {
     val plan = item.plan
     val result = item.result
@@ -175,7 +180,29 @@ private fun GridPlanCard(
                 }
             }
 
-            // 「下一档」提示
+            // 资金执行跟踪（已投入/剩余/浮盈）—— 有实际买入时才展示
+            ExecutionSummary(item.execution)
+
+            // 计划过期预警（现价远高于买入起点，行情已偏离当初锚定）
+            item.stalenessHint?.let { hint ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.small)
+                        .background(extendedColors.negative.copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "⚠ $hint",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = extendedColors.negative
+                    )
+                }
+            }
+
+            // 「下一档」提示 + 一键记账
             if (item.currentPrice != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
@@ -184,7 +211,8 @@ private fun GridPlanCard(
                         .clip(MaterialTheme.shapes.small)
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "现价 ${MoneyFormatter.withSymbol(item.currentPrice)}",
@@ -192,10 +220,19 @@ private fun GridPlanCard(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     result.nextBuyHint?.let { buy ->
+                        // 找到该档对应的建议股数（用于预填交易表单）
+                        val level = result.levels.firstOrNull { it.price == buy }
                         Text(
                             text = "下一买 ${MoneyFormatter.withSymbol(buy)}",
                             style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
                             color = extendedColors.positive
+                        )
+                        // 一键记账：跳到加交易页，预填该档价格/股数
+                        AppTextButton(
+                            onClick = {
+                                onAddTransaction(plan.stockCode, buy, level?.shares ?: 100)
+                            },
+                            text = "记账"
                         )
                     }
                     if (result.nextBuyHint == null) {
@@ -233,6 +270,79 @@ private fun GridPlanCard(
                 result.levels.forEach { level -> GridLevelRow(level, item.currentPrice) }
             }
         }
+    }
+}
+
+/** 资金执行跟踪摘要：进度条 + 已投入/剩余 + 浮盈。有买入才展示，否则隐藏（返回空）。 */
+@Composable
+private fun ExecutionSummary(execution: GridExecution) {
+    if (execution.triggeredCount == 0) return  // 无买入，不展示，避免噪音
+    val extendedColors = LocalExtendedColors.current
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "执行进度 ${execution.triggeredCount}/${execution.totalLevels}（${execution.progressPercent}%）",
+                style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            // 进度条（用 surfaceVariant 槽 + primary 填充）
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(MaterialTheme.shapes.extraSmall)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(execution.progressPercent / 100f)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FinanceMetric(
+            label = "已投入",
+            value = MoneyFormatter.withSymbol(execution.investedAmount),
+            modifier = Modifier.weight(1f)
+        )
+        FinanceMetric(
+            label = "剩余可投",
+            value = MoneyFormatter.withSymbol(execution.remainingCapital),
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Center
+        )
+        FinanceMetric(
+            label = "浮盈/亏",
+            value = execution.unrealizedPnl?.let { pnl ->
+                "${if (pnl >= 0) "+" else ""}${MoneyFormatter.amount(pnl)}" +
+                    (execution.unrealizedPnlRate?.let { r -> " ${if (r >= 0) "+" else ""}${"%.1f".format(r)}%" } ?: "")
+            } ?: "—",
+            valueColor = execution.unrealizedPnl?.let { if (it >= 0) extendedColors.positive else extendedColors.negative }
+                ?: MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End
+        )
+    }
+    execution.avgBuyPrice?.let { avg ->
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "已买 ${execution.boughtShares} 股 · 均价 ${MoneyFormatter.withSymbol(avg)}",
+            style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
