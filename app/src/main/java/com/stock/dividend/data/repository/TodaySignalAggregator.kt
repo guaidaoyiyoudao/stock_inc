@@ -99,7 +99,21 @@ object TodaySignalAggregator {
                         ),
                         sortPriority = 0,
                     )
+                    continue
                 }
+            }
+
+            // 1c. 周线跌破 BOLL 下轨（轻量：仅需周线 BOLL，今日页可触发）
+            val weekly = s.weeklyBand
+            if (weekly != null && price <= weekly.lower) {
+                out += TodaySignal(
+                    type = TodaySignalType.BUY_TRIGGER,
+                    stockCode = s.code,
+                    stockName = s.name,
+                    title = "跌破周线BOLL下轨",
+                    detail = "现价 %.2f，下轨 %.2f".format(price, weekly.lower),
+                    sortPriority = 0,
+                )
             }
         }
     }

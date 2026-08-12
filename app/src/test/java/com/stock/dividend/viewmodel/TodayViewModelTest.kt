@@ -3,12 +3,16 @@ package com.stock.dividend.viewmodel
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.MarketDataRepository
+import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TodayBriefingCoordinator
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -71,5 +75,22 @@ class TodayViewModelTest {
         val vm = makeVm()
         advanceUntilIdle()
         assertThat(vm.uiState.value.hasHoldings).isFalse()
+    }
+
+    @Test
+    fun bollLowerBreakSignal_emittedWhenPriceBelowLower() = runTest {
+        val stock = StockEntity(code = "sh.600000", name = "T", marketCode = "1", shares = 100, costPerShare = 10.0)
+        every { stockRepository.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns
+            mapOf("sh.600000" to QuoteSnapshot("sh.600000", price = 8.8, prevClose = 9.0))
+        coEvery { stockRepository.fetchBoll(any(), any()) } returns BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        coEvery { briefingCoordinator.read(any()) } returns null
+        val vm = makeVm()
+        advanceUntilIdle()
+        // price 8.8 ≤ lower 9.0 → 应触发「跌破BOLL下轨」信号
+        coVerify(atLeast = 1) { stockRepository.fetchBoll(any(), any()) }
+        // marketValue≈880 证明 price 生效（fetchQuoteSnapshots mock ok）；浮点用 tolerance
+        assertThat(vm.uiState.value.marketValue).isWithin(0.01).of(880.0)
+        assertThat(vm.uiState.value.signals.any { it.title.contains("BOLL下轨") }).isTrue()
     }
 }

@@ -5,10 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.IndexQuote
+import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.MarketDataRepository
 import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.StockRepository
@@ -20,11 +22,19 @@ import com.stock.dividend.data.repository.TodaySignalType
 import com.stock.dividend.data.repository.TodayStockSnapshot
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -56,10 +66,8 @@ data class TodayUiState(
  * - Collector B：刷新触发（含首次 onStart）→ 拉价 + 指数 → 算市值/盈亏/对照/信号
  * - Collector C：AI 简报（按今日读缓存）
  *
- * **信号轻量口径**（重要决策）：今日页不拉 BOLL（慢，每只股一次周线 K 线），买入触发只用
- * 「股息率达买入线」（[com.stock.dividend.data.repository.computeBuyThreshold]，需 bond+dividend+price）；
- * BOLL 共振信号留给评估页（那里才并发拉三周期 BOLL）。网格/分红倒计时不受影响。
- * 这样今日页保持「每天轻量看一眼」的快，不被 N 次 K 线请求拖慢。
+ * **信号口径**：今日页并发拉**周线 BOLL**（Semaphore(3) 限流，红线 #5）→「跌破周线 BOLL 下轨」信号；
+ * 加「股息率达买入线」+ 网格下一档 + 分红倒计时。三周期共振 BUY 仍留评估页（需日+周+月，重）。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -85,34 +93,37 @@ class TodayViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        // Collector A: 自选+持仓变化
+        // Collector A: hasHoldings 标记（是否有持仓股）
         viewModelScope.launch {
             allStocksFlow.collect { stocks ->
-                lastStocks = stocks
                 _uiState.update { it.copy(hasHoldings = stocks.any { s -> s.shares > 0 }) }
-                recomputePortfolio(lastSnapshots, lastIndices)
-                recomputeSignals(lastSnapshots)
             }
         }
 
-        // Collector B: 刷新触发（首次订阅自动 onStart emit 一次）→ 拉价 + 指数
+        // Collector B: stocks + 刷新触发 → 拉价 + 指数 → 重算组合/信号。
+        // 关键：用 flatMapLatest 把 stocks 与 refresh 绑定，确保 fetchQuoteSnapshots 总用最新 stocks
+        // （避免 stocks / refresh 两个独立 collector 的竞态：refresh 先跑时 lastStocks 还空 → 短路空 map）。
         viewModelScope.launch {
-            _refreshTrigger
-                .onStart { emit(Unit) }
-                .collect {
-                    _uiState.update { it.copy(isLoading = true) }
-                    val stocks = lastStocks
-                    val snapshots = if (stocks.isEmpty()) emptyMap()
-                        else runCatching { stockRepository.fetchQuoteSnapshots(stocks) }.getOrDefault(emptyMap())
-                    val indices = runCatching { marketDataRepository.fetchIndexQuotes() }.getOrDefault(emptyList())
-                    val stale = snapshots.isEmpty() && stocks.isNotEmpty()
-                    lastSnapshots = snapshots
-                    lastIndices = indices
-                    recomputePortfolio(snapshots, indices)
-                    recomputeSignals(snapshots)
-                    // 红线 #3：无论成功失败都复位 loading
-                    _uiState.update { it.copy(isLoading = false, dataStale = stale) }
+            allStocksFlow.flatMapLatest { stocks ->
+                lastStocks = stocks
+                if (stocks.isEmpty()) flowOf(emptyMap()) else {
+                    _refreshTrigger
+                        .onStart { emit(Unit) }
+                        .map {
+                            _uiState.update { it.copy(isLoading = true) }
+                            runCatching { stockRepository.fetchQuoteSnapshots(stocks) }.getOrDefault(emptyMap())
+                        }
                 }
+            }.collect { snapshots ->
+                val indices = runCatching { marketDataRepository.fetchIndexQuotes() }.getOrDefault(emptyList())
+                val stale = snapshots.isEmpty() && lastStocks.isNotEmpty()
+                lastSnapshots = snapshots
+                lastIndices = indices
+                recomputePortfolio(snapshots, indices)
+                recomputeSignals(snapshots)
+                // 红线 #3：无论成功失败都复位 loading
+                _uiState.update { it.copy(isLoading = false, dataStale = stale) }
+            }
         }
 
         // Collector C: AI 简报（按今日读缓存，失败 null）
@@ -156,7 +167,7 @@ class TodayViewModel @Inject constructor(
         }
     }
 
-    /** 信号聚合（轻量口径，无 BOLL）。bond/dividends/grid 均吞异常返回空（红线 #2）。 */
+    /** 信号聚合：周线 BOLL（跌破下轨）+ 股息率达线 + 网格 + 分红倒计时。各源吞异常返回空（红线 #2）。 */
     private suspend fun recomputeSignals(snapshots: Map<String, QuoteSnapshot>) {
         val stocks = lastStocks
         val bond = runCatching { bondYieldRepository.fetch10YBondYield() }
@@ -165,12 +176,26 @@ class TodayViewModel @Inject constructor(
         val gridPlans = runCatching { gridPlanRepository.observeAll().first() }
             .getOrDefault(emptyList())
         val divByCode = dividends.groupBy { it.stockCode }
+        // 并发拉周线 BOLL（Semaphore(3) 限流，红线 #5：腾讯接口拒高频）
+        val bollByCode: Map<String, BollBand?> = if (stocks.isEmpty()) emptyMap()
+        else coroutineScope {
+            val sem = Semaphore(3)
+            stocks.map { entity ->
+                async {
+                    sem.withPermit {
+                        entity.code to runCatching {
+                            stockRepository.fetchBoll(entity.code, KlinePeriod.WEEKLY)
+                        }.getOrNull()
+                    }
+                }
+            }.awaitAll().toMap()
+        }
         val stockSnapshots = stocks.map { entity ->
             TodayStockSnapshot(
                 code = entity.code,
                 name = entity.name,
                 price = snapshots[entity.code]?.price,
-                // 今日页不拉 BOLL：weeklyBand=null → BOLL 共振信号不触发（留给评估页）
+                weeklyBand = bollByCode[entity.code],   // 周线 BOLL（跌破下轨信号用）
                 latestYearlyDividend = divByCode[entity.code]?.let { ForecastCalculator.latestYearlyCashPerShare(it) },
                 bondYield10Y = bond,
                 buyThresholdMultiplier = entity.buyThresholdMultiplier,

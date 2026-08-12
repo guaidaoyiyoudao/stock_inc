@@ -102,4 +102,15 @@ class TodaySignalAggregatorTest {
         )
         assertThat(result).isNotEmpty()
     }
+
+    @Test
+    fun weeklyBollLowerBreak_triggersBuySignal() {
+        // 仅周线 BOLL，price ≤ lower；无日/月（三周期不共振）、无 bond（门槛不判）→ 应触发「跌破BOLL下轨」
+        val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        val s = snapshot("sh.600010", price = 8.8, weekly = band)
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(listOf(s), emptyList(), emptyMap(), emptyList(), today)
+        )
+        assertThat(result.any { it.type == TodaySignalType.BUY_TRIGGER && it.title.contains("BOLL下轨") }).isTrue()
+    }
 }
