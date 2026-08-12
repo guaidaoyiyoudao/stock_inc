@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Tune
@@ -36,6 +37,7 @@ internal val settingsGroupTitles = listOf(
     "数据",
     "交易记录",
     "网格交易",
+    "成就",
 )
 
 /**
@@ -53,6 +55,7 @@ fun SettingsScreen(
     onOpenDataSettings: () -> Unit,
     onOpenTransactionHistory: () -> Unit,
     onOpenGridPlan: () -> Unit,
+    onOpenAchievements: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -90,6 +93,12 @@ fun SettingsScreen(
             description = "网格档位表、下一档提示（仅计划，不下单）",
             icon = Icons.Filled.GridOn,
             onClick = onOpenGridPlan
+        )
+        SettingsNavRow(
+            title = settingsGroupTitles[5],
+            description = "使用成就与里程碑",
+            icon = Icons.Filled.EmojiEvents,
+            onClick = onOpenAchievements
         )
     }
 }

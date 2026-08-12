@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -39,10 +40,10 @@ internal data class BottomNavItem(
 )
 
 internal val bottomNavItems = listOf(
+    BottomNavItem("today", "今日", Icons.Filled.Home),
     BottomNavItem("portfolio", "持仓", Icons.Filled.AccountBalance),
     BottomNavItem("income", "股息收入", Icons.AutoMirrored.Filled.TrendingUp),
     BottomNavItem("ai", "AI", Icons.Filled.SmartToy),
-    BottomNavItem("achievements", "成就", Icons.Filled.EmojiEvents),
     BottomNavItem("settings", "设置", Icons.Filled.Settings)
 )
 
@@ -134,11 +135,18 @@ fun MainScaffold(
         // 造成股票详情等子页面顶部与状态栏间距过大（状态栏 inset 被应用两次）。
         NavHost(
             navController = tabNavController,
-            startDestination = "portfolio",
+            startDestination = "today",
             modifier = Modifier
                 .padding(padding)
                 .consumeWindowInsets(padding)
         ) {
+            composable("today") {
+                TodayScreen(
+                    onOpenPortfolio = { tabNavController.navigate("portfolio") },
+                    onOpenStock = { code -> tabNavController.navigate("stockDetail/$code") },
+                    onOpenAddStock = { tabNavController.navigate("addStock") },
+                )
+            }
             composable("portfolio") {
                 PortfolioScreen(
                     snackbarHostState = snackbarHostState,
@@ -186,7 +194,8 @@ fun MainScaffold(
                     onOpenLlmStrategySettings = { tabNavController.navigate("llmStrategySettings") },
                     onOpenDataSettings = { tabNavController.navigate("dataSettings") },
                     onOpenTransactionHistory = { rootNavController.navigate(Routes.TRANSACTION_HISTORY) },
-                    onOpenGridPlan = { rootNavController.navigate(Routes.GRID_PLAN) }
+                    onOpenGridPlan = { rootNavController.navigate(Routes.GRID_PLAN) },
+                    onOpenAchievements = { tabNavController.navigate("achievements") }
                 )
             }
             composable("alertEvalSettings") {
