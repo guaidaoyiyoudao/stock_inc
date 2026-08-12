@@ -31,6 +31,7 @@ class StockDividendApp : Application(), Configuration.Provider,
     override fun onCreate() {
         super.onCreate()
         notificationScheduler.schedulePeriodicChecks()
+        notificationScheduler.scheduleTodayBriefing()
     }
 
     /**
