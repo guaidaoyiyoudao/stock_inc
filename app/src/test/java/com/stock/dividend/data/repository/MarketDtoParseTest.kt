@@ -93,6 +93,41 @@ class MarketDtoParseTest {
         assertThat(item.mainNetInflow).isNull()
     }
 
+    // ── clist 全市场个股榜单（fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23，2026-08-15 实测）──
+    // 关键验证：f133 股息率为真实值（14.61 表示 14.61%）。交叉验证：汇洁股份近 12 月
+    // 每股分红 1.10 元 ÷ 现价 7.53 元 ≈ 14.6%，与 f133=14.61 吻合。
+    private val marketRankingClistJson = """
+        {"rc":0,"rt":6,"data":{"total":5549,"diff":[
+          {"f12":"002763","f14":"汇洁股份","f2":7.53,"f3":0.53,"f8":1.5,
+           "f9":8.41,"f20":3086727720,"f23":1.98,"f133":14.61},
+          {"f12":"603165","f14":"荣晟环保","f2":13.56,"f3":0.15,"f8":0.71,
+           "f9":13.98,"f20":4240596806,"f23":1.81,"f133":14.1}
+        ]}}
+    """.trimIndent()
+
+    @Test
+    fun `clist market ranking parses dividend yield f133 as real percent`() {
+        val resp = gson.fromJson(marketRankingClistJson, MarketClistResponse::class.java)
+        val item = resp.data!!.diff!!.first()
+        assertThat(item.code).isEqualTo("002763")
+        // f133 股息率：真实值不除（14.61 = 14.61%）
+        assertThat(item.dividendYield).isEqualTo(14.61)
+        // 其余字段：clist 全部真实值不除
+        assertThat(item.price).isEqualTo(7.53)
+        assertThat(item.changePct).isEqualTo(0.53)
+        assertThat(item.turnoverRate).isEqualTo(1.5)
+        assertThat(item.pe).isEqualTo(8.41)
+        assertThat(item.pb).isEqualTo(1.98)
+        assertThat(item.totalMarketCap).isEqualTo(3086727720.0)
+    }
+
+    @Test
+    fun `clist market ranking missing f133 yields null dividend yield`() {
+        val json = """{"data":{"diff":[{"f12":"600238","f14":"ST岛","f2":3.2}]}}"""
+        val item = gson.fromJson(json, MarketClistResponse::class.java).data!!.diff!!.first()
+        assertThat(item.dividendYield).isNull()
+    }
+
     // ── stock/get 指数（上证 1.000001，实测）────────────────────────
     // 关键验证：f43/f170 为 ×100 整数，解析时 ÷100；f47/f48 原值不除
     private val indexJson = """

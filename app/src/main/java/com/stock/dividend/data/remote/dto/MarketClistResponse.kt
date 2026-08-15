@@ -17,6 +17,8 @@ import com.google.gson.annotations.SerializedName
  * 行情：f2 现价 / f3 涨跌幅% / f4 涨跌额 / f5 成交量手 / f6 成交额元 / f7 振幅% / f8 换手率% /
  *   f9 PE(TTM) / f10 量比 / f12 代码 / f13 市场(1沪0深) / f14 名称 / f20 总市值元 / f21 流通市值元 / f23 PB /
  *   f100 所属行业 / f128 领涨股名 / f140 领涨股代码 / f136 领涨股涨跌幅%。
+ *   f133 股息率%（2026-08-15 实测交叉验证：汇洁股份 f133=14.61，与「近 12 月每股分红 1.10 元 ÷
+ *   现价 7.53 元 ≈ 14.6%」吻合；全市场 fs 按 f133 降序返回即为股息率榜）。
  * 资金流净额（元）：f62 主力 / f66 超大单 / f72 大单 / f78 中单 / f84 小单。
  * 资金流净占比（%）：f184 主力 / f69 超大单 / f75 大单 / f81 中单 / f87 小单。
  */
@@ -59,6 +61,8 @@ data class MarketClistResponse(
         val circMarketCap: Double? = null,
         @SerializedName("f23")
         val pb: Double? = null,
+        @SerializedName("f133")
+        val dividendYield: Double? = null,
         @SerializedName("f62")
         val mainNetInflow: Double? = null,
         @SerializedName("f184")

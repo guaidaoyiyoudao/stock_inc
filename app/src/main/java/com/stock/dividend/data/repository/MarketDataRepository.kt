@@ -43,7 +43,9 @@ data class MarketListItem(
     val mainNetInflowPct: Double?,
     val leaderName: String?,
     val leaderCode: String?,
-    val leaderChangePct: Double?
+    val leaderChangePct: Double?,
+    /** 股息率（%，clist f133 真实值）。仅全市场榜单请求带该字段，其余场景 null。 */
+    val dividendYield: Double? = null
 )
 
 /**
@@ -167,6 +169,47 @@ class MarketDataRepository @Inject constructor(
             ).toMarketList()
         }.getOrDefault(emptyList())
     }
+
+    /**
+     * 全市场 A 股榜单（fs 覆盖沪深全市场约 5500 只，按 [sortBy] 降序取前 N）。
+     *
+     * ⚠️ **过滤是客户端行为**：clist 仅支持单字段排序，不支持条件过滤。传过滤条件时
+     * 先按排序拉 [RANKING_SCAN_SIZE] 条候选再过滤——**满足条件的股票若排在候选集之外会漏掉**
+     * （如按股息率榜前 200 中过滤 PE，低 PE 但股息率排 200 名外的股票不会出现）。
+     * 调用方（工具层）需向用户如实说明该口径。
+     * 过滤时字段缺失（null）的股票被剔除（停牌/无数据不臆造）。
+     *
+     * @param minDividendYield 可选：股息率下限（%，含）
+     * @param maxPe 可选：PE(TTM) 上限（%，含）
+     * @param limit 返回条数（1-50）
+     */
+    suspend fun fetchMarketRanking(
+        sortBy: RankingSortBy = RankingSortBy.DIVIDEND_YIELD,
+        minDividendYield: Double? = null,
+        maxPe: Double? = null,
+        limit: Int = 20
+    ): List<MarketListItem> = runCatching {
+        val fid = when (sortBy) {
+            RankingSortBy.DIVIDEND_YIELD -> "f133"
+            RankingSortBy.CHANGE -> "f3"
+            RankingSortBy.MARKET_CAP -> "f20"
+            RankingSortBy.PE -> "f9"
+            RankingSortBy.PB -> "f23"
+            RankingSortBy.TURNOVER -> "f8"
+        }
+        val fetchSize = if (minDividendYield != null || maxPe != null) RANKING_SCAN_SIZE else limit
+        marketApi.getClist(
+            pz = fetchSize.toString(),
+            fid = fid,
+            fs = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+            fields = "f2,f3,f8,f9,f12,f14,f20,f23,f133"
+        ).toMarketList()
+            .filter { item ->
+                (minDividendYield == null || (item.dividendYield != null && item.dividendYield >= minDividendYield)) &&
+                    (maxPe == null || (item.pe != null && item.pe <= maxPe))
+            }
+            .take(limit.coerceIn(1, 50))
+    }.getOrDefault(emptyList())
 
     /**
      * 查询某只股票所属东财板块代码（BKxxxx）。
@@ -304,7 +347,8 @@ class MarketDataRepository @Inject constructor(
                 mainNetInflowPct = it.mainNetInflowPct.takeIfFinite(),
                 leaderName = it.leaderName,
                 leaderCode = it.leaderCode,
-                leaderChangePct = it.leaderChangePct.takeIfFinite()
+                leaderChangePct = it.leaderChangePct.takeIfFinite(),
+                dividendYield = it.dividendYield.takeIfFinite()
             )
         }.orEmpty()
 
@@ -329,7 +373,13 @@ class MarketDataRepository @Inject constructor(
     /** 行业内个股排序维度。 */
     enum class PeerSortBy { CHANGE, MARKET_CAP, PE, PB }
 
+    /** 全市场榜单排序维度。 */
+    enum class RankingSortBy { DIVIDEND_YIELD, CHANGE, MARKET_CAP, PE, PB, TURNOVER }
+
     companion object {
+        /** 全市场榜单带过滤条件时的候选集大小（客户端过滤仅作用于榜单前列）。 */
+        private const val RANKING_SCAN_SIZE = 200
+
         /** 主要指数：显示名 → push2 secid。 */
         val MAIN_INDICES: List<Pair<String, String>> = listOf(
             "上证指数" to "1.000001",

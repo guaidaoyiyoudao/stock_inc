@@ -22,6 +22,14 @@ class ToolDisplayNameTest {
     }
 
     @Test
+    fun portfolioAnalysisTools_haveChineseNames() {
+        // 2026-08-15 新增三个组合分析工具的中文动作名
+        assertThat(ToolDisplayName.name("get_market_ranking")).isEqualTo("查全市场榜单")
+        assertThat(ToolDisplayName.name("compare_stocks")).isEqualTo("多股对比")
+        assertThat(ToolDisplayName.name("diagnose_portfolio")).isEqualTo("诊断组合风险")
+    }
+
+    @Test
     fun everyRegisteredTool_hasMapping() {
         // 防御：新增工具时若漏配映射，本测试会失败提醒
         val allTools = listOf(
@@ -34,6 +42,7 @@ class ToolDisplayNameTest {
             "update_notification_rule", "update_stock_settings", "add_trade_strategy",
             "get_living_expenses", "add_living_expense", "update_living_expense",
             "remove_living_expense", "set_fire_goal",
+            "get_market_ranking", "compare_stocks", "diagnose_portfolio",
         )
         allTools.forEach { code ->
             val display = ToolDisplayName.name(code)
