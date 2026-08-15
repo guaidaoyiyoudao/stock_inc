@@ -22,11 +22,12 @@
 
 | 维度 | 选型 | 版本 |
 |---|---|---|
-| 语言 / JVM | Kotlin / Java 17 toolchain | 2.0.21 |
-| 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.0.21-1.0.28 |
+| 语言 / JVM | Kotlin / Java 17 toolchain | 2.1.20 |
+| 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.1.20-1.0.32 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.6.1，**当前 DB version = 20** |
+| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 20** |
+| AI Agent | Google ADK Kotlin（AI Tab，OpenAI 兼容协议适配） | 0.6.0 |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
 | 导航 | Navigation Compose（单 Activity + 多 Composable） | 2.8.5 |
@@ -34,6 +35,8 @@
 | 图片 | Coil3（含 SVG logo） | 3.1.0 |
 | OCR | ML Kit 中文识别（Play Services 按需下载模型，保 APK 小） | 16.0.1 |
 | desugar | `desugar_jdk_libs`（`java.time` on minSdk 24） | 2.1.4 |
+
+> ⚠️ **ADK 传递依赖坑**：ADK 会把 `kotlinx-coroutines` 等顶到 2.2/2.3，Kotlin 2.1 编译器无法读取 2.3 元数据导致编译失败。`app/build.gradle.kts` 已用 `resolutionStrategy.force` 把 `kotlin-stdlib` 全系锁到 **2.1.21** 兜底；升级 Kotlin 或 ADK 时务必同步检查这处强制对齐（见 `build.gradle.kts:136-143`）。
 
 **SDK**：`applicationId = com.stock.dividend`，`namespace = com.stock.dividend`，`minSdk = 24`，`compileSdk = 36`，`targetSdk = 35`。
 
@@ -67,7 +70,7 @@ stock_inc/
         │   │   ├── data/
         │   │   │   ├── local/
         │   │   │   │   ├── AppDatabase.kt       # Room DB（version=20）+ 全部 Migration（红线 #1）
-        │   │   │   │   ├── backup/BackupData.kt # 备份/恢复的数据载体（JSON 序列化）
+        │   │   │   │   ├── backup/BackupData.kt # 备份/恢复的数据载体（JSON 序列化；除 Room 表外，2026-08-03 起额外覆盖 LLM 与 AI 助手的 SharedPreferences 配置）
         │   │   │   │   ├── dao/                 # Room DAO 接口（@Dao）
         │   │   │   │   │   ├── StockDao.kt                  # 自选股（含 observeAll/observeByCode/getByCode）
         │   │   │   │   │   ├── DividendDao.kt               # 历史分红记录
@@ -160,6 +163,7 @@ stock_inc/
         │   │   │   │   ├── StockLlmInput.kt               # 个股 LLM 输入装配
         │   │   │   │   ├── ScreenshotStrategy.kt          # 截图策略数据结构
         │   │   │   │   ├── LlmConfig.kt / LlmProviderPresets.kt  # LLM 配置数据类
+        │   │   │   │   ├── AiAgentConfig.kt / AiAgentConfigRepository.kt  # AI 助手设置（系统提示词/温度/输出长度，SharedPreferences 存储，2026-08-02 新增）
         │   │   │   │   ├── LlmAnalysis.kt / LlmCacheKey.kt
         │   │   │   │   ├── StockLlmAnalysis.kt
         │   │   │   │   ├── JsonExtraction.kt              # LLM 响应 JSON 提取（容错）
@@ -176,6 +180,7 @@ stock_inc/
         │   │   │   │   ├── DripCalculator.kt     # 分红再投资（DRIP）复利模拟（按年再投，可配置再投价，2026-08-04 新增）
         │   │   │   │   ├── GridCalculator.kt     # 网格交易档位表（等差网格 + 当前价下一档提示，2026-08-04 新增）
         │   │   │   │   ├── GridAnchorCalculator.kt       # 网格智能锚定（BOLL中轨=基准/上轨=上界/目标股息率=下界，2026-08-04 新增）
+        │   │   │   │   ├── GridExecutionCalculator.kt    # 网格资金执行跟踪（已投入/剩余/已买股数/加权均价/浮盈，2026-08-05 新增）
         │   │   │   │   ├── HoldingRecommender.kt         # 单股评估：BOLL+股息率门槛 → BUY/HOLD/SELL
         │   │   │   │   ├── PortfolioAdvisor.kt           # 组合层仓位控制 + 三周期共振买点
         │   │   │   │   ├── Fundamentals.kt               # 基本面数据类 + Builder/enrichPayoutRatio/趋势
@@ -190,14 +195,15 @@ stock_inc/
         │   │   │   │   └── Formatters.kt                 # MoneyFormatter/PercentFormatter（纯函数 + 单测）
         │   │   │   │
         │   │   │   ├── agent/                  # AI Agent（Google ADK，AI Tab）
-        │   │   │   │   ├── AiAgentFactory.kt           # 工具注册中心（43 工具：31 读 + 12 写，装配 LlmAgent）
+        │   │   │   │   ├── AiAgentFactory.kt           # 工具注册中心（47 工具：34 读 + 13 写，装配 LlmAgent）
         │   │   │   │   ├── AgentInstructionBuilder.kt  # 系统提示词（注入策略库）
         │   │   │   │   ├── AiChatRepository.kt         # AI 会话编排（流式 SSE）
         │   │   │   │   ├── AiTitleGenerator.kt         # 会话标题生成
         │   │   │   │   ├── ConfirmationSummaryBuilder.kt # 写操作确认摘要
         │   │   │   │   ├── OpenAiCompatibleModel.kt    # ADK Model 适配（OpenAI 兼容协议）
         │   │   │   │   ├── OpenAiProtocol.kt / OpenAiDtos.kt / OpenAiSse.kt  # 协议/DTO/SSE 解析
-        │   │   │   │   └── tools/                      # Agent 工具（ReadTool/WriteTool 基类 + 43 个工具）
+        │   │   │   │   ├── ToolDisplayName.kt          # 工具调用展示名（英文→中文映射，2026-08-03 新增）
+        │   │   │   │   └── tools/                      # Agent 工具（ReadTool/WriteTool 基类 + 47 个工具）
         │   │   │   │       ├── ToolBases.kt            # ReadTool（只读）/ WriteTool（带确认门）抽象基类
         │   │   │   │       ├── ToolArgs.kt             # 参数解析扩展（stringArg/intArg/...）+ refreshPrice/toEntity 共用
         │   │   │   │       ├── MarketDataTools.kt      # 9 个行情工具（get_stock_info/get_kline/get_stock_fundamentals 等）
@@ -208,7 +214,9 @@ stock_inc/
         │   │   │   │       ├── ResearchTools.kt        # 研报/公告（2026-08-02 新增）
         │   │   │   │       ├── MarketBreadthTools.kt   # 指数/ETF/国债收益率（2026-08-02 新增）
         │   │   │   │       ├── PortfolioDataTools.kt   # 8 个组合工具（get_holdings/get_portfolio_signals 等）
+        │   │   │   │       ├── PortfolioAnalysisTools.kt # 3 个分析工具：get_market_ranking 全市场榜单/compare_stocks 多股对比/diagnose_portfolio 组合诊断（2026-08-15 新增）
         │   │   │   │       ├── StockActionTools.kt    # 8 个写工具（add_stock/update_holding 等，带确认门）
+        │   │   │   │       ├── StrategyActionTools.kt  # add_trade_strategy（全局策略库写工具，带确认门，2026-08-02 新增）
         │   │   │   │       └── FinanceActionTools.kt   # 5 个 FIRE/支出工具（1 读 + 4 写）
         │   │   │   │
         │   │   │   ├── notification/            # 通知/后台任务（WorkManager）
@@ -271,6 +279,9 @@ stock_inc/
         │   │   │       ├── TransactionHistoryScreen.kt  # 全局交易流水 + 复盘备注（2026-08-04 新增）
         │   │   │       ├── GridPlanScreen.kt    # 网格交易计划（档位表 + 下一档提示，仅计划不下单，2026-08-04 新增）
         │   │   │       ├── TradeStrategyListScreen.kt  # 策略库
+        │   │   │       ├── SettingsScreen.kt   # 设置入口（纯入口列表，按「提醒评估/AI策略/数据」归类，2026-08-02 重构）
+        │   │   │       ├── AlertEvalSettingsScreen.kt / LlmStrategySettingsScreen.kt / DataSettingsScreen.kt  # 设置 3 个二级详情页（2026-08-02 重构）
+        │   │   │       ├── AiSettingsScreen.kt   # AI 助手设置（系统提示词/温度/输出长度，会话旁入口，2026-08-02 新增）
         │   │   │       ├── NotificationSettingsScreen.kt / StockNotificationSettingsScreen.kt / NotificationReliabilityScreen.kt
         │   │   │       ├── BackupRestoreScreen.kt / FireGoalSetupScreen.kt / OcrDebugScreen.kt
         │   │   │       └── TabRefreshLocal.kt    # 本地刷新辅助
@@ -279,6 +290,7 @@ stock_inc/
         │   │       ├── PortfolioViewModel.kt     # 持仓主 VM（多 collector + 派生 Flow）
         │   │       ├── StockDetailViewModel.kt   # 个股详情 VM
         │   │       ├── AiChatViewModel.kt        # AI 会话 VM
+        │   │       ├── AiSettingsViewModel.kt   # AI 助手设置 VM（系统提示词/温度/输出长度，2026-08-02 新增）
         │   │       ├── AddStockViewModel.kt / EditHoldingViewModel.kt
         │   │       ├── DividendCalendarViewModel.kt / DividendValuationViewModel.kt
         │   │       ├── DripSimulationViewModel.kt       # 分红再投模拟（参数可调，纯函数重算，2026-08-04 新增）
@@ -295,14 +307,14 @@ stock_inc/
         │   └── res/                              # 资源（字体 inter.ttf 子集化、图标、字符串等）
         │
         └── test/java/com/stock/dividend/         # 单元测试（包结构与 main 对齐，见 §6）
-            ├── data/agent/        # 8 个：AgentInstructionBuilderTest / AiChatRepositoryTest / StockAgentToolsTest（43 工具）等
-            ├── data/repository/   # 38 个：纯函数（BollCalculatorTest/BuyThresholdCalculatorTest/DividendMetricsCalculatorTest）
+            ├── data/agent/        # 10 个：AgentInstructionBuilderTest / AiChatRepositoryTest / StockAgentToolsTest（44 工具）/ PortfolioAnalysisToolsTest（3 新工具）/ ToolDisplayNameTest 等
+            ├── data/repository/   # 45 个：纯函数（BollCalculatorTest/BuyThresholdCalculatorTest/DividendMetricsCalculatorTest/PortfolioRiskDiagnoserTest）
             │                       #    + DTO 解析（QuoteSnapshotTest/MarketDtoParseTest/FinancialStatementDtoParseTest/BondYieldResponseParseTest）
             │                       #    + Repository（StockRepositoryTest/DividendRepositoryTest/Robolectric）
-            └── viewmodel/         # 19 个：PortfolioViewModelTest 等（Robolectric + MockK + Turbine）
+            └── viewmodel/         # 22 个：PortfolioViewModelTest 等（Robolectric + MockK + Turbine）
 ```
 
-**文件规模速览**（2026-08-04）：main 源集约 135 个 .kt，测试约 72 个 .kt；DB 17 张表/20 个 Migration；AI Agent 43 个工具（31 读 + 12 写）。
+**文件规模速览**（2026-08-15）：main 源集约 249 个 .kt，测试约 87 个 .kt；DB 17 张表/19 个 Migration（version=20）；AI Agent 47 个工具（34 读 + 13 写）。
 
 ---
 
@@ -337,6 +349,7 @@ stock_inc/
 |---|---|
 | `HoldingRecommender` | 单股评估：BOLL 位置 tone + 股息率门槛 → BUY/HOLD/SELL |
 | `PortfolioAdvisor` | 组合层仓位控制 + 三周期共振买点 |
+| `PortfolioRiskDiagnoser` | 组合风险全景诊断：①集中度（行业/个股 HHI+CR、股息来源前 3）②股息可持续性（连续分红<3 年权重、派息率>100% 名单）③估值水位（加权股息率 vs 10Y 国债利差）+ 规则化建议（2026-08-15 新增） |
 | `BollCalculator` | 收盘价 → BOLL 带（MA20 ± 2σ） |
 | `ForecastCalculator` | 历史分红 → 年均每股 + 预测收入 |
 | `DividendDiscountCalculator` | DDM 估值 |
@@ -344,9 +357,10 @@ stock_inc/
 | `DripCalculator` | 分红再投资（DRIP）复利模拟：按年把分红以可配置再投价买入，对比「再投」与「现金分红」两条路径 |
 | `HoldingCalculator` | 摊薄成本法持仓成本（卖出盈亏藏入成本，不独立展示） |
 | `RealizedPnlCalculator` | FIFO 已实现盈亏（A 股法定口径，独立于摊薄成本法） |
-| `DripCalculator` | 分红再投资（DRIP）复利模拟：按年把分红以可配置再投价买入，对比「再投」与「现金分红」两条路径 |
+| `DividendMetricsCalculator` | 分红深度（连续年数/CAGR/稳定性，2026-08-02 新增） |
 | `GridCalculator` | 网格（纯买入）档位表：买入区间等分档、1/price 反比分配资金、**无卖出档**、「下一档买」提示 |
 | `GridAnchorCalculator` | 网格智能锚定：买入起点=min(日/周 BOLL 下轨, 月 BOLL 中轨)、资金用完位=min(三周期下轨最低, 目标股息率底)、参考上界=月 BOLL 上轨 |
+| `GridExecutionCalculator` | 网格资金执行跟踪：已投入金额/剩余可投/已买股数/加权均价/浮盈浮盈率/进度（与 markTriggeredLevels 同口径命中，2026-08-05 新增） |
 | `LlmPromptBuilder` | 评估数据 → LLM prompt（纯函数 + 降级兜底） |
 | `LlmAnalysisParser` | LLM 响应 → 结构化结果 |
 | `applyPortfolioFilter`（顶层函数） | 行业/标签筛选 |
@@ -371,7 +385,7 @@ stock_inc/
 
 ### 4.6 数据库（Room）纪律 —— 关键
 
-- **DB version 当前 = 18**，`exportSchema = false`。
+- **DB version 当前 = 20**，`exportSchema = false`（共 17 张表 / 19 个迁移步 `MIGRATION_1_2` … `MIGRATION_19_20`）。
 - 改 schema（加表/加列/改类型）**必须**：① 在 `AppDatabase` 的 `entities`/`version` 同步；② 新增 `MIGRATION_N_(N+1)` 并在 `DatabaseModule` 注册；③ `version` +1。
 - 历史迁移全部手写 `ALTER`/`CREATE`，保持这个风格。
 - 表名/列名用下划线（`dividend_income_records`、`stockCode`），实体字段用驼峰，靠 Room 注解映射。
@@ -416,6 +430,8 @@ stock_inc/
 | f84 小单 | **f87** 小单 |
 
 规律：净额 f6x/7x/8x（66/72/78/84，每 +6）；净占比 = 净额 +3（69/75/81/87）。⚠️ 不是 f174/f175/f185/f192。拿不准时**先查东财资金流向页面字段或用 `WebSearch` 核实**。
+
+其他已实测确认的榜单字段（2026-08-15）：**f133 = 股息率 %（clist 真实值）**，交叉验证方式为「近 12 月每股分红合计 ÷ clist f2 现价」（汇洁股份 1.10÷7.53≈14.6% 与 f133=14.61 吻合）；全市场 A 股 fs 串 = `m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23`（约 5500 只，见 `MarketDataRepository.fetchMarketRanking`）。⚠️ clist 只支持单字段排序，**不支持条件过滤**——「股息率≥X 且 PE≤Y」类筛选只能按排序拉前 N（现取 200）条客户端过滤，满足条件但排在候选集外的会漏（`get_market_ranking` 工具的 `note` 字段已如实标注该口径）。
 
 #### 4.9.3 同语义数据要换接口时，先验证「字段完整度」
 
@@ -541,3 +557,8 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-04：网格改**纯买入模型**（收息仓定位，杜绝「买了涨了就卖」）。`GridCalculator` 移除卖出档语义：买入区间 `[资金用完位, 买入起点]` 等分 grids 档、**档位全部为 BUY**（无 sellLevels/nextSellHint），资金 1/price 反比（越便宜买越多），`highPrice` 降级为「参考上界（超过不追买）」；`nextBuyHint`=现价下方最近买入档、现价跌破资金用完位返回 null。`GridAnchorCalculator` 改**三周期 BOLL 锚定**：买入起点 = min(日 BOLL 下轨, 周 BOLL 下轨, 月 BOLL 中轨)（**「月线中枢及以下」防守型建仓**，而非一回到中枢就买）、资金用完位 = min(三周期下轨最低, 目标股息率底)、参考上界 = 月 BOLL 上轨；周期缺失跳过。`GridPlanViewModel.autoAnchor()` 并发拉日/周/月三周期 BOLL。UI：去「下一卖」提示、档位表全「买」、预览区展示「参考上界（不追买）」、锚定卡说明三周期来源。测试重写：GridCalculator 12 / GridAnchor 10（含「股息底 ≥ 起点 → null 提示调高目标股息率」）/ VM 11。
 - 2026-08-04：网格关联个股交易记录显示触发状态。`GridCalculator.markTriggeredLevels()` 纯函数：**BUY 成交价落在档位触发区间（档位价 ± 半步长）→ 标记该档 `triggered`**（SELL 不参与判定，纯买入模型语义）+ 5 单测；`GridPlanViewModel` 注入 `TransactionRepository`，combine 全量交易按股票分组注入；`GridPlanScreen` 档位表已触发档显示「买✓」+ 价格淡化、档位表标题行显示「已触发 N/总档」进度。**不改 schema**（复用 transactions 表）。
 - 2026-08-05：网格三大增强（执行闭环/一键记账/动态重锚定预警）。① **资金执行跟踪**：`GridExecutionCalculator` 纯函数（已投入金额/剩余可投/已买股数/加权均价/浮盈浮盈率/进度百分比，与 markTriggeredLevels 同口径命中）+ 6 单测；计划卡展示「执行进度条 + 已投入/剩余可投/浮盈 + 已买均价」，有买入才显示。② **下一档一键记账**：网格页「下一买 ¥X」旁「记账」按钮 → 跳 `editHolding/{code}?buyPrice=&buyShares=`，`EditHoldingViewModel` 读 query 参数自动打开买入表单预填档位价/建议股数（闭环执行链路）+ 2 单测；`editHolding` 路由加可选 query 参数（旧无参跳转兼容）。③ **动态重锚定预警**：现价高于买入起点 >15% 时计划卡显示「⚠ 行情偏离当初锚定，建议重新锁定」（行情已远离当初的 BOLL 支撑位，计划可能失真）。**不改 schema**。`GridPlanScreen` 增加 `onAddTransaction` 回调（全局入口不接，个股入口经 `gridPlanFor` 路由接入）。
+- 2026-08-02（补登）：新增 **AI 助手设置页**（用户可见功能）。`AiSettingsScreen`（系统提示词/温度/输出长度）+ `AiSettingsViewModel` + `AiAgentConfig`/`AiAgentConfigRepository`（SharedPreferences 存储）；`AiAgentFactory` 注入 `agentConfigSource`，把 systemPrompt/temperature/maxTokens 经 `GenerateContentConfig` 透传到 OpenAI 请求。AI 会话页右上角入口。原 §3 目录树漏登，本次补上。
+- 2026-08-02（补登）：`add_trade_strategy` 工具 + `StrategyActionTools.kt`。Agent 工具数 **43→44**（31 读 + 13 写），写工具新增「全局策略库自动提取」能力；系统提示词引导 Agent 在解读截图/持仓时主动调用。原 §3/§4.4 漏登，本次补上。
+- 2026-08-03（补登）：备份/恢复扩展覆盖 **LLM 与 AI 助手的 SharedPreferences 配置**（provider/key/url + 系统提示词/温度/输出长度）。`BackupData.kt` 数据载体除 Room 表外现含这部分；恢复时一并写回。原 §3 BackupData 注释未提，本次补上。这是备份边界的公开行为变化（用户恢复后期望值改变）。
+- 2026-08-05（文档同步）：对照近 7 天代码变更对齐 AGENTS.md。① §2 技术栈：Kotlin 2.0.21→**2.1.20**、KSP 2.0.21-1.0.28→**2.1.20-1.0.32**、Room 2.6.1→**2.8.4**；新增「AI Agent | Google ADK Kotlin | 0.6.0」行 + ADK 传递依赖 stdlib 对齐坑（stdlib 锁 2.1.21）。② §4.6：DB version 18→**20**（17 表/19 迁移）。③ §3/§4.4：补 `StrategyActionTools.kt`/`AiSettings*`/`AiAgentConfig*`/`ToolDisplayName.kt`/3 个设置二级页/`DividendMetricsCalculator`/`GridExecutionCalculator`；工具数订正为 44；§4.4 删重复 `DripCalculator` 行。④ §3 文件规模速览与 test 目录注释数字按实测订正（main≈247/test≈85；agent 9/repo 44/vm 22）。
+- 2026-08-15：Agent 组合分析三工具（工具数 **44→47**：34 读 + 13 写）。① `get_market_ranking`：全市场 A 股榜单（clist 全市场 fs 串 + f133 股息率字段，**经实测交叉验证**并配 fixture 单测；支持股息率/涨幅/市值/PE/PB/换手 6 维排序 + 股息率下限/PE 上限客户端过滤，返回 `note` 如实说明「仅前 200 名候选集」口径）。② `compare_stocks`：多股对比（2-8 只），默认快照（单次 ulist 批量）+ 本地分红深度（连续年数/CAGR/变异系数，零请求）+ 持仓盈亏，`deep=true` 加日/周/月三周期 BOLL 共振评估（BUY/HOLD/SELL 程序计算，Semaphore(3) 限流）；股息率按现价实时算（与 get_stock_info 同口径）。③ `diagnose_portfolio`：组合风险全景诊断，新纯函数 `PortfolioRiskDiagnoser`（§4.4 惯例）+16 单测——集中度（行业/个股 HHI+CR、股息来源前 3）/股息可持续性（连续分红<3 年权重、派息率>100% 名单经 enrichPayoutRatio 装配）/估值水位（加权股息率 vs 10Y 国债利差）+ 规则化中文建议。系统提示词加三工具编排引导（找高股息→榜单、比较个股→对比、组合体检→诊断+信号+行业配比串联）。新增 `PortfolioAnalysisTools.kt`（工具层）+ `PortfolioAnalysisToolsTest.kt`（11 测试）。§4.9.2 补 f133/全市场 fs/客户端过滤口径知识。**不改 schema**。
