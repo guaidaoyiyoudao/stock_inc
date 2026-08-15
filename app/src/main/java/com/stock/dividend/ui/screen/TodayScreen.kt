@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,6 +42,9 @@ import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.ui.theme.LocalExtendedColors
 import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.viewmodel.TodayViewModel
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * 今日首页（起始 Tab）。一屏三块：① AI 一句话总结 ② 组合表现+大盘对照 ③ 信号卡。
@@ -69,6 +73,17 @@ fun TodayScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // ⓪ 日期头：锚定「今日」是哪天（周几影响开盘/收盘预期）
+        item(key = "date_header") {
+            val today = remember { LocalDate.now() }
+            Text(
+                text = today.format(DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINESE)),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
+
         // ① AI 一句话总结（仅当 briefing 非空时渲染）
         state.briefing?.let { briefing ->
             item(key = "briefing") {
@@ -115,7 +130,7 @@ fun TodayScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(modifier = Modifier.width(10.dp).height(10.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // 大字总市值：加粗 ¥ + 千分位金额（tnum 等宽，IncomeSummaryCard 同款）
                     Text(
@@ -127,7 +142,7 @@ fun TodayScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
 
-                    Spacer(modifier = Modifier.width(8.dp).height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // 今日盈亏：↑↓ 箭头 + 财务色
                     Text(
@@ -137,7 +152,7 @@ fun TodayScreen(
                         color = pnlColor(state.todayPnl),
                     )
 
-                    Spacer(modifier = Modifier.width(12.dp).height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // 底部对照 Row：累计盈亏% / 跑赢沪深300pp
                     Row(
@@ -158,11 +173,16 @@ fun TodayScreen(
                         }
                     }
 
-                    state.indexHs300?.let { hs300 ->
-                        Spacer(modifier = Modifier.width(4.dp).height(4.dp))
+                    // 大盘对照：上证 + 沪深300（有哪个展示哪个）
+                    val indexLine = listOfNotNull(
+                        state.indexSh?.let { "上证 ${PercentFormatter.withSign(it)}" },
+                        state.indexHs300?.let { "沪深300 ${PercentFormatter.withSign(it)}" },
+                    ).joinToString("　")
+                    if (indexLine.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "沪深300 ${PercentFormatter.withSign(hs300)}",
-                            style = MaterialTheme.typography.labelSmall,
+                            indexLine,
+                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -209,12 +229,21 @@ fun TodayScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
+                            // 股票名（加粗）+ 信号标题（primary 色），单行合并避免三行过高
                             Text(
-                                signal.title,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                text = buildAnnotatedString {
+                                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                                        append(signal.stockName)
+                                    }
+                                    append(" · ")
+                                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                                        append(signal.title)
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
-                            Spacer(modifier = Modifier.width(2.dp).height(2.dp))
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 signal.detail,
                                 style = MaterialTheme.typography.labelSmall,
