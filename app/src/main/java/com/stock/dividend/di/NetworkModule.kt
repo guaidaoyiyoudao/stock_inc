@@ -191,7 +191,9 @@ object NetworkModule {
     fun provideLlmOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
+            // web_search + reasoning 多轮搜索实测可达 60s+，给足余量避免流式 readTimeout。
+            // 流式逐 token 间隔虽小（<2s），但首 token / 工具结果返回前可能较久。
+            .readTimeout(180, TimeUnit.SECONDS)
             .addInterceptor(
                 HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
             )

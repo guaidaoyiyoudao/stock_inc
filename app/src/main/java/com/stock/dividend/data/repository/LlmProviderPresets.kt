@@ -6,7 +6,7 @@ enum class LlmProviderPreset(
     val baseUrl: String,
     val defaultModel: String,
 ) {
-    DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1/", "deepseek-chat"),
+    DEEPSEEK("DeepSeek", "https://api.deepseek.com/v1/", "deepseek-v4-flash"),
     ZHIPU("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4/", "glm-4-flash"),
     QWEN("通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1/", "qwen-turbo"),
     CUSTOM("自定义", "", "");

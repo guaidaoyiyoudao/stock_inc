@@ -36,6 +36,10 @@ data class ChatMessageUi(
     val streaming: Boolean = false,
     /** 仅 [ChatRole.TOOL] 有效：工具调用的展示名与状态。 */
     val toolCall: ToolCallUi? = null,
+    /** 仅 [ChatRole.AGENT] 有效：推理模型/联网搜索时的思考过程文本。null 表示无思考过程。 */
+    val thinking: String? = null,
+    /** 思考过程是否仍在流式接收中（true=展开+转圈，false=可折叠）。 */
+    val thinkingStreaming: Boolean = false,
 )
 
 @Stable
@@ -185,6 +189,13 @@ class AiChatViewModel @Inject constructor(
             try {
                 events.collect { event ->
                     when (event) {
+                        is AiChatEvent.Thinking -> _uiState.update {
+                            it.copy(messages = it.messages.appendThinking(event.text))
+                        }
+                        is AiChatEvent.ThinkingDone -> _uiState.update {
+                            // reasoning_text.done：该段思考结束，停转圈（多轮时每轮思考结束都会触发）
+                            it.copy(messages = it.messages.finalizeThinking())
+                        }
                         is AiChatEvent.Partial -> _uiState.update {
                             it.copy(messages = it.messages.appendAgentText(event.text, replace = false, streaming = true))
                         }
@@ -192,6 +203,7 @@ class AiChatViewModel @Inject constructor(
                             finalText = event.text
                             _uiState.update {
                                 it.copy(messages = it.messages
+                                    .finalizeThinking()
                                     .finalizeToolCalls(ToolCallStatus.DONE)
                                     .appendAgentText(event.text, replace = true, streaming = false))
                             }
@@ -260,6 +272,36 @@ private fun List<ChatMessageUi>.appendAgentText(
     } else {
         this + ChatMessageUi(ChatRole.AGENT, text, streaming = streaming)
     }
+}
+
+/**
+ * 思考过程增量：追加到最后一条 agent 消息的 thinking 字段（streaming=true）。
+ * 若末尾非 agent 消息，则新建一条（思考通常先于答案到达，此时 agent 气泡尚不存在）。
+ */
+private fun List<ChatMessageUi>.appendThinking(delta: String): List<ChatMessageUi> {
+    val last = lastOrNull()
+    return if (last?.role == ChatRole.AGENT) {
+        dropLast(1) + last.copy(
+            thinking = (last.thinking.orEmpty() + delta),
+            thinkingStreaming = true,
+        )
+    } else {
+        this + ChatMessageUi(
+            role = ChatRole.AGENT,
+            text = "",
+            streaming = true,
+            thinking = delta,
+            thinkingStreaming = true,
+        )
+    }
+}
+
+/** 思考结束：把最后一条 agent 消息的 thinkingStreaming 置 false（可折叠）。 */
+private fun List<ChatMessageUi>.finalizeThinking(): List<ChatMessageUi> {
+    val last = lastOrNull() ?: return this
+    return if (last.role == ChatRole.AGENT && last.thinkingStreaming) {
+        dropLast(1) + last.copy(thinkingStreaming = false)
+    } else this
 }
 
 /** 追加一条 RUNNING 的工具调用气泡。 */

@@ -3,6 +3,8 @@ package com.stock.dividend.viewmodel
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.repository.AiAgentConfig
+import com.stock.dividend.data.repository.AiAgentConfigRepository
 import com.stock.dividend.data.repository.DividendThresholds
 import com.stock.dividend.data.repository.LlmConfig
 import com.stock.dividend.data.repository.LlmConfigRepository
@@ -33,7 +35,8 @@ data class NotificationSettingsUiState(
 @HiltViewModel
 class NotificationSettingsViewModel @Inject constructor(
     private val repository: NotificationRuleRepository,
-    private val llmConfigRepository: LlmConfigRepository
+    private val llmConfigRepository: LlmConfigRepository,
+    private val agentConfigRepository: AiAgentConfigRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(NotificationSettingsUiState())
     val uiState: StateFlow<NotificationSettingsUiState> = _uiState.asStateFlow()
@@ -42,6 +45,12 @@ class NotificationSettingsViewModel @Inject constructor(
     val llmConfigState: StateFlow<LlmConfig> =
         llmConfigRepository.observeConfig().stateIn(
             viewModelScope, SharingStarted.WhileSubscribed(5000), LlmConfig("", "", "")
+        )
+
+    /** AI Agent 配置（含联网搜索开关；供设置页编辑）。 */
+    val agentConfigState: StateFlow<AiAgentConfig> =
+        agentConfigRepository.observe().stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5000), AiAgentConfig()
         )
 
     fun saveLlmConfig(baseUrl: String, apiKey: String, model: String) {
@@ -56,6 +65,13 @@ class NotificationSettingsViewModel @Inject constructor(
             llmConfigRepository.saveConfig(
                 LlmProviderPreset.apply(preset, llmConfigRepository.snapshot())
             )
+        }
+    }
+
+    /** 开关联网搜索（AI Tab 对话用；开启后请求注入 web_search 工具，需 deepseek-v4-flash 模型）。 */
+    fun saveWebSearch(enabled: Boolean) {
+        viewModelScope.launch {
+            agentConfigRepository.saveConfig(agentConfigRepository.snapshot().copy(webSearch = enabled))
         }
     }
 

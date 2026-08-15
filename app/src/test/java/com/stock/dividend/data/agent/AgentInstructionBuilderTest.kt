@@ -99,4 +99,17 @@ class AgentInstructionBuilderTest {
         assertThat(baseIdx).isLessThan(strategyIdx)
         assertThat(strategyIdx).isLessThan(promptIdx)
     }
+
+    @Test
+    fun baseInstruction_guidesPortfolioAnalysisOrchestration() {
+        // 组合分析编排引导：三个新工具的推荐使用场景必须写进默认提示词，
+        // 让模型在「体检组合/找高股息/对比个股」类问题上有明确路径
+        val instruction = AgentInstructionBuilder.build(emptyList())
+        assertThat(instruction).contains("diagnose_portfolio")
+        assertThat(instruction).contains("get_market_ranking")
+        assertThat(instruction).contains("compare_stocks")
+        // 引导多步编排（组合体检 = 诊断 + 信号串联），而非只报单工具数据
+        assertThat(instruction).contains("组合体检")
+        assertThat(instruction).contains("get_portfolio_signals")
+    }
 }

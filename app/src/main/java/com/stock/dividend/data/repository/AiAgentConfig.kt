@@ -9,11 +9,15 @@ import kotlinx.coroutines.flow.Flow
  *   避免破坏工具调用/数据准确性契约）。空串表示用默认。
  * - [temperature]：回答随机性，null 表示用模型默认；有效范围 0.0~2.0。
  * - [maxTokens]：单轮最大输出长度，null 表示用模型默认；必须 > 0。
+ * - [webSearch]：是否为 AI 对话启用联网搜索。开启后请求走 DeepSeek Responses API
+ *   （`/responses`，服务端 web_search 工具）；DeepSeek 域名下自动用 deepseek-v4-flash 模型。
+ *   仅作用于 AI Tab，不影响「一键评估」链路。
  */
 data class AiAgentConfig(
     val systemPrompt: String = "",
     val temperature: Float? = null,
     val maxTokens: Int? = null,
+    val webSearch: Boolean = false,
 )
 
 /** 只读 AI agent 配置源（抽象出来便于单测用 fake 绕开 SharedPreferences）。 */

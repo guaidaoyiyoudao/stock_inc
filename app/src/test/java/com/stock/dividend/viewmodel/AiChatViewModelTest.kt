@@ -194,6 +194,55 @@ class AiChatViewModelTest {
     }
 
     @Test
+    fun thinking_accumulatesThenFinalClosesStreaming() = runTest {
+        // 复现 web_search 真实时序：先思考（reasoning），再最终答案
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        coEvery { repository.send("s1", "今天大盘") } returns flowOf(
+            AiChatEvent.Thinking("我需要搜索"),
+            AiChatEvent.Thinking("今日A股行情"),
+            AiChatEvent.Final("今天A股收涨，沪指 3878"),
+        )
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        vm.onInputChanged("今天大盘")
+        vm.onSend()
+        advanceUntilIdle()
+        val agent = vm.uiState.value.messages.last { it.role == ChatRole.AGENT }
+        // 思考过程累积到 thinking 字段
+        assertThat(agent.thinking).isEqualTo("我需要搜索今日A股行情")
+        // Final 后思考结束（可折叠）
+        assertThat(agent.thinkingStreaming).isFalse()
+        // 最终答案在 text
+        assertThat(agent.text).isEqualTo("今天A股收涨，沪指 3878")
+    }
+
+    @Test
+    fun thinkingDone_stopsSpinnerBeforeFinal() = runTest {
+        // reasoning_text.done 在 Final 之前到达 → 转圈应立即停（不等 Final）
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        coEvery { repository.send("s1", "hi") } returns flowOf(
+            AiChatEvent.Thinking("思考中"),
+            AiChatEvent.ThinkingDone,   // reasoning 段结束
+            AiChatEvent.Final("答案是"),
+        )
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        vm.onInputChanged("hi")
+        vm.onSend()
+        advanceUntilIdle()
+        val agent = vm.uiState.value.messages.last { it.role == ChatRole.AGENT }
+        assertThat(agent.thinking).isEqualTo("思考中")
+        assertThat(agent.thinkingStreaming).isFalse()  // ThinkingDone 已停转圈
+        assertThat(agent.text).isEqualTo("答案是")
+    }
+
+    @Test
     fun selectSession_loadsMessages() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)

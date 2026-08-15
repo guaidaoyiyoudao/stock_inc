@@ -332,22 +332,29 @@ private fun MessageBubble(message: ChatMessageUi) {
                 )
             }
         }
-        ChatRole.AGENT -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                // 流式半成品或语法不完整的 Markdown 只显示纯文本，完整后再渲染
-                if (!message.streaming && canRenderMarkdown(message.text)) {
-                    MarkdownText(
-                        markdown = message.text,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                    )
-                } else {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                    )
+        ChatRole.AGENT -> Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // 思考过程（联网搜索/推理时，先于答案流式到达；让用户知道没卡住）
+            message.thinking?.let { ThinkingSection(it, message.thinkingStreaming) }
+            // 最终回复
+            if (message.text.isNotEmpty()) {
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+                    // 流式半成品或语法不完整的 Markdown 只显示纯文本，完整后再渲染
+                    if (!message.streaming && canRenderMarkdown(message.text)) {
+                        MarkdownText(
+                            markdown = message.text,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        )
+                    } else {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        )
+                    }
                 }
             }
         }
@@ -359,6 +366,58 @@ private fun MessageBubble(message: ChatMessageUi) {
             modifier = Modifier.fillMaxWidth()
         )
         ChatRole.TOOL -> message.toolCall?.let { ToolCallPill(it) }
+    }
+}
+
+/**
+ * 思考过程区：推理模型/联网搜索时实时展示模型的 reasoning。
+ * - 流式接收中（streaming=true）：默认展开 + 标题「思考中…」+ 转圈，让用户知道没卡住。
+ * - 接收完成（streaming=false）：默认折叠，标题「思考过程」，用户可点开查看。
+ * 文本用浅色小字纯文本展示（不渲染 Markdown，避免流式闪烁）。
+ */
+@Composable
+private fun ThinkingSection(thinking: String, streaming: Boolean) {
+    // 流式时强制展开；完成后默认折叠。用 remember 持久化用户的折叠操作。
+    var expanded by remember(streaming) { mutableStateOf(streaming) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(end = 32.dp) // 留出与用户消息对称的右边距
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (streaming) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+            Text(
+                text = if (streaming) "思考中…" else "思考过程",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+            )
+            Text(
+                text = if (expanded) "▲" else "▼",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (expanded && thinking.isNotBlank()) {
+            Text(
+                text = thinking,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 

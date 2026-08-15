@@ -29,6 +29,13 @@ object AgentInstructionBuilder {
         数据时效：行情/资金流/指数/ETF 为实时盘口；财务三表与基本面为 7 天缓存季报数据（可 forceRefresh）。
         红线：不对东方财富原始数据做换算（仅允许「每10股→每股」单位换算与展示格式化）；
         资金净流入正值=净流入、负值=净流出；汇率数据暂不支持。
+        组合分析三工具的推荐路径：
+        - 用户想找高股息/低估股票（如「有什么股息率超 5% 的股票」）→ get_market_ranking
+          （支持按股息率/涨幅/市值/PE/PB/换手排序 + 股息率下限/PE 上限过滤；过滤只作用于榜单前 200 名，须如实转述该口径）。
+        - 用户想比较多只股票（如「茅台和平安哪个好」）→ compare_stocks（默认返回快照+分红深度+持仓盈亏，
+          需要买卖点判断时加 deep=true 获取三周期 BOLL 评估）。
+        - 用户要求「组合体检/检查风险/诊断持仓」→ diagnose_portfolio（集中度/股息可持续性/估值水位，程序计算结论），
+          并串联 get_portfolio_signals（仓位控制+共振买点）与 get_industry_allocation 给出完整体检报告。
         回答简洁中文，可用 Markdown；涉及投资建议时提示仅供参考。
     """.trimIndent()
 
@@ -39,17 +46,33 @@ object AgentInstructionBuilder {
      * @param strategies 策略库（全局投资原则），注入到原则段。
      * @param customPrompt 用户自定义附加指令，追加到末尾（非替换，避免破坏工具调用契约）。
      *                     空串表示用默认。默认 "" 兼容旧调用点。
+     * @param webSearch 是否已启用联网搜索。true 时追加联网搜索使用引导（web_search 工具）。
      */
     fun build(
         strategies: List<TradeStrategyEntity>,
         customPrompt: String = "",
+        webSearch: Boolean = false,
     ): String {
         val prompt = customPrompt.trim()
         val strategySection = buildStrategySection(strategies)
+        val webSearchSection = if (webSearch) WEB_SEARCH_GUIDE else ""
         val promptSection = if (prompt.isEmpty()) "" else
             "\n\n## 你的附加指令（用户自定义，优先级最高）\n$prompt"
-        return BASE_INSTRUCTION + strategySection + promptSection
+        return BASE_INSTRUCTION + strategySection + webSearchSection + promptSection
     }
+
+    /** 联网搜索引导：仅在 webSearch 启用时注入。trimIndent() 非编译期常量，故用 val 而非 const。 */
+    private val WEB_SEARCH_GUIDE = """
+
+## 联网搜索
+你已启用联网搜索（web_search 工具，由服务端执行）。使用原则：
+- 涉及实时新闻、政策变化、宏观经济、行业动态、公司公告等本应用工具无法覆盖的**时效性信息**时，
+  可调用 web_search 获取最新内容，并在回答中标注信息来源与时间。
+- 涉及持仓、个股行情、基本面、财务三表、K 线、估值、股息、分红、资金流等**结构化数据**时，
+  仍**优先用本应用工具**（get_stock_info / get_financial_statements 等），不要用联网搜索替代——
+  应用工具返回的是经核对的权威源数据，准确性更高。
+- 联网搜索结果可能有时效滞后或偏差，回答时如实说明，不编造搜索结果。
+""".trimIndent()
 
     private fun buildStrategySection(strategies: List<TradeStrategyEntity>): String {
         if (strategies.isEmpty()) return ""

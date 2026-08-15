@@ -39,6 +39,7 @@ class AiAgentConfigRepository @Inject constructor(
         systemPrompt = prefs.getString(KEY_SYSTEM_PROMPT, "").orEmpty(),
         temperature = prefs.getString(KEY_TEMPERATURE, null)?.toFloatOrNull(),
         maxTokens = prefs.getString(KEY_MAX_TOKENS, null)?.toIntOrNull(),
+        webSearch = prefs.getBoolean(KEY_WEB_SEARCH, false),
     )
 
     suspend fun saveConfig(config: AiAgentConfig) {
@@ -46,6 +47,7 @@ class AiAgentConfigRepository @Inject constructor(
             .putString(KEY_SYSTEM_PROMPT, config.systemPrompt)
             .putString(KEY_TEMPERATURE, config.temperature?.toString())
             .putString(KEY_MAX_TOKENS, config.maxTokens?.toString())
+            .putBoolean(KEY_WEB_SEARCH, config.webSearch)
             .apply()
     }
 
@@ -54,7 +56,8 @@ class AiAgentConfigRepository @Inject constructor(
         private const val KEY_SYSTEM_PROMPT = "system_prompt"
         private const val KEY_TEMPERATURE = "temperature"
         private const val KEY_MAX_TOKENS = "max_tokens"
-        private val KEYS = setOf(KEY_SYSTEM_PROMPT, KEY_TEMPERATURE, KEY_MAX_TOKENS)
+        private const val KEY_WEB_SEARCH = "web_search"
+        private val KEYS = setOf(KEY_SYSTEM_PROMPT, KEY_TEMPERATURE, KEY_MAX_TOKENS, KEY_WEB_SEARCH)
     }
 }
 

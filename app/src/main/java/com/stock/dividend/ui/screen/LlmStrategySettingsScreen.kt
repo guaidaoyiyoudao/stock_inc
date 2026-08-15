@@ -19,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -95,12 +96,14 @@ fun LlmStrategySettingsScreen(
 @Composable
 internal fun LlmConfigSettingsContent(viewModel: NotificationSettingsViewModel) {
     val config by viewModel.llmConfigState.collectAsStateWithLifecycle()
+    val agentConfig by viewModel.agentConfigState.collectAsStateWithLifecycle()
     var apiKey by remember(config.apiKey) { mutableStateOf(config.apiKey) }
     var baseUrl by remember(config.baseUrl) { mutableStateOf(config.baseUrl) }
     var model by remember(config.model) { mutableStateOf(config.model) }
     var showKey by remember { mutableStateOf(false) }
     val selectedProvider =
         LlmProviderPreset.entries.firstOrNull { it.baseUrl == config.baseUrl } ?: LlmProviderPreset.CUSTOM
+    val isDeepSeek = config.baseUrl.contains("deepseek.com")
 
     Column(Modifier.fillMaxWidth()) {
         Text(
@@ -160,5 +163,42 @@ internal fun LlmConfigSettingsContent(viewModel: NotificationSettingsViewModel) 
             onClick = { viewModel.saveLlmConfig(baseUrl, apiKey, model) },
             text = "保存",
         )
+
+        // ── 联网搜索（AI Tab 对话用）──
+        Spacer(Modifier.height(20.dp))
+        Text(
+            text = "联网搜索",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "开启后，AI 对话可联网查询实时新闻、政策、宏观等资讯（DeepSeek Responses API + web_search 工具）。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("联网搜索", style = MaterialTheme.typography.bodyLarge)
+                if (agentConfig.webSearch) {
+                    Text(
+                        text = if (isDeepSeek) {
+                            "已启用，AI 对话会联网检索实时资讯"
+                        } else {
+                            "⚠ 联网搜索仅 DeepSeek 支持，建议选 DeepSeek"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Switch(
+                checked = agentConfig.webSearch,
+                onCheckedChange = { viewModel.saveWebSearch(it) }
+            )
+        }
     }
 }

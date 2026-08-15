@@ -22,6 +22,10 @@ import javax.inject.Singleton
 
 /** AI Tab 对外事件。 */
 sealed interface AiChatEvent {
+    /** 思考过程增量（推理模型/联网搜索时，边想边输出的 reasoning）。UI 单独渲染为「思考过程」区。 */
+    data class Thinking(val text: String) : AiChatEvent
+    /** 一段思考结束（reasoning_text.done）——UI 据此停掉「思考中…」转圈。 */
+    data object ThinkingDone : AiChatEvent
     data class Partial(val text: String) : AiChatEvent
     data class Final(val text: String) : AiChatEvent
     data class ToolStatus(val toolName: String) : AiChatEvent
@@ -167,6 +171,9 @@ class AiChatRepository @Inject constructor(
 
     private fun emitEvent(event: Event): AiChatEvent? {
         val parts = event.content?.parts.orEmpty()
+        // 思考过程（thought=true）与可见文本分开：思考流式展示在「思考过程」区，不计入最终回复
+        val thinkingText = parts.filter { it.thought == true && it.text != null }
+            .joinToString("") { it.text!! }
         val text = parts.filter { it.thought != true && it.text != null }
             .joinToString("") { it.text!! }
         val functionCalls = parts.mapNotNull { it.functionCall }
@@ -187,9 +194,18 @@ class AiChatRepository @Inject constructor(
             return AiChatEvent.ToolStatus(functionCalls.first().name)
         }
         if (event.partial) {
+            // 思考增量优先（联网搜索时先发思考、再发答案，思考让用户知道没卡住）
+            if (thinkingText.isNotEmpty()) return AiChatEvent.Thinking(thinkingText)
+            // thought part 存在但文本空 → 思考段结束信号（reasoning_text.done）→ 停转圈
+            val hasThoughtPart = parts.any { it.thought == true }
+            if (hasThoughtPart && text.isEmpty()) return AiChatEvent.ThinkingDone
             return if (text.isNotEmpty()) AiChatEvent.Partial(text) else null
         }
-        return if (text.isNotEmpty()) AiChatEvent.Final(text) else null
+        // 非流式最终事件：有文本则返回，无文本但带错误信息（如模型返回 errorMessage /
+        // HTTP 400 错误体 / response.failed）须透出，避免静默「无响应」。
+        if (text.isNotEmpty()) return AiChatEvent.Final(text)
+        val errorMsg = event.errorMessage
+        return if (!errorMsg.isNullOrBlank()) AiChatEvent.Error(errorMsg) else null
     }
 
     companion object {
