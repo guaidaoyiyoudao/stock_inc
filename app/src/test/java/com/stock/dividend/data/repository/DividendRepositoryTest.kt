@@ -16,6 +16,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import org.junit.Before
 import org.junit.Test
 import retrofit2.HttpException
 import retrofit2.Response
@@ -30,6 +31,14 @@ class DividendRepositoryTest {
     private val eastMoneyApi: DividendApi = mockk()
     private val dao: DividendDao = mockk(relaxed = true)
     private val repository = DividendRepository(tencentApi, eastMoneyApi, dao)
+
+    @Before
+    fun setUp() {
+        // 默认：东财补充源（股息率元数据）返回空，需要补充效果的用例单独 stub
+        coEvery { eastMoneyApi.getDividends(filter = any()) } returns DividendResponse(
+            success = true, result = DividendResponse.DividendResult(data = emptyList())
+        )
+    }
 
     /** 构造一条 qfqday 记录：前 6 个是 OHLCV 字符串，第 7 个是分红对象（可为 null 表示无分红）。 */
     private fun dayEntry(
@@ -401,12 +410,59 @@ class DividendRepositoryTest {
                 dayEntry("2025-07-11", dividendObj("2024", "24.6", "2025-07-10", "2025-07-11"))
             )
         )
+        // 东财补充源（股息率元数据）异常应被静默吞掉，不影响腾讯主源结果
+        coEvery { eastMoneyApi.getDividends(filter = any()) } throws SocketTimeoutException("em down")
 
         repository.fetchAndCacheDividends("sz.000001", "000001")
 
         assertThat(entitiesSlot.last()).hasSize(1)
-        // 腾讯有数据时不应调用东方财富
-        coVerify(exactly = 0) { eastMoneyApi.getDividends(filter = any()) }
+        // 腾讯主源数据仍在（东财补充失败不破坏主流程）
+        assertThat(entitiesSlot.last().single().cashPerShare).isWithin(0.001).of(2.46)
+    }
+
+    @Test
+    fun `fetchAndCacheDividends enriches dividendYield from eastmoney by ex-dividend date`() = runTest {
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+        stubTencent(
+            listOf(
+                // 两条：一条东财有对应除权日记录，一条没有
+                dayEntry("2025-07-11", dividendObj("2024", "24.6", "2025-07-10", "2025-07-11")),
+                dayEntry("2024-10-10", dividendObj("2023", "20", "2024-10-09", "2024-10-10"))
+            )
+        )
+        coEvery { eastMoneyApi.getDividends(filter = any()) } returns DividendResponse(
+            success = true,
+            result = DividendResponse.DividendResult(
+                data = listOf(eastMoneyItem(dividentRatio = 0.0593, exDividendDate = "2025-07-11T00:00:00"))
+            )
+        )
+
+        repository.fetchAndCacheDividends("sz.000001", "000001")
+
+        val entities = entitiesSlot.last().sortedBy { it.exDividendDate }
+        // 除权日对齐上的那条补到了历史股息率快照（0.0593 → 5.93%）
+        assertThat(entities[1].dividendYield).isWithin(0.01).of(5.93)
+        // 对不上的那条保持 null，不臆造
+        assertThat(entities[0].dividendYield).isNull()
+    }
+
+    @Test
+    fun `fetchAndCacheDividends keeps null yield when eastmoney enrich fails`() = runTest {
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+        stubTencent(
+            listOf(
+                dayEntry("2025-07-11", dividendObj("2024", "24.6", "2025-07-10", "2025-07-11"))
+            )
+        )
+        coEvery { eastMoneyApi.getDividends(filter = any()) } throws ConnectException("em refused")
+
+        val result = repository.fetchAndCacheDividends("sz.000001", "000001")
+
+        // 补充源失败静默：主流程成功、数据保留、股息率保持 null
+        assertThat(result.isSuccess).isTrue()
+        assertThat(entitiesSlot.last().single().dividendYield).isNull()
     }
 
     @Test

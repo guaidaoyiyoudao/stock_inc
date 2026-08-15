@@ -29,6 +29,7 @@ class DividendRepository @Inject constructor(
             // 腾讯为主源；若失败或拿不到数据，用东方财富回退补充
             val entities = fetchFromTencent(stockCode, securityCode)
                 .takeIf { it.isNotEmpty() }
+                ?.let { enrichDividendYieldFromEastMoney(stockCode, securityCode, it) }
                 ?: fetchFromEastMoney(stockCode, securityCode)
 
             dividendDao.deleteByStockCode(stockCode)
@@ -72,7 +73,7 @@ class DividendRepository @Inject constructor(
                 stockCode = stockCode,
                 reportDate = reportDate,
                 cashPerShare = cashPerShare,
-                dividendYield = null, // 腾讯无此字段，由本地按现价计算
+                dividendYield = null, // 腾讯无此字段，由东财元数据按除权日对齐补充（见 enrichDividendYieldFromEastMoney）
                 exDividendDate = exDate,
                 recordDate = item.djr?.takeDateOnlyOrNull(),
                 planNoticeDate = null,
@@ -126,14 +127,46 @@ class DividendRepository @Inject constructor(
 
     // ── 东方财富（补充/回退）──────────────────────────────────────
 
+    /**
+     * 腾讯主源无股息率字段（[fetchFromTencent] 落地 dividendYield=null），
+     * 用东方财富分红明细按除权日对齐补充历史股息率快照。
+     * 仅补 dividendYield 一个字段；东财失败/无匹配时静默返回原列表，不影响主源数据。
+     */
+    private suspend fun enrichDividendYieldFromEastMoney(
+        stockCode: String,
+        securityCode: String,
+        entities: List<DividendEntity>
+    ): List<DividendEntity> {
+        val yieldByExDate = runCatching {
+            eastMoneyApi.getDividends(filter = dividendFilter(stockCode, securityCode))
+                .result?.data.orEmpty()
+        }.getOrDefault(emptyList())
+            .mapNotNull { item ->
+                val exDate = item.exDividendDate?.toDateOnlyOrNull() ?: return@mapNotNull null
+                val yieldPct = item.dividentRatio?.let { it * 100.0 } ?: return@mapNotNull null
+                exDate to yieldPct
+            }
+            .toMap()
+        if (yieldByExDate.isEmpty()) return entities
+        return entities.map {
+            it.copy(dividendYield = it.dividendYield ?: yieldByExDate[it.exDividendDate])
+        }
+    }
+
+    /** 东财分红明细查询过滤条件：优先精确 SECUCODE，退化为 SECURITY_CODE。 */
+    private fun dividendFilter(stockCode: String, securityCode: String): String {
+        val expectedSecuCode = stockCode.toEastmoneySecuCode()
+        return expectedSecuCode
+            ?.let { "(SECUCODE=\"$it\")" }
+            ?: "(SECURITY_CODE=\"$securityCode\")"
+    }
+
     private suspend fun fetchFromEastMoney(
         stockCode: String,
         securityCode: String
     ): List<DividendEntity> {
         val expectedSecuCode = stockCode.toEastmoneySecuCode()
-        val filter = expectedSecuCode
-            ?.let { "(SECUCODE=\"$it\")" }
-            ?: "(SECURITY_CODE=\"$securityCode\")"
+        val filter = dividendFilter(stockCode, securityCode)
         val response = eastMoneyApi.getDividends(filter = filter)
         val items = response.result?.data ?: emptyList()
 
