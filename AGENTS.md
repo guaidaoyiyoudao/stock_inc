@@ -167,6 +167,10 @@ stock_inc/
         │   │   │   │   ├── LlmAnalysis.kt / LlmCacheKey.kt
         │   │   │   │   ├── StockLlmAnalysis.kt
         │   │   │   │   ├── JsonExtraction.kt              # LLM 响应 JSON 提取（容错）
+        │   │   │   │   ├── TodaySignalAggregator.kt       # 今日信号聚合纯函数（买入触发/网格下一档/分红倒计时）
+        │   │   │   │   ├── TodayBriefingCoordinator.kt    # 今日 AI 简报编排（拉数据→信号→prompt→LLM→按日缓存）
+        │   │   │   │   ├── TodayBriefingPromptBuilder.kt / TodayBriefingParser.kt  # 简报 prompt 构造/解析（纯函数）
+        │   │   │   │   ├── PortfolioDiagnosisAssembler.kt # 组合诊断共享装配器（今日页体检卡与 diagnose_portfolio 工具同源，2026-08-15 新增）
         │   │   │   │   │
         │   │   │   │   ├── 纯函数计算器（决策/计算逻辑，配单测，见 §4.4）：
         │   │   │   │   ├── BollCalculator.kt              # 收盘价 → BOLL 带（MA20 ± 2σ）
@@ -181,6 +185,7 @@ stock_inc/
         │   │   │   │   ├── GridCalculator.kt     # 网格交易档位表（等差网格 + 当前价下一档提示，2026-08-04 新增）
         │   │   │   │   ├── GridAnchorCalculator.kt       # 网格智能锚定（BOLL中轨=基准/上轨=上界/目标股息率=下界，2026-08-04 新增）
         │   │   │   │   ├── GridExecutionCalculator.kt    # 网格资金执行跟踪（已投入/剩余/已买股数/加权均价/浮盈，2026-08-05 新增）
+        │   │   │   │   ├── MarketMoodCalculator.kt      # 市场情绪分组：板块列表 → 领涨/领跌 TopN 两端（2026-08-15 新增）
         │   │   │   │   ├── HoldingRecommender.kt         # 单股评估：BOLL+股息率门槛 → BUY/HOLD/SELL
         │   │   │   │   ├── PortfolioAdvisor.kt           # 组合层仓位控制 + 三周期共振买点
         │   │   │   │   ├── Fundamentals.kt               # 基本面数据类 + Builder/enrichPayoutRatio/趋势
@@ -264,8 +269,9 @@ stock_inc/
         │   │   │   │   ├── CompanyIcon.kt / CompanyLogoMap.kt  # 公司 logo（Coil3 SVG）
         │   │   │   │   ├── EmptyStateView.kt / CompactTopAppBar.kt / AchievementCard.kt / YearSelector.kt
         │   │   │   └── screen/                   # 各页面 Composable（单 Activity + 多 Composable）
-        │   │   │       ├── MainScaffold.kt       # 底部导航骨架（Tab 切换）
-        │   │   │       ├── HomeScreen.kt         # 首页（概览）
+        │   │   │       ├── MainScaffold.kt       # 底部导航骨架（Tab 切换，起始 Tab=today）
+        │   │   │       ├── TodayScreen.kt       # 今日首页（起始 Tab）：AI 简报/组合表现/市场环境/组合体检/股息现金流/信号（金融分析师晨报分区）
+        │   │   │       ├── HomeScreen.kt         # 股息收入页（收入+日历二级 Tab）+ AchievementScreen 成就页
         │   │   │       ├── PortfolioScreen.kt    # 持仓主页（自选/持仓列表 + 下拉刷新 + FAB）
         │   │   │       ├── StockDetailScreen.kt  # 个股详情（行情/股息/BOLL/评估/AI 解读）
         │   │   │       ├── AiChatScreen.kt       # AI Tab（对话式 Agent）
@@ -287,6 +293,7 @@ stock_inc/
         │   │   │       └── TabRefreshLocal.kt    # 本地刷新辅助
         │   │   │
         │   │   └── viewmodel/                    # @HiltViewModel + UiState（参考 PortfolioViewModel，见 §4.2）
+        │   │       ├── TodayViewModel.kt      # 今日首页 VM（A 持仓/B 刷新→价格+市场+体检并行/C 简报/D 股息现金流 四 collector）
         │   │       ├── PortfolioViewModel.kt     # 持仓主 VM（多 collector + 派生 Flow）
         │   │       ├── StockDetailViewModel.kt   # 个股详情 VM
         │   │       ├── AiChatViewModel.kt        # AI 会话 VM
@@ -349,7 +356,8 @@ stock_inc/
 |---|---|
 | `HoldingRecommender` | 单股评估：BOLL 位置 tone + 股息率门槛 → BUY/HOLD/SELL |
 | `PortfolioAdvisor` | 组合层仓位控制 + 三周期共振买点 |
-| `PortfolioRiskDiagnoser` | 组合风险全景诊断：①集中度（行业/个股 HHI+CR、股息来源前 3）②股息可持续性（连续分红<3 年权重、派息率>100% 名单）③估值水位（加权股息率 vs 10Y 国债利差）+ 规则化建议（2026-08-15 新增） |
+| `PortfolioRiskDiagnoser` | 组合风险全景诊断：①集中度（行业/个股 HHI+CR、股息来源前 3）②股息可持续性（连续分红<3 年权重、派息率>100% 名单）③估值水位（加权股息率 vs 10Y 国债利差）+ 规则化建议；`grade()` 输出三维度 OK/WARN/BAD 红绿灯（阈值与建议规则同源，2026-08-15 新增 grade） |
+| `MarketMoodCalculator` | 市场情绪分组：clist 板块列表按涨跌幅本地排序取两端 TopN（领涨/领跌，口径同 get_market_sentiment 工具，2026-08-15 新增） |
 | `BollCalculator` | 收盘价 → BOLL 带（MA20 ± 2σ） |
 | `ForecastCalculator` | 历史分红 → 年均每股 + 预测收入 |
 | `DividendDiscountCalculator` | DDM 估值 |
@@ -562,3 +570,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-03（补登）：备份/恢复扩展覆盖 **LLM 与 AI 助手的 SharedPreferences 配置**（provider/key/url + 系统提示词/温度/输出长度）。`BackupData.kt` 数据载体除 Room 表外现含这部分；恢复时一并写回。原 §3 BackupData 注释未提，本次补上。这是备份边界的公开行为变化（用户恢复后期望值改变）。
 - 2026-08-05（文档同步）：对照近 7 天代码变更对齐 AGENTS.md。① §2 技术栈：Kotlin 2.0.21→**2.1.20**、KSP 2.0.21-1.0.28→**2.1.20-1.0.32**、Room 2.6.1→**2.8.4**；新增「AI Agent | Google ADK Kotlin | 0.6.0」行 + ADK 传递依赖 stdlib 对齐坑（stdlib 锁 2.1.21）。② §4.6：DB version 18→**20**（17 表/19 迁移）。③ §3/§4.4：补 `StrategyActionTools.kt`/`AiSettings*`/`AiAgentConfig*`/`ToolDisplayName.kt`/3 个设置二级页/`DividendMetricsCalculator`/`GridExecutionCalculator`；工具数订正为 44；§4.4 删重复 `DripCalculator` 行。④ §3 文件规模速览与 test 目录注释数字按实测订正（main≈247/test≈85；agent 9/repo 44/vm 22）。
 - 2026-08-15：Agent 组合分析三工具（工具数 **44→47**：34 读 + 13 写）。① `get_market_ranking`：全市场 A 股榜单（clist 全市场 fs 串 + f133 股息率字段，**经实测交叉验证**并配 fixture 单测；支持股息率/涨幅/市值/PE/PB/换手 6 维排序 + 股息率下限/PE 上限客户端过滤，返回 `note` 如实说明「仅前 200 名候选集」口径）。② `compare_stocks`：多股对比（2-8 只），默认快照（单次 ulist 批量）+ 本地分红深度（连续年数/CAGR/变异系数，零请求）+ 持仓盈亏，`deep=true` 加日/周/月三周期 BOLL 共振评估（BUY/HOLD/SELL 程序计算，Semaphore(3) 限流）；股息率按现价实时算（与 get_stock_info 同口径）。③ `diagnose_portfolio`：组合风险全景诊断，新纯函数 `PortfolioRiskDiagnoser`（§4.4 惯例）+16 单测——集中度（行业/个股 HHI+CR、股息来源前 3）/股息可持续性（连续分红<3 年权重、派息率>100% 名单经 enrichPayoutRatio 装配）/估值水位（加权股息率 vs 10Y 国债利差）+ 规则化中文建议。系统提示词加三工具编排引导（找高股息→榜单、比较个股→对比、组合体检→诊断+信号+行业配比串联）。新增 `PortfolioAnalysisTools.kt`（工具层）+ `PortfolioAnalysisToolsTest.kt`（11 测试）。§4.9.2 补 f133/全市场 fs/客户端过滤口径知识。**不改 schema**。
+- 2026-08-15：今日页「金融分析师视角」三区块（把只活在 Agent 工具层的能力提升为首页常驻）。① **市场环境卡**：四大指数（上证/深证/沪深300/创业板，fetchIndexQuotes 过滤）2×2 + 领涨/领跌板块 Top3 + 主力净流入板块 Top3（新纯函数 `MarketMoodCalculator`，口径同 get_market_sentiment：一次 clist(CHANGE,30) 本地排序两端 + 一次 clist(INFLOW,3)）；数据全空整节隐藏；**无持仓时也渲染**（看大盘不需要持仓）。② **组合体检卡**：新 `PortfolioRiskDiagnoser.grade()`（集中度/股息可持续/估值水位三维度 OK/WARN/BAD，阈值与建议规则同源）+ 摘要三行红绿灯 + 首条建议，点击展开完整数字（HHI/CR/股息来源/派息率超标名单/利差）与全部建议；新装配器 `PortfolioDiagnosisAssembler`（@Singleton）收敛「持仓+现价→DiagnoseHolding」装配，`diagnose_portfolio` 工具与今日页**共用同一实现**（今日页复用已刷新行情不重复拉价，fundamentals 读取 Semaphore(3) 限流）。③ **股息现金流卡**：本年已到账（observeTotalByYear）大字 + 全年预测（observeForecastTotal）进度条 + 差额，点击跳收入 Tab（MainScaffold 传 onOpenIncome）。`TodayViewModel` Collector B 在价格刷新后**并行**补算信号/市场/体检（async+awaitAll，各源吞异常互不拖累），新增 Collector D 响应式订阅现金流；组合表现卡删去与市场卡重复的上证/沪深300 行（保留「跑赢沪深300」相对表现）。④ **AI 简报喂料增强**：`TodayBriefingCoordinator` 追加体检行（股息率/10Y 国债/利差/单股最大权重）与市场行（领涨领跌板块），`TodayBriefingPromptBuilder` 加可选参数（null 省略块），Worker 与前台共用 Assembler。测试：PortfolioRiskDiagnoserTest 补 grade 8 用例、新 MarketMoodCalculatorTest 5 用例、新 PortfolioDiagnosisAssemblerTest 7 用例、TodayViewModelTest 补 4 用例、TodayBriefingPromptBuilder/CoordinatorTest 补喂料用例。**不改 schema**。

@@ -7,11 +7,19 @@ import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BondYieldRepository
+import com.stock.dividend.data.repository.DividendIncomeRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.IndexQuote
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.MarketDataRepository
+import com.stock.dividend.data.repository.MarketListItem
+import com.stock.dividend.data.repository.MarketMood
+import com.stock.dividend.data.repository.MarketMoodCalculator
+import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
+import com.stock.dividend.data.repository.PortfolioHealthGrade
+import com.stock.dividend.data.repository.PortfolioRiskDiagnosis
+import com.stock.dividend.data.repository.PortfolioRiskDiagnoser
 import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TodayBriefingCoordinator
@@ -31,6 +39,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -40,6 +49,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.Year
 import javax.inject.Inject
 
 @Stable
@@ -57,17 +67,32 @@ data class TodayUiState(
     val isLoading: Boolean = false,
     val hasHoldings: Boolean = false,
     val dataStale: Boolean = false,
+    // ── 市场环境（2026-08-15 金融分析师视角新增）──
+    val indices: List<IndexQuote> = emptyList(),            // 四大指数（上证/深证/沪深300/创业板）
+    val marketMood: MarketMood = MarketMood(),              // 领涨/领跌板块 Top3
+    val inflowIndustries: List<MarketListItem> = emptyList(), // 主力净流入板块 Top3
+    // ── 组合体检 ──
+    val diagnosis: PortfolioRiskDiagnosis? = null,
+    val healthGrade: PortfolioHealthGrade? = null,
+    // ── 股息现金流（本年）──
+    val yearDividendReceived: Double = 0.0,
+    val yearDividendForecast: Double = 0.0,
 )
 
 /**
  * 今日首页 ViewModel。多独立 collector 聚合「今日一瞥」（参考 PortfolioViewModel 模式 §4.2）。
  *
  * - Collector A：自选+持仓变化 → hasHoldings + 触发组合/信号重算
- * - Collector B：刷新触发（含首次 onStart）→ 拉价 + 指数 → 算市值/盈亏/对照/信号
+ * - Collector B：刷新触发（含首次 onStart）→ 拉价 + 指数 → 算市值/盈亏/对照 + 并行补
+ *   信号/市场环境/组合体检（金融分析师视角三件套，各源吞异常互不拖累，红线 #2）
  * - Collector C：AI 简报（按今日读缓存）
+ * - Collector D：股息现金流（本年已到账 vs 全年预测，响应式）
  *
  * **信号口径**：今日页并发拉**周线 BOLL**（Semaphore(3) 限流，红线 #5）→「跌破周线 BOLL 下轨」信号；
  * 加「股息率达买入线」+ 网格下一档 + 分红倒计时。三周期共振 BUY 仍留评估页（需日+周+月，重）。
+ *
+ * **体检口径**：[PortfolioDiagnosisAssembler] 复用本页已刷新行情装配（不重复拉价），
+ * 与 Agent 工具 `diagnose_portfolio` 同源；分级由 [PortfolioRiskDiagnoser.grade] 纯函数产出。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -78,6 +103,8 @@ class TodayViewModel @Inject constructor(
     private val bondYieldRepository: BondYieldRepository,
     private val marketDataRepository: MarketDataRepository,
     private val briefingCoordinator: TodayBriefingCoordinator,
+    private val diagnosisAssembler: PortfolioDiagnosisAssembler,
+    private val dividendIncomeRepository: DividendIncomeRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TodayUiState())
@@ -120,8 +147,15 @@ class TodayViewModel @Inject constructor(
                 lastSnapshots = snapshots
                 lastIndices = indices
                 recomputePortfolio(snapshots, indices)
-                recomputeSignals(snapshots)
-                // 红线 #3：无论成功失败都复位 loading
+                // 信号/市场/体检并行补算（各源吞异常互不拖累），一起完成后复位 loading（红线 #3）
+                coroutineScope {
+                    val jobs = listOf(
+                        async { recomputeSignals(snapshots) },
+                        async { recomputeMarket(indices) },
+                        async { recomputeDiagnosis(snapshots) },
+                    )
+                    jobs.awaitAll()
+                }
                 _uiState.update { it.copy(isLoading = false, dataStale = stale) }
             }
         }
@@ -130,6 +164,19 @@ class TodayViewModel @Inject constructor(
         viewModelScope.launch {
             val text = runCatching { briefingCoordinator.read(LocalDate.now()) }.getOrNull()
             _uiState.update { it.copy(briefing = text) }
+        }
+
+        // Collector D: 股息现金流——本年已到账 + 全年预测（响应式，收入记录变化自动刷新）
+        viewModelScope.launch {
+            combine(
+                dividendIncomeRepository.observeTotalByYear(Year.now().value),
+                dividendIncomeRepository.observeForecastTotal(),
+            ) { received, forecast -> received to forecast }
+                .collect { (received, forecast) ->
+                    _uiState.update {
+                        it.copy(yearDividendReceived = received, yearDividendForecast = forecast)
+                    }
+                }
         }
     }
 
@@ -212,8 +259,47 @@ class TodayViewModel @Inject constructor(
         _uiState.update { it.copy(signals = signals) }
     }
 
+    /**
+     * 市场环境：四大指数 + 领涨领跌板块 + 主力净流入板块。
+     * 各源吞异常返回空（红线 #2）；无持仓时同样计算（看大盘不需要持仓）。
+     */
+    private suspend fun recomputeMarket(indices: List<IndexQuote>) {
+        val byCode = indices.associateBy { it.code }
+        val topIndices = TODAY_INDICES.mapNotNull { byCode[it] }
+        val industries = runCatching {
+            marketDataRepository.fetchIndustryList(MarketDataRepository.SortBy.CHANGE, limit = 30)
+        }.getOrDefault(emptyList())
+        val mood = MarketMoodCalculator.splitGainersLosers(industries)
+        val inflow = runCatching {
+            marketDataRepository.fetchIndustryList(MarketDataRepository.SortBy.INFLOW, limit = 3)
+        }.getOrDefault(emptyList())
+        _uiState.update {
+            it.copy(indices = topIndices, marketMood = mood, inflowIndustries = inflow)
+        }
+    }
+
+    /** 组合体检：复用本页已刷新行情装配（不重复拉价），分级交给 [PortfolioRiskDiagnoser.grade]。 */
+    private suspend fun recomputeDiagnosis(snapshots: Map<String, QuoteSnapshot>) {
+        val holdings = lastStocks.filter { it.shares > 0 }
+        val prices = snapshots.mapNotNull { (code, q) ->
+            q.price?.takeIf { it > 0.0 }?.let { code to it }
+        }.toMap()
+        val diagnosis = runCatching { diagnosisAssembler.assemble(holdings, prices) }.getOrNull()
+        _uiState.update {
+            it.copy(
+                diagnosis = diagnosis,
+                healthGrade = diagnosis?.let { PortfolioRiskDiagnoser.grade(it) },
+            )
+        }
+    }
+
     /** 用户下拉刷新：重拉行情 + 指数。 */
     fun refresh() {
         viewModelScope.launch { _refreshTrigger.emit(Unit) }
+    }
+
+    companion object {
+        /** 今日页展示的四大指数（code 为接口返回 6 位代码）。 */
+        private val TODAY_INDICES = listOf("000001", "399001", "000300", "399006")
     }
 }

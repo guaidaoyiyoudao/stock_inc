@@ -61,6 +61,7 @@ import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.AiAgentConfigSource
 import com.stock.dividend.data.repository.LlmConfig
 import com.stock.dividend.data.repository.MarketDataRepository
+import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.ResearchRepository
 import com.stock.dividend.data.repository.StockRepository
@@ -89,6 +90,7 @@ class AiAgentFactory @Inject constructor(
     private val tradeStrategyRepository: TradeStrategyRepository,
     private val marketDataRepository: MarketDataRepository,
     private val researchRepository: ResearchRepository,
+    private val diagnosisAssembler: PortfolioDiagnosisAssembler,
     private val agentConfigSource: AiAgentConfigSource,
     @LlmClient private val llmClient: OkHttpClient,
 ) {
@@ -153,7 +155,7 @@ class AiAgentFactory @Inject constructor(
             GetDividendIncomeTool(dividendIncomeRepository, stockRepository),
             // ── 组合分析（2026-08-15 新增）──
             GetCompareStocksTool(stockRepository, dividendRepository, notificationRuleRepository),
-            GetPortfolioDiagnosisTool(stockRepository, dividendRepository, fundamentalsCacheRepository, bondYieldRepository),
+            GetPortfolioDiagnosisTool(stockRepository, diagnosisAssembler),
         )
         val actionTools = listOf(
             AddStockTool(stockRepository),

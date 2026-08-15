@@ -157,6 +157,7 @@ fun MainScaffold(
                     onOpenPortfolio = { tabNavController.navigate("portfolio") },
                     onOpenStock = { code -> tabNavController.navigate("stockDetail/$code") },
                     onOpenAddStock = { tabNavController.navigate("addStock") },
+                    onOpenIncome = { tabNavController.navigate("income") },
                 )
             }
             composable("portfolio") {

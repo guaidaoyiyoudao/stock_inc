@@ -4,20 +4,16 @@ import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.repository.BondYieldRepository
-import com.stock.dividend.data.repository.DiagnoseHolding
 import com.stock.dividend.data.repository.DividendMetricsCalculator
 import com.stock.dividend.data.repository.DividendRepository
-import com.stock.dividend.data.repository.DividendThresholds
 import com.stock.dividend.data.repository.ForecastCalculator
-import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.HoldingRecommender
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.MarketDataRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
+import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
 import com.stock.dividend.data.repository.PortfolioRiskDiagnoser
 import com.stock.dividend.data.repository.StockRepository
-import com.stock.dividend.data.repository.enrichPayoutRatio
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -235,9 +231,7 @@ class GetCompareStocksTool(
 
 class GetPortfolioDiagnosisTool(
     private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository,
-    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
-    private val bondYieldRepository: BondYieldRepository,
+    private val diagnosisAssembler: PortfolioDiagnosisAssembler,
 ) : ReadTool(
     name = "diagnose_portfolio",
     description = "组合风险全景诊断（基于全部持仓 shares>0，现价批量实时刷新）：三类视角——" +
@@ -249,31 +243,9 @@ class GetPortfolioDiagnosisTool(
         val stocks = stockRepository.observeAllStocksForSnapshot().filter { it.shares > 0 }
         if (stocks.isEmpty()) return@runCatching mapOf("error" to "没有持仓（shares>0）可诊断")
         val prices = stockRepository.fetchFreshPrices(stocks)
-        val bondYield = bondYieldRepository.fetch10YBondYield()
-
-        val holdings = stocks.mapNotNull { s ->
-            val price = prices[s.code]?.takeIf { it > 0.0 } ?: return@mapNotNull null
-            val dividends = dividendRepository.observeDividends(s.code).first()
-            val yearlyCash = ForecastCalculator.latestYearlyCashPerShare(dividends)
-            val metrics = DividendMetricsCalculator.calculate(dividends)
-            // 派息率：基本面（7 天缓存）+ dividends 表的每股派息 enrich，取最新一期
-            val payoutRatio = fundamentalsCacheRepository.getFundamentals(s.code)?.let { raw ->
-                val epsDivByDate = dividends
-                    .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
-                    .associate { it.reportDate to it.cashPerShare }
-                enrichPayoutRatio(raw, epsDivByDate).periods.firstOrNull { it.payoutRatio != null }?.payoutRatio
-            }
-            DiagnoseHolding(
-                code = s.code, name = s.name,
-                industry = s.industry.takeIf { it.isNotBlank() },
-                marketValue = price * s.shares,
-                annualDividend = yearlyCash?.takeIf { it > 0.0 }?.let { it * s.shares },
-                dividendYieldPct = if (yearlyCash != null && yearlyCash > 0.0) yearlyCash / price * 100.0 else null,
-                consecutiveYears = metrics?.consecutiveYears,
-                payoutRatio = payoutRatio,
-            )
-        }
-        val d = PortfolioRiskDiagnoser.diagnose(holdings, bondYield10yPct = bondYield)
+        // 装配口径（分红深度/派息率 enrich/缺价跳过）统一收敛在 PortfolioDiagnosisAssembler，
+        // 与今日页「组合体检」共用同一份实现
+        val d = diagnosisAssembler.assemble(stocks, prices)
             ?: return@runCatching mapOf("error" to "持仓现价均缺失，无法诊断")
         buildMap<String, Any?> {
             put("holdingCount", d.holdingCount)

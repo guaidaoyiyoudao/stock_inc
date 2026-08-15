@@ -35,4 +35,24 @@ class TodayBriefingPromptBuilderTest {
         assertThat(prompt).contains("S3")
         assertThat(prompt).doesNotContain("S4")
     }
+
+    @Test
+    fun diagnosisAndMarketLines_appendedAsBlocks() {
+        val prompt = TodayBriefingPromptBuilder.build(
+            portfolioLine = "组合今日 +0.10%",
+            signals = emptyList(),
+            dividendLine = null,
+            diagnosisLine = "加权股息率 4.00%，10Y国债 3.00%，利差+1.00pp",
+            marketLine = "领涨板块 银行、白酒；领跌板块 煤炭",
+        )
+        assertThat(prompt).contains("【组合体检】加权股息率 4.00%")
+        assertThat(prompt).contains("【市场】领涨板块 银行")
+    }
+
+    @Test
+    fun nullDiagnosisAndMarket_omitsBlocks() {
+        val prompt = TodayBriefingPromptBuilder.build("组合今日 +0.10%", emptyList(), null)
+        assertThat(prompt).doesNotContain("【组合体检】")
+        assertThat(prompt).doesNotContain("【市场】")
+    }
 }

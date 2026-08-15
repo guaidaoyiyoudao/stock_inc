@@ -17,6 +17,7 @@ import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.MarketDataRepository
 import com.stock.dividend.data.repository.MarketListItem
 import com.stock.dividend.data.repository.NotificationRuleRepository
+import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
 import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StockSearchResult
@@ -228,7 +229,7 @@ class PortfolioAnalysisToolsTest {
 
     @Test
     fun portfolioDiagnosisTool_declaration_hasNoParams() {
-        val tool = GetPortfolioDiagnosisTool(mockk(), mockk(), mockk(), mockk())
+        val tool = GetPortfolioDiagnosisTool(mockk(), mockk())
         assertThat(tool.declaration().name).isEqualTo("diagnose_portfolio")
         assertThat(tool.declaration().parameters).isNull()
     }
@@ -237,7 +238,7 @@ class PortfolioAnalysisToolsTest {
     fun portfolioDiagnosisTool_emptyHoldingsReturnsError() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
-        val tool = GetPortfolioDiagnosisTool(stockRepo, mockk(), mockk(), mockk())
+        val tool = GetPortfolioDiagnosisTool(stockRepo, mockk())
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("持仓")
     }
@@ -264,7 +265,9 @@ class PortfolioAnalysisToolsTest {
         val bondRepo = mockk<BondYieldRepository>(relaxed = true)
         coEvery { bondRepo.fetch10YBondYield(false) } returns 3.0
 
-        val tool = GetPortfolioDiagnosisTool(stockRepo, divRepo, fundRepo, bondRepo)
+        // 装配器用真实实现（mock 其依赖），锁定工具→装配→诊断全链路口径
+        val assembler = PortfolioDiagnosisAssembler(divRepo, fundRepo, bondRepo)
+        val tool = GetPortfolioDiagnosisTool(stockRepo, assembler)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         // 同行业双持仓：行业 HHI=10000、CR3=100 → 触发行业集中建议
         assertThat(result["industryHhi"]).isEqualTo(10_000.0)
@@ -299,7 +302,8 @@ class PortfolioAnalysisToolsTest {
         val bondRepo = mockk<BondYieldRepository>(relaxed = true)
         coEvery { bondRepo.fetch10YBondYield(false) } returns 3.0
 
-        val tool = GetPortfolioDiagnosisTool(stockRepo, divRepo, fundRepo, bondRepo)
+        val assembler = PortfolioDiagnosisAssembler(divRepo, fundRepo, bondRepo)
+        val tool = GetPortfolioDiagnosisTool(stockRepo, assembler)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["highPayoutCodes"] as List<*>).containsExactly("sh.600036")
         assertThat(result["suggestions"].toString()).contains("派息率超 100%")

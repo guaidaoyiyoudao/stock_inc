@@ -57,6 +57,23 @@ data class PortfolioRiskDiagnosis(
     val suggestions: List<String>,
 )
 
+/** 体检分级：OK 正常 / WARN 需关注 / BAD 存在风险。 */
+enum class HealthLevel { OK, WARN, BAD }
+
+/**
+ * 组合体检三级评定（今日页红绿灯用，纯数据）。
+ * 三个维度 + 总体取最差；摘要行直接供 UI 渲染，缺失字段如实显示「—」。
+ */
+data class PortfolioHealthGrade(
+    val concentration: HealthLevel,
+    val sustainability: HealthLevel,
+    val valuation: HealthLevel,
+    val overall: HealthLevel,
+    val concentrationSummary: String,    // 如「行业CR3 62% · 单股CR1 34%」
+    val sustainabilitySummary: String,   // 如「脆弱仓位 18% · 派息率超标 2 只」
+    val valuationSummary: String,        // 如「股息率 4.20% · 利差 +1.70pp」
+)
+
 /**
  * 组合风险全景诊断纯函数（无 Android 依赖，配 [PortfolioRiskDiagnoserTest]）。
  *
@@ -171,6 +188,65 @@ object PortfolioRiskDiagnoser {
             bondYield10yPct = bondYield10yPct,
             yieldSpreadPct = spread?.let(::round2),
             suggestions = suggestions,
+        )
+    }
+
+    /**
+     * 诊断结果 → 三维度分级（阈值与 [diagnose] 建议规则同源，不另设标准）：
+     * - 集中度：BAD = 行业 HHI 超限且单股 CR1 超限（双重集中）；WARN = 任一超限；
+     * - 股息可持续性：WARN = 脆弱分红权重超限或存在派息率超标个股；
+     * - 估值水位：BAD = 利差为负（收息相对国债无优势）；WARN = 利差低于安全边际。
+     * 可空指标缺失按 OK 计（无从判定，不臆造），摘要行如实显示「—」。
+     */
+    fun grade(d: PortfolioRiskDiagnosis): PortfolioHealthGrade {
+        val industryHigh = d.industryHhi != null && d.industryHhi > INDUSTRY_HHI_HIGH
+        val stockHigh = d.stockCr1 != null && d.stockCr1 > STOCK_CR1_WARN
+        val concentration = when {
+            industryHigh && stockHigh -> HealthLevel.BAD
+            industryHigh || stockHigh -> HealthLevel.WARN
+            else -> HealthLevel.OK
+        }
+        val sustainability = when {
+            (d.fragileDividendWeightPct != null && d.fragileDividendWeightPct > FRAGILE_WEIGHT_WARN) ||
+                d.highPayoutCodes.isNotEmpty() -> HealthLevel.WARN
+            else -> HealthLevel.OK
+        }
+        val valuation = when (d.yieldSpreadPct) {
+            null -> HealthLevel.OK
+            else -> when {
+                d.yieldSpreadPct < 0.0 -> HealthLevel.BAD
+                d.yieldSpreadPct < SPREAD_THIN -> HealthLevel.WARN
+                else -> HealthLevel.OK
+            }
+        }
+        val overall = listOf(concentration, sustainability, valuation).maxByOrNull { it.ordinal } ?: HealthLevel.OK
+
+        val concentrationSummary = listOfNotNull(
+            d.industryCr3?.let { "行业CR3 ${it.roundToInt()}%" },
+            d.stockCr1?.let { "单股CR1 ${it.roundToInt()}%" },
+        ).joinToString(" · ")
+        val sustainabilitySummary = buildString {
+            append(
+                d.fragileDividendWeightPct?.let { "脆弱仓位 ${it.roundToInt()}%" } ?: "分红记录不足"
+            )
+            if (d.highPayoutCodes.isNotEmpty()) append(" · 派息率超标 ${d.highPayoutCodes.size} 只")
+        }
+        val valuationSummary = buildString {
+            append(d.weightedDividendYieldPct?.let { "股息率 %.2f%%".format(it) } ?: "股息率 —")
+            append(
+                d.yieldSpreadPct?.let { " · 利差 %+.2fpp".format(it) }
+                    ?: d.bondYield10yPct?.let { " · 10Y国债 %.2f%%".format(it) }
+                    ?: " · 利差 —"
+            )
+        }
+        return PortfolioHealthGrade(
+            concentration = concentration,
+            sustainability = sustainability,
+            valuation = valuation,
+            overall = overall,
+            concentrationSummary = concentrationSummary.ifEmpty { "结构数据缺失" },
+            sustainabilitySummary = sustainabilitySummary,
+            valuationSummary = valuationSummary,
         )
     }
 

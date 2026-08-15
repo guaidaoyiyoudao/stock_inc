@@ -255,4 +255,157 @@ class PortfolioRiskDiagnoserTest {
         assertThat(d.stockCr3).isEqualTo(100.0)
         assertThat(d.topHoldings.map { it.name }).containsExactly("600036", "600519", "601088").inOrder()
     }
+
+    // ── grade：三维度分级（今日页红绿灯） ──
+
+    @Test
+    fun `grade balanced portfolio all ok with summaries`() {
+        // 5 行业各 20%、CR1=20%、健康利差（股息率 6% vs 国债 3% = +3pp）
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(
+                holding("600036", 20_000.0, industry = "银行", annualDividend = 1200.0),
+                holding("600519", 20_000.0, industry = "白酒", annualDividend = 1200.0),
+                holding("601088", 20_000.0, industry = "煤炭", annualDividend = 1200.0),
+                holding("600900", 20_000.0, industry = "电力", annualDividend = 1200.0),
+                holding("000333", 20_000.0, industry = "家电", annualDividend = 1200.0),
+            ),
+            bondYield10yPct = 3.0,
+        )!!
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.concentration).isEqualTo(HealthLevel.OK)
+        assertThat(g.sustainability).isEqualTo(HealthLevel.OK)
+        assertThat(g.valuation).isEqualTo(HealthLevel.OK)
+        assertThat(g.overall).isEqualTo(HealthLevel.OK)
+        assertThat(g.concentrationSummary).isEqualTo("行业CR3 60% · 单股CR1 20%")
+        assertThat(g.valuationSummary).isEqualTo("股息率 6.00% · 利差 +3.00pp")
+    }
+
+    @Test
+    fun `grade double concentration is bad`() {
+        // 行业 70/30（HHI 5800>2500）且 CR1=70%>30% → 双重集中 BAD，总体 BAD
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(
+                holding("600036", 70_000.0, industry = "银行"),
+                holding("600519", 30_000.0, industry = "白酒"),
+            ),
+            bondYield10yPct = 3.0,
+        )!!
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.concentration).isEqualTo(HealthLevel.BAD)
+        assertThat(g.overall).isEqualTo(HealthLevel.BAD)
+    }
+
+    @Test
+    fun `grade industry concentration only is warn`() {
+        // 4 只各 25%（CR1=25% ≤30 不触发个股），两行业各 50%（HHI=5000>2500 触发行业）→ 仅行业集中 WARN
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(
+                holding("600036", 25_000.0, industry = "银行"),
+                holding("601166", 25_000.0, industry = "银行"),
+                holding("600519", 25_000.0, industry = "白酒"),
+                holding("000858", 25_000.0, industry = "白酒"),
+            ),
+            bondYield10yPct = 3.0,
+        )!!
+        assertThat(d.industryHhi).isEqualTo(5000.0)
+        assertThat(d.stockCr1).isEqualTo(25.0)
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.concentration).isEqualTo(HealthLevel.WARN)
+    }
+
+    @Test
+    fun `grade stock concentration only is warn`() {
+        // 单股 CR1=32%>30% 触发个股，行业足够分散（8 行业，HHI<2500）→ 仅个股集中 WARN。
+        // 剩余 68% 均分 7 行业各 ~9.71%：HHI = 32² + 7×9.71² ≈ 1024 + 660 ≈ 1685 < 2500 ✓
+        val holdings = buildList {
+            add(holding("600036", 32_000.0, industry = "银行"))
+            val industries = listOf("白酒", "煤炭", "电力", "家电", "交运", "钢铁", "石化")
+            industries.forEachIndexed { i, ind -> add(holding("S$i", 68_000.0 / 7, industry = ind)) }
+        }
+        val d = PortfolioRiskDiagnoser.diagnose(holdings, bondYield10yPct = 3.0)!!
+        assertThat(d.industryHhi).isLessThan(2500.0)
+        assertThat(d.stockCr1).isGreaterThan(30.0)
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.concentration).isEqualTo(HealthLevel.WARN)
+    }
+
+    @Test
+    fun `grade fragile dividend or high payout is sustainability warn`() {
+        // 派息率超标 1 只（脆弱权重 0：连续 5/10 年）
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(
+                holding("A", 50_000.0, industry = "银行", payoutRatio = 130.0, consecutiveYears = 10),
+                holding("B", 50_000.0, industry = "煤炭", payoutRatio = 40.0, consecutiveYears = 10),
+            ),
+            bondYield10yPct = 3.0,
+        )!!
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.sustainability).isEqualTo(HealthLevel.WARN)
+        assertThat(g.sustainabilitySummary).isEqualTo("脆弱仓位 0% · 派息率超标 1 只")
+    }
+
+    @Test
+    fun `grade negative spread is valuation bad`() {
+        // 股息率 3.0% vs 国债 3.5% → 利差 -0.5pp → BAD，总体 BAD
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(holding("A", 100_000.0, industry = "银行", annualDividend = 3000.0)),
+            bondYield10yPct = 3.5,
+        )!!
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.valuation).isEqualTo(HealthLevel.BAD)
+        assertThat(g.overall).isEqualTo(HealthLevel.BAD)
+        assertThat(g.valuationSummary).isEqualTo("股息率 3.00% · 利差 -0.50pp")
+    }
+
+    @Test
+    fun `grade thin spread is valuation warn`() {
+        // 利差 +0.5pp < 1.0 安全边际 → WARN
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(holding("A", 100_000.0, industry = "银行", annualDividend = 3500.0)),
+            bondYield10yPct = 3.0,
+        )!!
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.valuation).isEqualTo(HealthLevel.WARN)
+    }
+
+    @Test
+    fun `grade missing spread treated ok and shown as dash`() {
+        // 无国债数据：利差 null → valuation OK，摘要如实显示「利差 —」而非臆造
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(holding("A", 100_000.0, industry = "银行", annualDividend = 6000.0)),
+            bondYield10yPct = null,
+        )!!
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.valuation).isEqualTo(HealthLevel.OK)
+        assertThat(g.valuationSummary).isEqualTo("股息率 6.00% · 利差 —")
+    }
+
+    @Test
+    fun `grade overall takes worst dimension`() {
+        // 集中 WARN（两行业各 50%、单股各 25%）+ 估值 BAD（股息率 3% vs 国债 3.5%）→ overall BAD
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(
+                holding("600036", 25_000.0, industry = "银行", annualDividend = 750.0),
+                holding("601166", 25_000.0, industry = "银行", annualDividend = 750.0),
+                holding("600519", 25_000.0, industry = "白酒", annualDividend = 750.0),
+                holding("000858", 25_000.0, industry = "白酒", annualDividend = 750.0),
+            ),
+            bondYield10yPct = 3.5,
+        )!!
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.concentration).isEqualTo(HealthLevel.WARN)
+        assertThat(g.valuation).isEqualTo(HealthLevel.BAD)
+        assertThat(g.overall).isEqualTo(HealthLevel.BAD)
+    }
+
+    @Test
+    fun `grade concentration summary falls back when metrics missing`() {
+        // 单持仓：CR3/CR1 均有值；空摘要兜底「结构数据缺失」不可达，锁定正常格式
+        val d = PortfolioRiskDiagnoser.diagnose(
+            listOf(holding("600036", 100_000.0, industry = "银行")),
+            bondYield10yPct = 3.0,
+        )!!
+        val g = PortfolioRiskDiagnoser.grade(d)
+        assertThat(g.concentrationSummary).isEqualTo("行业CR3 100% · 单股CR1 100%")
+    }
 }
