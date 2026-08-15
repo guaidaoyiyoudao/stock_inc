@@ -232,6 +232,7 @@ class StockAgentToolsTest {
             shares = 100, costPerShare = 100.0, industry = "白酒", lastUpdated = 123456789L
         )
         coEvery { repo.observeAllStocksForSnapshot() } returns listOf(stock)
+        coEvery { repo.fetchQuotes(listOf(stock)) } returns mapOf("sh.600519" to 200.0)
         coEvery { repo.getCachedPrices(listOf("sh.600519")) } returns mapOf("sh.600519" to 200.0)
         coEvery { repo.observeAllStockTags() } returns flowOf(listOf(StockTagEntity("sh.600519", "红利")))
         val tool = GetHoldingsTool(repo)
@@ -240,6 +241,42 @@ class StockAgentToolsTest {
         val holding = (result["holdings"] as List<*>).single() as Map<*, *>
         assertThat(holding["tags"] as List<*>).containsExactly("红利")
         assertThat(holding["lastUpdated"]).isEqualTo(123456789L)
+    }
+
+    @Test
+    fun getHoldingsTool_usesFreshQuotesOverCache() = runTest {
+        val repo = mockk<StockRepository>(relaxed = true)
+        val stock = StockEntity(
+            code = "sh.600036", name = "招商银行", marketCode = "1", shares = 100, costPerShare = 30.0
+        )
+        coEvery { repo.observeAllStocksForSnapshot() } returns listOf(stock)
+        // 实时价 210 优先于缓存价 200：同一会话内与其他实时工具口径一致
+        coEvery { repo.fetchQuotes(listOf(stock)) } returns mapOf("sh.600036" to 210.0)
+        coEvery { repo.getCachedPrices(listOf("sh.600036")) } returns mapOf("sh.600036" to 200.0)
+        coEvery { repo.observeAllStockTags() } returns flowOf(emptyList())
+        val tool = GetHoldingsTool(repo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        val holding = (result["holdings"] as List<*>).single() as Map<*, *>
+        assertThat(holding["currentPrice"]).isEqualTo(210.0)
+        assertThat(holding["marketValue"]).isEqualTo(21000.0)
+    }
+
+    @Test
+    fun getHoldingsTool_fallsBackToCachedPricesWhenQuotesFail() = runTest {
+        val repo = mockk<StockRepository>(relaxed = true)
+        val stock = StockEntity(
+            code = "sh.600036", name = "招商银行", marketCode = "1", shares = 100, costPerShare = 30.0
+        )
+        coEvery { repo.observeAllStocksForSnapshot() } returns listOf(stock)
+        coEvery { repo.fetchQuotes(any()) } returns emptyMap()
+        coEvery { repo.getCachedPrices(listOf("sh.600036")) } returns mapOf("sh.600036" to 200.0)
+        coEvery { repo.observeAllStockTags() } returns flowOf(emptyList())
+        val tool = GetHoldingsTool(repo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        val holding = (result["holdings"] as List<*>).single() as Map<*, *>
+        assertThat(holding["currentPrice"]).isEqualTo(200.0)
     }
 
     @Test
@@ -469,10 +506,55 @@ class StockAgentToolsTest {
         )
         val dividendRepo = mockk<DividendRepository>(relaxed = true)
         coEvery { dividendRepo.getLatestDividend("sh.600519") } returns null
+        coEvery { dividendRepo.observeDividends("sh.600519") } returns flowOf(emptyList())
         val tool = GetStockInfoTool(stockRepo, dividendRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["lastUpdated"]).isEqualTo(999L)
+    }
+
+    @Test
+    fun getStockInfoTool_computesDividendYieldByCurrentPrice() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600519" to 1500.0)
+        coEvery { stockRepo.observeStock("sh.600519") } returns flowOf(null)
+        val dividendRepo = mockk<DividendRepository>(relaxed = true)
+        val entity = DividendEntity(
+            id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 2.0,
+            dividendYield = 5.0, exDividendDate = "2025-06-20"
+        )
+        coEvery { dividendRepo.getLatestDividend("sh.600519") } returns entity
+        coEvery { dividendRepo.observeDividends("sh.600519") } returns flowOf(listOf(entity))
+        val tool = GetStockInfoTool(stockRepo, dividendRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        // 股息率按现价实时计算（与 get_stock_evaluation/get_buy_threshold 同口径），
+        // 而非透传 DB 里的除权时点历史快照 5.0
+        assertThat((result["dividendYield"] as Double)).isWithin(1e-9).of(2.0 / 1500.0 * 100.0)
+        assertThat(result["exDividendDate"]).isEqualTo("2025-06-20")
+    }
+
+    @Test
+    fun getStockInfoTool_omitsDividendYieldWithoutPriceOrDividend() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
+        coEvery { stockRepo.getCachedPrices(any()) } returns emptyMap()
+        coEvery { stockRepo.observeStock("sh.600519") } returns flowOf(null)
+        val dividendRepo = mockk<DividendRepository>(relaxed = true)
+        val entity = DividendEntity(
+            id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 2.0,
+            dividendYield = 5.0, exDividendDate = "2025-06-20"
+        )
+        coEvery { dividendRepo.getLatestDividend("sh.600519") } returns entity
+        coEvery { dividendRepo.observeDividends("sh.600519") } returns flowOf(listOf(entity))
+        val tool = GetStockInfoTool(stockRepo, dividendRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
+        // 无有效现价时不臆造股息率（缺失而非错误值）
+        assertThat(result.containsKey("dividendYield")).isFalse()
+        assertThat(result["exDividendDate"]).isEqualTo("2025-06-20")
     }
 
     @Test

@@ -41,11 +41,11 @@ class GetHoldingsTool(
     private val stockRepository: StockRepository,
 ) : ReadTool(
     name = "get_holdings",
-    description = "返回全部自选/持仓列表（含观察仓 shares=0）：代码、名称、股数、成本、现价、市值、盈亏、行业、标签、最后更新时间。无需参数。",
+    description = "返回全部自选/持仓列表（含观察仓 shares=0）：代码、名称、股数、成本、现价（批量实时刷新）、市值、盈亏、行业、标签、最后更新时间。无需参数。",
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
         val stocks = stockRepository.observeAllStocksForSnapshot()
-        val prices = stockRepository.getCachedPrices(stocks.map { it.code })
+        val prices = stockRepository.fetchFreshPrices(stocks)
         val tagsByCode = runCatching { stockRepository.observeAllStockTags().first() }
             .getOrDefault(emptyList())
             .groupBy({ it.stockCode }, { it.tag })
@@ -82,11 +82,11 @@ class GetPortfolioSummaryTool(
     private val livingExpenseRepository: LivingExpenseRepository,
 ) : ReadTool(
     name = "get_portfolio_summary",
-    description = "组合概况：总市值（元）、总成本、总盈亏、年化股息预测（元）、FIRE 目标进度与支出覆盖率。无需参数。",
+    description = "组合概况：总市值（元）、总成本、总盈亏、年化股息预测（元）、FIRE 目标进度与支出覆盖率（现价批量实时刷新，与 get_holdings 同口径）。无需参数。",
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
         val stocks = stockRepository.observeAllStocksForSnapshot()
-        val prices = stockRepository.getCachedPrices(stocks.map { it.code })
+        val prices = stockRepository.fetchFreshPrices(stocks)
         val totalMarketValue = stocks.sumOf { (prices[it.code] ?: 0.0) * it.shares }
         val totalCost = stocks.sumOf { it.costPerShare * it.shares }
         val annualForecast = dividendIncomeRepository.observeForecastTotal().first()
@@ -126,11 +126,11 @@ class GetIndustryAllocationTool(
     private val stockRepository: StockRepository,
 ) : ReadTool(
     name = "get_industry_allocation",
-    description = "持仓按行业的市值占比与目标配比对比（百分比）。无需参数。",
+    description = "持仓按行业的市值占比与目标配比对比（百分比，现价批量实时刷新，与 get_holdings 同口径）。无需参数。",
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
         val stocks = stockRepository.observeAllStocksForSnapshot()
-        val prices = stockRepository.getCachedPrices(stocks.map { it.code })
+        val prices = stockRepository.fetchFreshPrices(stocks)
         val targets = stockRepository.getIndustryTargets().associate { it.industry to it.targetWeight }
         val byIndustry = stocks.groupBy { it.industry.takeIf { i -> i.isNotBlank() } ?: "未分类" }
         val total = byIndustry.values.sumOf { list ->

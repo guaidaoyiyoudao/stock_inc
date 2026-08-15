@@ -38,7 +38,7 @@ class GetStockInfoTool(
     private val dividendRepository: DividendRepository,
 ) : ReadTool(
     name = "get_stock_info",
-    description = "查询单只股票的实时行情与基本信息：现价、行业、最近股息率、除权日。code 参数格式见参数说明。",
+    description = "查询单只股票的实时行情与基本信息：现价、行业、股息率（按现价与最近年度分红实时计算，与 get_stock_evaluation/get_buy_threshold 同口径）、最近除权日。code 参数格式见参数说明。",
     parameters = CODE_SCHEMA,
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
@@ -50,17 +50,21 @@ class GetStockInfoTool(
             val price = stockRepository.refreshPrice(entity)
             val saved = stockRepository.observeStock(stock.code).first()
             val latest = dividendRepository.getLatestDividend(stock.code)
+            // 股息率按现价实时计算（dividends 表的 dividendYield 仅为除权时点历史快照，
+            // 腾讯主源恒为 null，不能直接透传，否则与评估类工具口径不一致）
+            val dividends = dividendRepository.observeDividends(stock.code).first()
+            val yearlyCash = ForecastCalculator.latestYearlyCashPerShare(dividends)
             buildMap<String, Any?> {
                 put("code", stock.code)
                 put("name", stock.name)
                 put("marketCode", stock.marketCode)
                 put("currentPrice", price)
+                if (price != null && price > 0.0 && yearlyCash != null && yearlyCash > 0.0) {
+                    put("dividendYield", yearlyCash / price * 100.0)
+                }
                 saved?.industry?.takeIf { it.isNotBlank() }?.let { put("industry", it) }
                 saved?.lastUpdated?.let { put("lastUpdated", it) }
-                latest?.let {
-                    it.dividendYield?.let { v -> put("dividendYield", v) }
-                    it.exDividendDate?.let { v -> put("exDividendDate", v) }
-                }
+                latest?.exDividendDate?.let { v -> put("exDividendDate", v) }
             }
         }.getOrElse { e -> mapOf("error" to (e.message ?: "查询失败")) }
     }
@@ -126,7 +130,7 @@ class GetKlineTool(
     private val klineRepository: KlineRepository,
 ) : ReadTool(
     name = "get_kline",
-    description = "查询单只股票的前复权 OHLCV K 线序列（旧→新：日期/开/收/高/低/量）与 BOLL 上/中/下轨（收盘价不足 20 根时无 BOLL）。period 为 DAILY/WEEKLY/MONTHLY，默认 WEEKLY；bars 默认 40，范围 10-120。",
+    description = "查询单只股票的前复权 OHLCV K 线序列（旧→新：日期/开/收/高/低/量）与 BOLL 上/中/下轨（收盘价不足 20 根时无 BOLL）。注意：价格均为前复权口径，latestClose 是最近一根收盘价（盘中≈昨收，除权后会整体重算），与 get_stock_info 的实时现价可能不同，属正常口径差异。period 为 DAILY/WEEKLY/MONTHLY，默认 WEEKLY；bars 默认 40，范围 10-120。",
     parameters = Schema(
         type = Type.OBJECT,
         properties = mapOf(
@@ -234,7 +238,7 @@ class GetDividendHistoryTool(
     private val stockRepository: StockRepository,
 ) : ReadTool(
     name = "get_dividend_history",
-    description = "查询单只股票的历史分红记录（报告期、每股分红、股息率、除权日）。code 参数格式见参数说明。",
+    description = "查询单只股票的历史分红记录（报告期、每股分红、股息率、除权日）。注意：记录里的 dividendYield 是除权时点的历史快照值，个别记录可能缺失；当前股息率（按现价实时计算）请用 get_stock_info / get_stock_evaluation。code 参数格式见参数说明。",
     parameters = CODE_SCHEMA,
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {

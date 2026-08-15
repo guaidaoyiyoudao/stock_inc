@@ -45,6 +45,15 @@ internal suspend fun StockRepository.refreshPrice(entity: StockEntity): Double? 
     runCatching { fetchQuotes(listOf(entity))[entity.code] }.getOrNull()
         ?: runCatching { getCachedPrices(listOf(entity.code))[entity.code] }.getOrNull()
 
+/**
+ * 组合现价：先批量实时刷新（单次 ulist 请求），失败或为空回退缓存（多个组合工具共用）。
+ * 保证与 get_stock_info 等实时工具在同一会话内现价口径一致。
+ */
+internal suspend fun StockRepository.fetchFreshPrices(stocks: List<StockEntity>): Map<String, Double> =
+    runCatching { fetchQuotes(stocks) }.getOrNull()?.takeIf { it.isNotEmpty() }
+        ?: runCatching { getCachedPrices(stocks.map { it.code }) }.getOrNull()
+        ?: emptyMap()
+
 /** 搜索结果 → 轻量 StockEntity（仅 code/name/marketCode，供行情查询用，多个工具共用）。 */
 internal fun StockSearchResult.toEntity(): StockEntity =
     StockEntity(code = code, name = name, marketCode = marketCode)
