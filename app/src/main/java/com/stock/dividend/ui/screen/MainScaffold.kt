@@ -68,7 +68,10 @@ fun MainScaffold(
     val tabBackStackEntry by tabNavController.currentBackStackEntryAsState()
     val currentTabRoute = tabBackStackEntry?.destination?.route
 
-    val selectedTabIndex = bottomNavItems.indexOfFirst { it.route == currentTabRoute }.coerceAtLeast(0)
+    // 子页面（个股详情/设置二级页等）不属于任何 Tab → -1，不高亮任何 Tab。
+    // ⚠️ 不能 coerceAtLeast(0)：会把「今日」误判为已选中，导致子页面点「今日」Tab 被
+    // onClick 的 index 判断吞掉（只能靠返回键回去的 bug 根因）。
+    val selectedTabIndex = bottomNavItems.indexOfFirst { it.route == currentTabRoute }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -100,13 +103,22 @@ fun MainScaffold(
                         NavigationBarItem(
                             selected = index == selectedTabIndex,
                             onClick = {
-                                if (index != selectedTabIndex) {
+                                // 按路由精确比较（而非 index）：子页面（非 Tab 路由）点任何
+                                // Tab 都要正常导航，特别是点「今日」返回起始页。
+                                if (item.route != currentTabRoute) {
+                                    // ⚠️ 起始 Tab（今日）必须关闭 restoreState：
+                                    // NavController 里 popUpTo(saveState) 会把刚弹出的栈
+                                    // 同时注册到 backStackMap[popUpTo目标id]，而 restoreState
+                                    // 检查在其后执行——目标==起始页时会立刻把刚弹掉的栈恢复
+                                    // 回来，导航自我抵消成 no-op（点「今日」无响应的根因）。
+                                    val isStartTab =
+                                        item.route == tabNavController.graph.startDestinationRoute
                                     tabNavController.navigate(item.route) {
                                         popUpTo(tabNavController.graph.startDestinationId) {
                                             saveState = true
                                         }
                                         launchSingleTop = true
-                                        restoreState = true
+                                        restoreState = !isStartTab
                                     }
                                 }
                             },
