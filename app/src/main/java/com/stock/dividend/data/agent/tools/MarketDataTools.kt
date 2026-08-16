@@ -7,8 +7,6 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.BuyThresholdStatus
 import com.stock.dividend.data.repository.BollBand
-import com.stock.dividend.data.repository.DividendDiscountCalculator
-import com.stock.dividend.data.repository.DividendDiscountInput
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
@@ -290,50 +288,6 @@ class GetDividendForecastTool(
                 latest?.exDividendDate?.let { put("nextExDividendDate", it) }
             }
         }.getOrElse { e -> mapOf("error" to (e.message ?: "查询失败")) }
-    }
-}
-
-class GetValuationTool(
-    private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository,
-) : ReadTool(
-    name = "get_valuation",
-    description = "用股息贴现模型（DDM）估算单只股票的内在价值（元/股）、安全买入价（元/股）与当前折溢价。",
-    parameters = CODE_SCHEMA,
-) {
-    override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
-        val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
-        return runCatching {
-            val stock = stockRepository.resolveStock(code)
-                ?: return@runCatching mapOf("error" to "未找到股票：$code")
-            val entity = stock.toEntity()
-            val price = stockRepository.refreshPrice(entity)
-            val dividends = dividendRepository.observeDividends(stock.code).first()
-            val basis = DividendDiscountCalculator.deriveDividendBasis(dividends)
-            if (basis == null || basis.averageCashPerShare <= 0.0) {
-                return@runCatching mapOf("error" to "分红数据不足，无法估值")
-            }
-            val result = DividendDiscountCalculator.calculate(
-                DividendDiscountInput(
-                    dividendBasisPerShare = basis.averageCashPerShare,
-                    dividendGrowthRate = 5.0,
-                    discountRate = 9.0,
-                    terminalGrowthRate = 2.0,
-                    projectionYears = 10,
-                    marginOfSafety = 0.8,
-                    currentPrice = price
-                )
-            )
-            mapOf(
-                "code" to stock.code,
-                "name" to stock.name,
-                "intrinsicValuePerShare" to result.intrinsicValuePerShare,
-                "safetyBuyPrice" to result.safetyBuyPrice,
-                "currentPrice" to result.currentPrice,
-                "discountOrPremiumPercent" to result.discountOrPremiumPercent,
-                "valuationStatus" to result.valuationStatus.name
-            )
-        }.getOrElse { e -> mapOf("error" to (e.message ?: "估值失败")) }
     }
 }
 

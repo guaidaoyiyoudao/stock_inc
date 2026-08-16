@@ -77,6 +77,8 @@ fun TodayScreen(
     onOpenStock: (String) -> Unit = {},
     onOpenAddStock: () -> Unit = {},
     onOpenIncome: () -> Unit = {},
+    /** 网格信号点击直达该标的的网格计划页（其余信号仍跳个股详情）。 */
+    onOpenGridPlan: (String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -267,9 +269,16 @@ fun TodayScreen(
                 }
             }
         } else {
-            items(items = state.signals, key = { it.stockCode + it.type.name }) { signal ->
+            items(items = state.signals, key = { it.key }) { signal ->
                 AppCard(
-                    onClick = { onOpenStock(signal.stockCode) },
+                    // 网格信号直达网格计划页（改参数/看档位/记账都在那里），其余跳个股详情
+                    onClick = {
+                        if (signal.type == TodaySignalType.GRID_NEXT_LEVEL) {
+                            onOpenGridPlan(signal.stockCode)
+                        } else {
+                            onOpenStock(signal.stockCode)
+                        }
+                    },
                     tone = AppCardTone.List,
                     modifier = Modifier.fillMaxWidth(),
                 ) {

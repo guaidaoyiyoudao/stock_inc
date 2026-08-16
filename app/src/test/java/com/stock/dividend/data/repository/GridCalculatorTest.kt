@@ -212,4 +212,81 @@ class GridCalculatorTest {
         assertThat(base.levels.all { !it.triggered }).isTrue()          // 原对象不变
         assertThat(marked.levels.any { it.triggered }).isTrue()         // 副本有标记
     }
+
+    // ── 等比网格（GEOM）──────────────────────────────
+
+    /** 等比 4→8→16：相邻档比值恒为 2，两端精确命中 low/base。 */
+    @Test
+    fun `geometric grid keeps constant ratio and exact endpoints`() {
+        val r = GridCalculator.generate(
+            basePrice = 16.0, lowPrice = 4.0, highPrice = 20.0,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.GEOMETRIC
+        )
+        assertThat(r.validationError).isNull()
+        assertThat(r.levels.map { it.price }).containsExactly(4.0, 8.0, 16.0).inOrder()
+        // stepPercent = (ratio-1)×100 = 100%
+        assertThat(r.stepPercent).isEqualTo(100.0)
+    }
+
+    /** 等比 10/8 区间 3 档：比值恒定 ≈1.118（每档步长 11.8%），非等差分布。 */
+    @Test
+    fun `geometric grid distributes by percent step not absolute`() {
+        val r = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.GEOMETRIC
+        )
+        val prices = r.levels.map { it.price }
+        // 相邻比值一致（round2 后有 ±0.01 容差）
+        val ratio1 = prices[1] / prices[0]
+        val ratio2 = prices[2] / prices[1]
+        assertThat(ratio1).isWithin(0.005).of(ratio2)
+        // 与等差（8/9/10）明显不同
+        assertThat(prices[1]).isNotEqualTo(9.0)
+        assertThat(r.stepPercent).isWithin(0.05).of(11.80)
+    }
+
+    /** 等比下「越便宜买越多」仍成立（1/price 反比权重不变）。 */
+    @Test
+    fun `geometric grid keeps inverse capital weighting`() {
+        val r = GridCalculator.generate(
+            basePrice = 16.0, lowPrice = 4.0, highPrice = 20.0,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.GEOMETRIC
+        )
+        assertThat(r.levels.first().amount).isGreaterThan(r.levels.last().amount)
+        r.levels.forEach { assertThat(it.shares % 100).isEqualTo(0) }
+    }
+
+    /** fromRaw：GEOM → 等比；null/ARITH/未知 → 等差（旧数据兼容）。 */
+    @Test
+    fun `gridType fromRaw falls back to arithmetic`() {
+        assertThat(GridType.fromRaw("GEOM")).isEqualTo(GridType.GEOMETRIC)
+        assertThat(GridType.fromRaw("ARITH")).isEqualTo(GridType.ARITHMETIC)
+        assertThat(GridType.fromRaw(null)).isEqualTo(GridType.ARITHMETIC)
+        assertThat(GridType.fromRaw("WHATEVER")).isEqualTo(GridType.ARITHMETIC)
+    }
+
+    // ── 股息展望（dividendOutlook）──────────────────
+
+    /** 展望 = Σ档位股数 × 每股年分红；收益率 = 年股息/总资金。 */
+    @Test
+    fun `dividend outlook sums level shares times dps`() {
+        val r = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val totalShares = r.levels.sumOf { it.shares }
+        val outlook = GridCalculator.dividendOutlook(r, dps = 0.5, totalCapital = 100000.0)
+        assertThat(outlook).isNotNull()
+        assertThat(outlook!!.annualDividend).isWithin(0.01).of(totalShares * 0.5)
+        assertThat(outlook.yieldOnCapitalPct)
+            .isWithin(0.01).of(totalShares * 0.5 / 100000.0 * 100.0)
+    }
+
+    /** 无分红数据（null/非正）→ 展望为 null，不臆造。 */
+    @Test
+    fun `dividend outlook null without positive dps`() {
+        val r = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        assertThat(GridCalculator.dividendOutlook(r, dps = null, totalCapital = 100000.0)).isNull()
+        assertThat(GridCalculator.dividendOutlook(r, dps = 0.0, totalCapital = 100000.0)).isNull()
+    }
 }

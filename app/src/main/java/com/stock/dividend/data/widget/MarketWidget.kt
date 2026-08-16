@@ -60,21 +60,19 @@ class MarketWidget : GlanceAppWidget() {
                 .cornerRadius(16.dp)
                 .clickable(actionStartActivity<MainActivity>())
         ) {
-            if (state.holdingCount == 0) {
+            if (state.holdingCount == 0 && state.gridNextHints.isEmpty()) {
                 EmptyContent()
             } else {
                 Column(modifier = GlanceModifier.fillMaxSize().padding(12.dp)) {
-                    HeaderRow(isRefreshing)
-                    Spacer(GlanceModifier.height(8.dp))
-                    Text(
-                        "¥ " + formatMoney(state.totalMarketValue),
-                        style = TextStyle(
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold
+                    if (state.holdingCount > 0) HoldingsBlock(state, isRefreshing)
+                    else HeaderRow(isRefreshing)  // 无持仓但有网格计划：仍显示标题与网格提示
+                    state.gridNextHints.forEach { hint ->
+                        Spacer(GlanceModifier.height(6.dp))
+                        Text(
+                            "网格 " + hint.stockName + " 下一买 ¥" + "%.2f".format(hint.nextBuyPrice),
+                            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium)
                         )
-                    )
-                    Spacer(GlanceModifier.height(4.dp))
-                    PnlText(state.costBasisPnl, state.costBasisPnlPercent)
+                    }
                     if (state.fireGoalAmount > 0.0) {
                         Spacer(GlanceModifier.height(8.dp))
                         Text(
@@ -87,6 +85,21 @@ class MarketWidget : GlanceAppWidget() {
                 }
             }
         }
+    }
+
+    @Composable
+    private fun HoldingsBlock(state: WidgetUiState, isRefreshing: Boolean) {
+        HeaderRow(isRefreshing)
+        Spacer(GlanceModifier.height(8.dp))
+        Text(
+            "¥ " + formatMoney(state.totalMarketValue),
+            style = TextStyle(
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold
+            )
+        )
+        Spacer(GlanceModifier.height(4.dp))
+        PnlText(state.costBasisPnl, state.costBasisPnlPercent)
     }
 
     @Composable

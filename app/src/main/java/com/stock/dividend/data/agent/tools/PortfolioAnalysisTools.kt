@@ -7,6 +7,10 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.DividendMetricsCalculator
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.repository.GridCalculator
+import com.stock.dividend.data.repository.GridExecutionCalculator
+import com.stock.dividend.data.repository.GridPlanRepository
+import com.stock.dividend.data.repository.GridType
 import com.stock.dividend.data.repository.HoldingRecommender
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.MarketDataRepository
@@ -14,6 +18,7 @@ import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
 import com.stock.dividend.data.repository.PortfolioRiskDiagnoser
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.TransactionRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -232,6 +237,8 @@ class GetCompareStocksTool(
 class GetPortfolioDiagnosisTool(
     private val stockRepository: StockRepository,
     private val diagnosisAssembler: PortfolioDiagnosisAssembler,
+    private val gridPlanRepository: GridPlanRepository,
+    private val transactionRepository: TransactionRepository,
 ) : ReadTool(
     name = "diagnose_portfolio",
     description = "组合风险全景诊断（基于全部持仓 shares>0，现价批量实时刷新）：三类视角——" +
@@ -266,6 +273,28 @@ class GetPortfolioDiagnosisTool(
             d.weightedDividendYieldPct?.let { put("weightedDividendYieldPct", it) }
             d.bondYield10yPct?.let { put("bondYield10y", it) }
             d.yieldSpreadPct?.let { put("yieldSpreadPct", it) }
+            // 网格弹药（信息性补充，不改现金比例判定口径）：网格剩余资金本质仍是现金，
+            // 但属于「已承诺的分批买入弹药」，解读现金水位时应向用户说明这一属性
+            val gridPlans = runCatching { gridPlanRepository.observeAll().first() }.getOrDefault(emptyList())
+            if (gridPlans.isNotEmpty()) {
+                val txsByStock = runCatching {
+                    transactionRepository.getAll().groupBy { it.stockCode }
+                }.getOrDefault(emptyMap())
+                val uninvested = gridPlans.sumOf { plan ->
+                    val planTxs = txsByStock[plan.stockCode].orEmpty()
+                    val result = GridCalculator.markTriggeredLevels(
+                        GridCalculator.generate(
+                            plan.basePrice, plan.lowPrice, plan.highPrice,
+                            plan.grids, plan.totalCapital,
+                            gridType = GridType.fromRaw(plan.gridType)
+                        ),
+                        planTxs
+                    )
+                    GridExecutionCalculator.calculate(result, plan.totalCapital, planTxs, null).remainingCapital
+                }
+                put("gridUninvestedCash", uninvested)
+                put("gridNote", "网格剩余可投资金（已承诺弹药，本质仍为现金，未计入上述判定口径）")
+            }
             // 建议
             put("suggestions", d.suggestions)
         }

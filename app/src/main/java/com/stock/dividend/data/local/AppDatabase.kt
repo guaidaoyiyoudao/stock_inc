@@ -59,7 +59,7 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         FinancialStatementsCacheEntity::class,
         GridPlanEntity::class
     ],
-    version = 20,
+    version = 22,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -360,6 +360,26 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_grid_plans_stockCode` ON `grid_plans`(`stockCode`)"
                 )
+            }
+        }
+
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 网格到档提醒：开关（默认开）+ 上次已提醒档位价（每档只提醒一次的去重状态）
+                db.execSQL(
+                    "ALTER TABLE grid_plans ADD COLUMN notifyEnabled INTEGER NOT NULL DEFAULT 1"
+                )
+                db.execSQL("ALTER TABLE grid_plans ADD COLUMN lastNotifiedLevelPrice REAL")
+            }
+        }
+
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 等比网格选项 + 重锚定用的目标股息率（用户意图，可空——旧数据/手填参数无此值）
+                db.execSQL(
+                    "ALTER TABLE grid_plans ADD COLUMN gridType TEXT NOT NULL DEFAULT 'ARITH'"
+                )
+                db.execSQL("ALTER TABLE grid_plans ADD COLUMN targetYieldPercent REAL")
             }
         }
     }

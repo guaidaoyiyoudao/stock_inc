@@ -1,6 +1,24 @@
 package com.stock.dividend.data.repository
 
+import com.stock.dividend.data.local.entity.GRID_TYPE_GEOM
 import kotlin.math.abs
+
+/**
+ * 网格档位分布类型。
+ *
+ * - [ARITHMETIC] 等差（默认）：买入区间按**绝对价差**均分——低价股/窄区间直观。
+ * - [GEOMETRIC] 等比：按**百分比步长**均分（相邻档位价之比恒定）——高价股/宽区间下
+ *   各档相对跌幅一致，避免高价区档位过密、低价区过疏。
+ */
+enum class GridType(val raw: String) {
+    ARITHMETIC("ARITH"),
+    GEOMETRIC("GEOM");
+
+    companion object {
+        /** 解析持久化字符串；未知/缺失回退等差（旧数据兼容）。 */
+        fun fromRaw(raw: String?): GridType = if (raw == GRID_TYPE_GEOM) GEOMETRIC else ARITHMETIC
+    }
+}
 
 /**
  * 网格（分批买入计划）档位计算（纯函数，无 Android 依赖，便于单测）。
@@ -63,6 +81,18 @@ data class GridResult(
     val validationError: String?
 )
 
+/**
+ * 网格股息展望：这套网格**全部打完后**的年股息收入与资金收益率（收息定位的终极答案）。
+ *
+ * @property annualDividend  预计年股息（元）= Σ(各档分配股数 × 每股年分红)。
+ * @property yieldOnCapitalPct 占总资金收益率（%，= 年股息 / totalCapital × 100）——
+ *   全部资金打完时的「成本股息率」口径。
+ */
+data class GridDividendOutlook(
+    val annualDividend: Double,
+    val yieldOnCapitalPct: Double?
+)
+
 object GridCalculator {
 
     /**
@@ -74,6 +104,7 @@ object GridCalculator {
      * @param grids         买入档数（[lowPrice, basePrice] 等分份数，≥ 2）。
      * @param totalCapital  投入总资金（元，> 0）。
      * @param currentPrice  当前价（元），可选；用于「下一档买入」提示。
+     * @param gridType      档位分布：等差（默认）/ 等比（百分比步长）。
      */
     fun generate(
         basePrice: Double,
@@ -81,7 +112,8 @@ object GridCalculator {
         highPrice: Double,
         grids: Int,
         totalCapital: Double,
-        currentPrice: Double? = null
+        currentPrice: Double? = null,
+        gridType: GridType = GridType.ARITHMETIC
     ): GridResult {
         // 参数校验
         if (basePrice <= 0.0 || lowPrice <= 0.0 || highPrice <= 0.0) {
@@ -97,11 +129,24 @@ object GridCalculator {
             return empty("投入资金必须为正数", highPrice)
         }
 
-        // 档位在 [lowPrice, basePrice] 等分 grids 档（含两端），从低到高排列
-        val range = basePrice - lowPrice
-        val step = range / (grids - 1)
-        val stepPercent = step / basePrice * 100.0
-        val prices = (0 until grids).map { lowPrice + step * it } // 最便宜档在前
+        // 档位在 [lowPrice, basePrice] 分布 grids 档（含两端），从低到高排列。
+        // 等差：绝对价差均分；等比：相邻档位价之比恒定（百分比步长）。
+        val prices: List<Double> = when (gridType) {
+            GridType.GEOMETRIC -> {
+                val ratio = Math.pow(basePrice / lowPrice, 1.0 / (grids - 1))
+                (0 until grids).map { lowPrice * Math.pow(ratio, it.toDouble()) }
+            }
+            GridType.ARITHMETIC -> {
+                val step = (basePrice - lowPrice) / (grids - 1)
+                (0 until grids).map { lowPrice + step * it }
+            }
+        }
+        // stepPercent 语义：相邻档的步长幅度（%）——等差按价差/起点，等比按每档恒定比值
+        val stepPercent = when (gridType) {
+            GridType.GEOMETRIC -> (Math.pow(basePrice / lowPrice, 1.0 / (grids - 1)) - 1.0) * 100.0
+            GridType.ARITHMETIC ->
+                ((basePrice - lowPrice) / (grids - 1)) / basePrice * 100.0
+        }
 
         // 资金 1/price 反比加权：越便宜买越多
         val weightSum = prices.sumOf { 1.0 / it }
@@ -159,6 +204,28 @@ object GridCalculator {
 
     private fun round2(v: Double): Double =
         kotlin.math.round(v * 100.0) / 100.0
+
+    /**
+     * 网格股息展望：全部档位打完后的年股息收入（Σ 档位股数 × 每股年分红）与占总资金收益率。
+     *
+     * @param result       网格计算结果（档位表含各档分配股数）。
+     * @param dps          最新年度每股现金分红（元）；null/非正 → 返回 null（不臆造）。
+     * @param totalCapital 计划总资金（元），用于成本收益率。
+     */
+    fun dividendOutlook(
+        result: GridResult,
+        dps: Double?,
+        totalCapital: Double
+    ): GridDividendOutlook? {
+        if (dps == null || dps <= 0.0 || result.levels.isEmpty()) return null
+        val totalShares = result.levels.sumOf { it.shares }
+        if (totalShares <= 0) return null
+        val annualDividend = totalShares * dps
+        return GridDividendOutlook(
+            annualDividend = round2(annualDividend),
+            yieldOnCapitalPct = if (totalCapital > 0.0) round2(annualDividend / totalCapital * 100.0) else null
+        )
+    }
 
     /**
      * 关联实际交易记录，标记每个买入档位是否已触发（纯函数，无 Android 依赖）。

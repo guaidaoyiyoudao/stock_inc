@@ -23,7 +23,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.absoluteValue
 
 private const val DIVIDEND_ALERT_CHANNEL_ID = NotificationChannels.LEGACY_DIVIDEND_ALERTS
 
@@ -67,7 +66,8 @@ class AndroidDividendAlertNotifier @Inject constructor(
         stockName: String,
         ruleType: String,
         metricValue: Double,
-        thresholdValue: Double
+        thresholdValue: Double,
+        dedupKey: String?
     ) {
         if (!canNotify()) return
 
@@ -75,9 +75,16 @@ class AndroidDividendAlertNotifier @Inject constructor(
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_STOCK_CODE, stockCode)   // deep link：点击跳个股详情
         }
+        // 通知 id：默认按股票聚合（同股新通知替换旧通知）；带 dedupKey 时按来源独立
+        // （同股多套网格计划各自成条，互不覆盖）
+        val notifyId = if (dedupKey == null) {
+            stockCode.hashCode()
+        } else {
+            (stockCode + dedupKey).hashCode()
+        }
         val pendingIntent = PendingIntent.getActivity(
             context,
-            stockCode.hashCode().absoluteValue,
+            notifyId,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -98,7 +105,7 @@ class AndroidDividendAlertNotifier @Inject constructor(
             .build()
 
         try {
-            NotificationManagerCompat.from(context).notify(stockCode.hashCode(), notification)
+            NotificationManagerCompat.from(context).notify(notifyId, notification)
         } catch (_: SecurityException) {
             return
         }
@@ -134,6 +141,8 @@ class AndroidDividendAlertNotifier @Inject constructor(
                 "%s 当前价格 %.2f 已低于 %.2f".format(Locale.US, stockName, metricValue, thresholdValue)
             NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD -> "股息率跌破目标" to
                 "%s 当前股息率 %.2f%% 已低于 %.2f%%".format(Locale.US, stockName, metricValue, thresholdValue)
+            GRID_NEXT_LEVEL_ALERT -> "网格到达买入档" to
+                "%s 现价 %.2f 已到买入档 %.2f，可按网格计划执行".format(Locale.US, stockName, metricValue, thresholdValue)
             else -> "股息率达到目标" to
                 "%s 当前股息率 %.2f%% 已达到 %.2f%% 阈值".format(Locale.US, stockName, metricValue, thresholdValue)
         }

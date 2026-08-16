@@ -12,6 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val NOTIFICATION_CHECK_WORK = "notification-rule-checks"
+private const val GRID_CHECK_WORK = "grid-level-checks"
 private const val TODAY_BRIEFING_WORK = "today-briefing"
 
 @Singleton
@@ -29,6 +30,27 @@ class NotificationScheduler @Inject constructor(
 
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             NOTIFICATION_CHECK_WORK,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            request
+        )
+    }
+
+    /**
+     * 每小时检查网格到档（价格到达下一买入档时推送提醒）。
+     * 独立于每日规则检查：到档是「该执行了」的时效信号，日频太粗；
+     * 每次仅对计划涉及标的发一次批量行情请求，开销可忽略。
+     */
+    fun scheduleGridChecks() {
+        val request = PeriodicWorkRequestBuilder<GridNotificationWorker>(1, TimeUnit.HOURS)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            GRID_CHECK_WORK,
             ExistingPeriodicWorkPolicy.UPDATE,
             request
         )

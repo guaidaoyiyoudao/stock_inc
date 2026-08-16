@@ -3,11 +3,14 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.StockDao
+import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.PriceCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.widget.WidgetUiState
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -17,7 +20,13 @@ class WidgetDataRepositoryTest {
     private val priceCacheDao = mockk<PriceCacheDao>()
     private val fireGoalRepository = mockk<FireGoalRepository>()
     private val stockRepository = mockk<StockRepository>()
-    private val repo = WidgetDataRepository(stockDao, priceCacheDao, fireGoalRepository, stockRepository)
+    private val gridPlanRepository = mockk<GridPlanRepository>(relaxed = true)
+    private val repo = WidgetDataRepository(stockDao, priceCacheDao, fireGoalRepository, stockRepository, gridPlanRepository)
+
+    private fun planOf(code: String = "sh.600036") = GridPlanEntity(
+        id = "p1", stockCode = code, stockName = "浦发银行",
+        basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0, grids = 4, totalCapital = 100000.0
+    )
 
     @Test
     fun `returns EMPTY when no holdings`() = runTest {
@@ -126,4 +135,49 @@ class WidgetDataRepositoryTest {
         shares = shares,
         costPerShare = costPerShare,
     )
+    /** 网格下一买档：用 price_cache 现价本地计算（现价 9.5 → 下一档 9.33）。 */
+    @Test
+    fun `grid next hint computed from cached price`() = runTest {
+        coEvery { stockDao.getAll() } returns listOf(stock("sh.600036", shares = 100, costPerShare = 30.0))
+        coEvery { priceCacheDao.getAll() } returns listOf(PriceCacheEntity("sh.600036", price = 9.5, updatedAt = 1000L))
+        coEvery { fireGoalRepository.getGoalOnce() } returns null
+        coEvery { gridPlanRepository.observeAll() } returns kotlinx.coroutines.flow.flowOf(listOf(planOf()))
+
+        val state = repo.loadSnapshot()
+
+        assertThat(state.gridNextHints).hasSize(1)
+        assertThat(state.gridNextHints[0].stockName).isEqualTo("浦发银行")
+        assertThat(state.gridNextHints[0].nextBuyPrice).isEqualTo(9.33)
+    }
+
+    /** 无持仓但有网格计划（自选观察仓）→ 不返回 EMPTY，网格提示仍展示。 */
+    @Test
+    fun `watchlist only grid plan still yields hints`() = runTest {
+        coEvery { stockDao.getAll() } returns listOf(stock("sh.600036", shares = 0, costPerShare = 0.0))
+        coEvery { priceCacheDao.getAll() } returns listOf(PriceCacheEntity("sh.600036", price = 9.5, updatedAt = 1000L))
+        coEvery { fireGoalRepository.getGoalOnce() } returns null
+        coEvery { gridPlanRepository.observeAll() } returns kotlinx.coroutines.flow.flowOf(listOf(planOf()))
+
+        val state = repo.loadSnapshot()
+
+        assertThat(state.holdingCount).isEqualTo(0)
+        assertThat(state.gridNextHints).isNotEmpty()
+    }
+
+    /** 刷新拉价范围并入网格计划标的：自选未持仓股的缓存价也能刷新（修复死角）。 */
+    @Test
+    fun `refreshPrices includes grid plan stocks beyond holdings`() = runTest {
+        coEvery { stockDao.getAll() } returns listOf(
+            stock("sh.600036", shares = 100, costPerShare = 30.0),   // 持仓
+            stock("sz.000001", shares = 0, costPerShare = 0.0)        // 自选（网格标的）
+        )
+        coEvery { gridPlanRepository.observeAll() } returns kotlinx.coroutines.flow.flowOf(listOf(planOf("sz.000001")))
+        coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
+
+        repo.refreshPrices()
+
+        val captured = slot<List<StockEntity>>()
+        coVerify { stockRepository.fetchQuotes(capture(captured)) }
+        assertThat(captured.captured.map { it.code }).containsExactly("sh.600036", "sz.000001")
+    }
 }

@@ -4,6 +4,7 @@ import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
+import com.stock.dividend.data.local.entity.GRID_TYPE_ARITH
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
@@ -19,6 +20,27 @@ data class BackupMetadata(
     val exportTimestamp: Long,
     val dbVersion: Int
 )
+
+/**
+ * 按备份 [dbVersion] 归一化 grid_plans（恢复路径用，首个按版本修补的先例）。
+ *
+ * Gson 绕过构造函数反序列化：旧备份缺失的字段 → 基本类型为 Java 默认值（Boolean→false）、
+ * 对象类型为 null——**非空列 gridType 为 null 会撞 Room NOT NULL 约束导致整个恢复事务失败**。
+ * - `dbVersion < 21`（v20 备份）：notifyEnabled 缺失被置 false → 恢复为 true（当时无此开关，默认开）；
+ * - `dbVersion < 22`：gridType 缺失为 null → 恢复为 ARITH（当时只有等差网格）。
+ * gridType 的 null 兜底对任何版本都生效（防御损坏数据）。
+ */
+fun normalizeGridPlans(plans: List<GridPlanEntity>?, dbVersion: Int): List<GridPlanEntity> {
+    val list = plans.orEmpty()
+    if (list.isEmpty()) return list
+    return list.map { plan ->
+        // gridType 非空列：Gson 缺字段 → null。必须显式传入 copy——
+        // 未指定的参数会读原对象的 null 值，触发 copy 的非空参数检查直接 NPE。
+        val type = plan.gridType ?: GRID_TYPE_ARITH
+        if (dbVersion < 21) plan.copy(notifyEnabled = true, gridType = type)
+        else plan.copy(gridType = type)
+    }
+}
 
 /**
  * 备份校验摘要：元信息 + 各表记录数，供导入确认对话框预览。

@@ -21,6 +21,10 @@ interface GridPlanDao {
     @Query("DELETE FROM grid_plans WHERE id = :id")
     suspend fun delete(id: String)
 
+    /** 回写到档提醒状态。注意：不更新 updatedAt，避免通知回写导致计划列表重排。 */
+    @Query("UPDATE grid_plans SET lastNotifiedLevelPrice = :lastNotifiedLevelPrice WHERE id = :id")
+    suspend fun updateNotifiedLevel(id: String, lastNotifiedLevelPrice: Double?)
+
     @Query("SELECT * FROM grid_plans")
     suspend fun getAllForBackup(): List<GridPlanEntity>
 

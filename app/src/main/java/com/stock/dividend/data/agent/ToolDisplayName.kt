@@ -13,7 +13,6 @@ object ToolDisplayName {
         "get_stock_info" to "查询行情",
         "get_dividend_history" to "查询分红历史",
         "get_dividend_forecast" to "预测股息收入",
-        "get_valuation" to "查询估值",
         "get_buy_threshold" to "计算买入线",
         "get_stock_evaluation" to "评估个股",
         "get_stock_fundamentals" to "查询基本面",
@@ -27,6 +26,7 @@ object ToolDisplayName {
         "get_user_strategies" to "查询策略库",
         "get_portfolio_signals" to "查询组合信号",
         "get_dividend_income" to "查询股息收入",
+        "get_grid_plans" to "查询网格计划",
         // ── 组合分析（2026-08-15 新增）──
         "get_market_ranking" to "查全市场榜单",
         "compare_stocks" to "多股对比",

@@ -158,6 +158,7 @@ fun MainScaffold(
                     onOpenStock = { code -> tabNavController.navigate("stockDetail/$code") },
                     onOpenAddStock = { tabNavController.navigate("addStock") },
                     onOpenIncome = { tabNavController.navigate("income") },
+                    onOpenGridPlan = { code -> tabNavController.navigate("gridPlanFor/$code") },
                 )
             }
             composable("portfolio") {
@@ -251,17 +252,10 @@ fun MainScaffold(
                     stockCode = code,
                     onBack = { tabNavController.popBackStack() },
                     onEditHolding = { c -> tabNavController.navigate("editHolding/$c") },
-                    onOpenDividendValuation = { c -> tabNavController.navigate("dividendValuation/$c") },
                     onOpenDripSimulation = { c -> tabNavController.navigate("dripSimulation/$c") },
                     onOpenGridPlan = { c -> tabNavController.navigate("gridPlanFor/$c") },
                     onOpenNotificationSettings = { c -> tabNavController.navigate("stockNotificationSettings/$c") }
                 )
-            }
-            composable(
-                route = "dividendValuation/{code}",
-                arguments = listOf(navArgument("code") { type = NavType.StringType })
-            ) {
-                DividendValuationScreen(onBack = { tabNavController.popBackStack() })
             }
             composable(
                 route = "dripSimulation/{code}",

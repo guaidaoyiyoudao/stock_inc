@@ -23,6 +23,10 @@ class GridPlanRepository @Inject constructor(
 
     suspend fun delete(id: String) = gridPlanDao.delete(id)
 
+    /** 回写到档提醒状态（通知检查用；不动 updatedAt，避免列表重排）。 */
+    suspend fun updateNotifiedLevel(id: String, lastNotifiedLevelPrice: Double?) =
+        gridPlanDao.updateNotifiedLevel(id, lastNotifiedLevelPrice)
+
     suspend fun getAllForBackup(): List<GridPlanEntity> = gridPlanDao.getAllForBackup()
 
     suspend fun clear() = gridPlanDao.clear()

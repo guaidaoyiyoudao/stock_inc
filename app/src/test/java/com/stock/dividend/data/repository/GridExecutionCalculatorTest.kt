@@ -113,4 +113,126 @@ class GridExecutionCalculatorTest {
         val exec = GridExecutionCalculator.calculate(marked, 100000.0, listOf(tx("BUY", 9.4, 300)), currentPrice = 9.0)
         assertThat(exec.progressPercent).isEqualTo(25)  // 1/4
     }
+
+    /**
+     * 执行偏差：金额加权平均 + 最差值。
+     * BUY@9.4×300（命中 9.33 档，偏差 (9.4−9.33)/9.33≈+0.75%）与
+     * BUY@8.7×200（命中 8.67 档，偏差 (8.7−8.67)/8.67≈+0.35%）：
+     * 金额权重 2820 vs 1740 → 加权平均 ≈ (0.75×2820 + 0.35×1740)/4560 ≈ +0.60%。
+     */
+    @Test
+    fun `deviation stats weighted by amount`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val txs = listOf(tx("BUY", 9.4, 300), tx("BUY", 8.7, 200))
+        val marked = GridCalculator.markTriggeredLevels(base, txs)
+        val exec = GridExecutionCalculator.calculate(marked, 100000.0, txs, currentPrice = 9.0)
+
+        val dev1 = (9.4 - 9.33) / 9.33 * 100.0
+        val dev2 = (8.7 - 8.67) / 8.67 * 100.0
+        val expectedAvg = (dev1 * 9.4 * 300 + dev2 * 8.7 * 200) / (9.4 * 300 + 8.7 * 200)
+        assertThat(exec.avgDeviationPercent).isNotNull()
+        assertThat(exec.avgDeviationPercent!!).isWithin(0.05).of(expectedAvg)
+        // 最差 = 两笔中更大的正偏差（9.4 那笔）
+        assertThat(exec.worstDeviationPercent).isNotNull()
+        assertThat(exec.worstDeviationPercent!!).isWithin(0.01).of(maxOf(dev1, dev2))
+    }
+
+    /** 无成交 → 偏差均为 null。 */
+    @Test
+    fun `deviation null without hits`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val exec = GridExecutionCalculator.calculate(base, 100000.0, emptyList(), currentPrice = 9.0)
+        assertThat(exec.avgDeviationPercent).isNull()
+        assertThat(exec.worstDeviationPercent).isNull()
+    }
+
+    /** 成交价低于档位价 → 偏差为负（买得更便宜）。 */
+    @Test
+    fun `negative deviation when bought below level`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        // 9.2 命中 9.33 档（|9.2−9.33|=0.13 ≤ 半步长 0.335），低于档位价
+        val txs = listOf(tx("BUY", 9.2, 300))
+        val marked = GridCalculator.markTriggeredLevels(base, txs)
+        val exec = GridExecutionCalculator.calculate(marked, 100000.0, txs, currentPrice = 9.0)
+        assertThat(exec.avgDeviationPercent).isNotNull()
+        assertThat(exec.avgDeviationPercent!!).isLessThan(0.0)
+        assertThat(exec.worstDeviationPercent!!).isLessThan(0.0)
+    }
+
+    // ── levelFills（逐档成交明细）────────────────────
+
+    /** 两档各一笔成交 → 各自汇总（价/股数/笔数/日期）。 */
+    @Test
+    fun `levelFills aggregates per level`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val txs = listOf(tx("BUY", 9.4, 300), tx("BUY", 8.7, 200))
+        val marked = GridCalculator.markTriggeredLevels(base, txs)
+        val fills = GridExecutionCalculator.levelFills(marked, txs)
+        // 9.33 档：300 股 1 笔；8.67 档：200 股 1 笔
+        assertThat(fills.keys).containsExactly(9.33, 8.67)
+        assertThat(fills[9.33]!!.shares).isEqualTo(300)
+        assertThat(fills[9.33]!!.fills).isEqualTo(1)
+        assertThat(fills[8.67]!!.shares).isEqualTo(200)
+        assertThat(fills[8.67]!!.lastDate).isEqualTo("2026-01-01")
+    }
+
+    /** 同档多笔成交 → 累计股数/笔数，最近一笔的价与日期（按日期排序取末笔）。 */
+    @Test
+    fun `levelFills merges multiple fills on same level`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val txs = listOf(
+            TransactionEntity(id = 1L, stockCode = "sh.600000", type = "BUY", shares = 100, price = 9.3, date = "2026-01-10"),
+            TransactionEntity(id = 2L, stockCode = "sh.600000", type = "BUY", shares = 200, price = 9.35, date = "2026-02-20")
+        )
+        val marked = GridCalculator.markTriggeredLevels(base, txs)
+        val fills = GridExecutionCalculator.levelFills(marked, txs)
+        val fill = fills[9.33]!!
+        assertThat(fill.shares).isEqualTo(300)
+        assertThat(fill.fills).isEqualTo(2)
+        assertThat(fill.price).isEqualTo(9.35)      // 最近一笔
+        assertThat(fill.lastDate).isEqualTo("2026-02-20")
+    }
+
+    /** 未触发档位（无成交命中）不出现在 fills；SELL 不参与。 */
+    @Test
+    fun `levelFills skips untriggered levels and sells`() {
+        val base = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        val txs = listOf(tx("SELL", 9.4, 300))
+        val marked = GridCalculator.markTriggeredLevels(base, txs)
+        val fills = GridExecutionCalculator.levelFills(marked, txs)
+        assertThat(fills).isEmpty()
+    }
+
+    // ── summarizeAmmo（弹药库汇总）──────────────────
+
+    /** 弹药库 = 各计划合计（总资金/已投入/剩余/触发进度）；总资金显式传入（EMPTY 执行会丢资金量）。 */
+    @Test
+    fun `summarizeAmmo aggregates across plans`() {
+        val base1 = GridCalculator.generate(10.0, 8.0, 12.0, 4, 60000.0)
+        val tx1 = listOf(tx("BUY", 9.4, 300))
+        val marked1 = GridCalculator.markTriggeredLevels(base1, tx1)
+        val exec1 = GridExecutionCalculator.calculate(marked1, 60000.0, tx1, currentPrice = 9.0)
+        val exec2 = GridExecution.EMPTY  // 第二个计划参数非法 → EMPTY（0 投入）
+
+        val summary = GridExecutionCalculator.summarizeAmmo(
+            totalCapitals = listOf(60000.0, 40000.0),
+            executions = listOf(exec1, exec2)
+        )
+        assertThat(summary.planCount).isEqualTo(2)
+        assertThat(summary.totalCapital).isEqualTo(100000.0)
+        assertThat(summary.investedAmount).isEqualTo(2820.0)         // 9.4×300
+        assertThat(summary.remainingCapital).isEqualTo(97180.0)
+        assertThat(summary.triggeredLevels).isEqualTo(1)
+        assertThat(summary.totalLevels).isEqualTo(4)
+        assertThat(summary.progressPercent).isEqualTo(25)
+    }
+
+    /** 空列表 → 全零汇总，进度 0（不崩溃）。 */
+    @Test
+    fun `summarizeAmmo empty yields zeros`() {
+        val summary = GridExecutionCalculator.summarizeAmmo(emptyList(), emptyList())
+        assertThat(summary.planCount).isEqualTo(0)
+        assertThat(summary.totalCapital).isEqualTo(0.0)
+        assertThat(summary.progressPercent).isEqualTo(0)
+    }
 }

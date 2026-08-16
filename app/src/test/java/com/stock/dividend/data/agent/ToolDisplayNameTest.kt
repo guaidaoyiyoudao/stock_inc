@@ -30,11 +30,16 @@ class ToolDisplayNameTest {
     }
 
     @Test
+    fun gridPlanTool_hasChineseName() {
+        assertThat(ToolDisplayName.name("get_grid_plans")).isEqualTo("查询网格计划")
+    }
+
+    @Test
     fun everyRegisteredTool_hasMapping() {
         // 防御：新增工具时若漏配映射，本测试会失败提醒
         val allTools = listOf(
             "search_stock", "get_stock_info", "get_dividend_history", "get_dividend_forecast",
-            "get_valuation", "get_buy_threshold", "get_stock_evaluation", "get_stock_fundamentals",
+            "get_buy_threshold", "get_stock_evaluation", "get_stock_fundamentals",
             "get_kline", "get_holdings", "get_portfolio_summary", "get_industry_allocation",
             "get_transactions", "get_notification_rules", "get_user_strategies",
             "get_portfolio_signals", "get_dividend_income", "add_stock", "remove_stock",
@@ -43,6 +48,7 @@ class ToolDisplayNameTest {
             "get_living_expenses", "add_living_expense", "update_living_expense",
             "remove_living_expense", "set_fire_goal",
             "get_market_ranking", "compare_stocks", "diagnose_portfolio",
+            "get_grid_plans",
         )
         allTools.forEach { code ->
             val display = ToolDisplayName.name(code)

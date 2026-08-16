@@ -6,6 +6,7 @@ import com.stock.dividend.data.agent.tools.GetCompareStocksTool
 import com.stock.dividend.data.agent.tools.GetMarketRankingTool
 import com.stock.dividend.data.agent.tools.GetPortfolioDiagnosisTool
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BondYieldRepository
@@ -13,6 +14,7 @@ import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.DividendThresholds
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
+import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.MarketDataRepository
 import com.stock.dividend.data.repository.MarketListItem
@@ -21,6 +23,7 @@ import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
 import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StockSearchResult
+import com.stock.dividend.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
@@ -229,7 +232,7 @@ class PortfolioAnalysisToolsTest {
 
     @Test
     fun portfolioDiagnosisTool_declaration_hasNoParams() {
-        val tool = GetPortfolioDiagnosisTool(mockk(), mockk())
+        val tool = GetPortfolioDiagnosisTool(mockk(), mockk(), mockk(relaxed = true), mockk(relaxed = true))
         assertThat(tool.declaration().name).isEqualTo("diagnose_portfolio")
         assertThat(tool.declaration().parameters).isNull()
     }
@@ -238,7 +241,7 @@ class PortfolioAnalysisToolsTest {
     fun portfolioDiagnosisTool_emptyHoldingsReturnsError() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
-        val tool = GetPortfolioDiagnosisTool(stockRepo, mockk())
+        val tool = GetPortfolioDiagnosisTool(stockRepo, mockk(), mockk(relaxed = true), mockk(relaxed = true))
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("持仓")
     }
@@ -267,7 +270,9 @@ class PortfolioAnalysisToolsTest {
 
         // 装配器用真实实现（mock 其依赖），锁定工具→装配→诊断全链路口径
         val assembler = PortfolioDiagnosisAssembler(divRepo, fundRepo, bondRepo)
-        val tool = GetPortfolioDiagnosisTool(stockRepo, assembler)
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        val tool = GetPortfolioDiagnosisTool(stockRepo, assembler, gridRepo, txRepo)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         // 同行业双持仓：行业 HHI=10000、CR3=100 → 触发行业集中建议
         assertThat(result["industryHhi"]).isEqualTo(10_000.0)
@@ -303,9 +308,52 @@ class PortfolioAnalysisToolsTest {
         coEvery { bondRepo.fetch10YBondYield(false) } returns 3.0
 
         val assembler = PortfolioDiagnosisAssembler(divRepo, fundRepo, bondRepo)
-        val tool = GetPortfolioDiagnosisTool(stockRepo, assembler)
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        val tool = GetPortfolioDiagnosisTool(stockRepo, assembler, gridRepo, txRepo)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["highPayoutCodes"] as List<*>).containsExactly("sh.600036")
         assertThat(result["suggestions"].toString()).contains("派息率超 100%")
+    }
+    /** 网格弹药信息行：有网格计划时输出剩余可投（已承诺弹药），注明不改现金判定口径。 */
+    @Test
+    fun portfolioDiagnosisTool_reportsGridUninvestedCash() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.observeAllStocksForSnapshot() } returns listOf(
+            StockEntity("sh.600036", "招商银行", "1", shares = 100, costPerShare = 9.0, industry = "银行")
+        )
+        coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600036" to 10.0)
+        val divRepo = mockk<DividendRepository>(relaxed = true)
+        coEvery { divRepo.observeDividends("sh.600036") } returns flowOf(
+            listOf(div("sh.600036", "2025-12-31", 0.4))
+        )
+        val fundRepo = mockk<FundamentalsCacheRepository>(relaxed = true)
+        coEvery { fundRepo.getFundamentals(any(), any()) } returns null
+        val bondRepo = mockk<BondYieldRepository>(relaxed = true)
+        coEvery { bondRepo.fetch10YBondYield(false) } returns 3.0
+
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        // 一套 10 万的网格，已有一笔 BUY@8.7×200 命中 8.67 档 → 已投入 1740，剩余 98260
+        coEvery { gridRepo.observeAll() } returns flowOf(
+            listOf(
+                GridPlanEntity(
+                    id = "p1", stockCode = "sh.600036", stockName = "招商银行",
+                    basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0,
+                    grids = 4, totalCapital = 100000.0
+                )
+            )
+        )
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        coEvery { txRepo.getAll() } returns listOf(
+            com.stock.dividend.data.local.entity.TransactionEntity(
+                stockCode = "sh.600036", type = "BUY", shares = 200, price = 8.7, date = "2026-08-01"
+            )
+        )
+
+        val assembler = PortfolioDiagnosisAssembler(divRepo, fundRepo, bondRepo)
+        val tool = GetPortfolioDiagnosisTool(stockRepo, assembler, gridRepo, txRepo)
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        assertThat(result["gridUninvestedCash"]).isEqualTo(98260.0)
+        assertThat(result["gridNote"].toString()).contains("已承诺弹药")
     }
 }

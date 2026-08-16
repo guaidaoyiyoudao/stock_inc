@@ -113,4 +113,34 @@ class TodaySignalAggregatorTest {
         )
         assertThat(result.any { it.type == TodaySignalType.BUY_TRIGGER && it.title.contains("BOLL下轨") }).isTrue()
     }
+
+    @Test
+    fun sameStockTwoGridPlans_producesDistinctSignalKeys() {
+        // 同股多套网格计划（合法场景）：两条 GRID 信号都要出，但 LazyColumn key 必须互不相同，
+        // 否则今日页滚动到信号区组合 item 时抛「Key was already used」闪退（2026-08-16 修复的回归锁）
+        val planA = GridPlanEntity("g1", "sh.600003", "Grid", 10.0, 8.0, 11.0, 3, 9000.0)
+        val planB = GridPlanEntity("g2", "sh.600003", "Grid", 9.5, 7.0, 10.5, 4, 6000.0)
+        val prices = mapOf("sh.600003" to 9.6)
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(emptyList(), listOf(planA, planB), prices, emptyList(), today)
+        )
+        val grids = result.filter { it.type == TodaySignalType.GRID_NEXT_LEVEL }
+        assertThat(grids).hasSize(2)
+        assertThat(grids.map { it.key }.distinct()).hasSize(2)
+    }
+
+    @Test
+    fun mixedSignals_allKeysUnique() {
+        // 混合输入（买入 + 网格 + 分红同股并存）：全部信号的 key 全局唯一
+        val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
+        val monthly = BollBand(middle = 10.5, upper = 12.0, lower = 9.0)
+        val s = snapshot("sh.600003", price = 8.8, weekly = band, daily = band, monthly = monthly, dividend = 0.5)
+        val plan = GridPlanEntity("g1", "sh.600003", "Grid", 10.0, 8.0, 11.0, 3, 9000.0)
+        val div = DividendEntity("d1", "sh.600003", "2025-12-31", 0.25, exDividendDate = "2026-08-20")
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(listOf(s), listOf(plan), mapOf("sh.600003" to 9.6), listOf(div), today)
+        )
+        assertThat(result).hasSize(3)
+        assertThat(result.map { it.key }.distinct()).hasSize(3)
+    }
 }

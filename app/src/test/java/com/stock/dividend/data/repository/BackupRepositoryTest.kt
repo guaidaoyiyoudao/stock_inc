@@ -1,11 +1,14 @@
 package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
+import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.stock.dividend.data.local.backup.BackupContainer
 import com.stock.dividend.data.local.backup.BackupCounts
 import com.stock.dividend.data.local.backup.BackupMetadata
+import com.stock.dividend.data.local.backup.normalizeGridPlans
 import com.stock.dividend.data.local.entity.AchievementEntity
+import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
@@ -372,5 +375,58 @@ class BackupRepositoryTest {
         assertThat(counts.settings).isEqualTo(3)
         // settings 不计入 total（语义上是配置项，非业务记录）
         assertThat(counts.total).isEqualTo(0)
+    }
+    /** v20 旧备份：gridPlans 缺 notifyEnabled/gridType 字段 → Gson 得 false/null，归一化恢复默认值。 */
+    @Test
+    fun `normalizeGridPlans repairs legacy v20 backup fields`() {
+        val json = """
+              {"metadata": {"appVersion": "1.0.0", "versionCode": 1, "exportTimestamp": 0, "dbVersion": 20},
+              "gridPlans": [{
+                "id": "p1", "stockCode": "sh.600036", "stockName": "招商银行",
+                "basePrice": 10.0, "lowPrice": 8.0, "highPrice": 12.0,
+                "grids": 4, "totalCapital": 100000.0,
+                "createdAt": 1, "updatedAt": 1
+              }]}
+        """.trimIndent()
+        val container = Gson().fromJson(json, BackupContainer::class.java)
+        // Gson 绕过构造函数：notifyEnabled=false、gridType=null（非空列撞 NOT NULL 的隐患）
+        val plans = normalizeGridPlans(container.gridPlans, container.metadata.dbVersion)
+        assertThat(plans).hasSize(1)
+        assertThat(plans[0].notifyEnabled).isTrue()   // v20 无此开关，恢复默认开
+        assertThat(plans[0].gridType).isEqualTo("ARITH")
+    }
+
+    /** v21 备份已含 notifyEnabled：显式 false 不被覆盖（尊重用户关闭意图），但 gridType=null 仍兜底。 */
+    @Test
+    fun `normalizeGridPlans keeps explicit flags from v21 but still fixes null gridType`() {
+        val json = """
+              {"metadata": {"appVersion": "1.0.0", "versionCode": 1, "exportTimestamp": 0, "dbVersion": 21},
+              "gridPlans": [{
+                "id": "p1", "stockCode": "sh.600036", "stockName": "招商银行",
+                "basePrice": 10.0, "lowPrice": 8.0, "highPrice": 12.0,
+                "grids": 4, "totalCapital": 100000.0,
+                "notifyEnabled": false,
+                "lastNotifiedLevelPrice": 9.33,
+                "createdAt": 1, "updatedAt": 1
+              }]}
+        """.trimIndent()
+        val container = Gson().fromJson(json, BackupContainer::class.java)
+        val plans = normalizeGridPlans(container.gridPlans, container.metadata.dbVersion)
+        assertThat(plans[0].notifyEnabled).isFalse()      // 用户显式关闭，保留
+        assertThat(plans[0].lastNotifiedLevelPrice).isEqualTo(9.33)
+        assertThat(plans[0].gridType).isEqualTo("ARITH")  // v21 无等比，null 兜底
+    }
+
+    /** v22 备份原样透传（含等比网格与目标股息率）。 */
+    @Test
+    fun `normalizeGridPlans passes through v22 backup unchanged`() {
+        val plan = GridPlanEntity(
+            id = "p1", stockCode = "sh.600036", stockName = "招商银行",
+            basePrice = 16.0, lowPrice = 4.0, highPrice = 20.0,
+            grids = 3, totalCapital = 100000.0,
+            gridType = "GEOM", targetYieldPercent = 8.0, notifyEnabled = false
+        )
+        val plans = normalizeGridPlans(listOf(plan), dbVersion = 22)
+        assertThat(plans[0]).isEqualTo(plan)
     }
 }

@@ -25,8 +25,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FloatingActionButton
@@ -36,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -52,10 +55,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.data.repository.GridBacktestResult
 import com.stock.dividend.data.repository.GridExecution
 import com.stock.dividend.data.repository.GridLevel
+import com.stock.dividend.data.repository.GridLevelFill
 import com.stock.dividend.data.repository.GridResult
+import com.stock.dividend.data.repository.GridType
 import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.PercentFormatter
 import com.stock.dividend.ui.component.AppButton
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
@@ -63,11 +70,13 @@ import com.stock.dividend.ui.component.AppTextButton
 import com.stock.dividend.ui.component.AppTextField
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.component.FinanceMetric
+import com.stock.dividend.ui.component.GridLevelScale
 import com.stock.dividend.ui.theme.LocalExtendedColors
 import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.viewmodel.GridPlanItem
 import com.stock.dividend.viewmodel.GridPlanUiState
 import com.stock.dividend.viewmodel.GridPlanViewModel
+import com.stock.dividend.viewmodel.ReanchorDiff
 
 /**
  * 网格交易计划页：展示已保存的网格计划（含「下一档」提示），FAB 唤起生成器
@@ -122,11 +131,21 @@ fun GridPlanScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
             }
+            // 弹药库汇总：全部计划合计（还剩多少子弹）
+            state.ammoSummary?.let { ammo ->
+                item(key = "ammo") {
+                    AmmoSummaryCard(ammo)
+                }
+            }
             items(state.items, key = { it.plan.id }) { item ->
                 GridPlanCard(
                     item = item,
+                    state = state,
                     onEdit = { viewModel.editPlan(item.plan) },
                     onDelete = { viewModel.deletePlan(item.plan.id) },
+                    onToggleNotify = { viewModel.toggleNotify(item.plan) },
+                    onReanchor = { viewModel.reanchorPlan(item.plan) },
+                    onBacktest = { viewModel.backtestPlan(item.plan) },
                     onAddTransaction = onAddTransaction
                 )
             }
@@ -135,14 +154,121 @@ fun GridPlanScreen(
         if (state.showGenerator) {
             GridGeneratorSheet(state, viewModel, onDismiss = viewModel::dismissGenerator)
         }
+
+        // 一键重锚定确认弹窗：新旧三价对比，确认后保存并重置到档提醒状态
+        state.reanchorDiff?.let { diff ->
+            ReanchorConfirmDialog(
+                diff = diff,
+                onConfirm = viewModel::confirmReanchor,
+                onDismiss = viewModel::dismissReanchor
+            )
+        }
+    }
+}
+
+/** 弹药库汇总卡：全部网格计划的合计总资金/已投入/剩余/加权进度。 */
+@Composable
+private fun AmmoSummaryCard(ammo: com.stock.dividend.data.repository.GridAmmoSummary) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "弹药库 · ${ammo.planCount} 套网格",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "已触发 ${ammo.triggeredLevels}/${ammo.totalLevels}（${ammo.progressPercent}%）",
+                    style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FinanceMetric(
+                    label = "总资金",
+                    value = MoneyFormatter.withSymbol(ammo.totalCapital),
+                    modifier = Modifier.weight(1f)
+                )
+                FinanceMetric(
+                    label = "已投入",
+                    value = MoneyFormatter.withSymbol(ammo.investedAmount),
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center
+                )
+                FinanceMetric(
+                    label = "剩余可投",
+                    value = MoneyFormatter.withSymbol(ammo.remainingCapital),
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.End
+                )
+            }
+        }
+    }
+}
+
+/** 重锚定确认弹窗：展示新旧三价对比与采用的目标股息率。 */
+@Composable
+private fun ReanchorConfirmDialog(
+    diff: ReanchorDiff,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重新锁定网格") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "按最新 BOLL + 分红重新锚定（目标股息率 ${"%.1f".format(diff.targetYieldUsed)}%）：",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                ReanchorRow("买入起点", diff.plan.basePrice, diff.newBasePrice)
+                ReanchorRow("资金用完位", diff.plan.lowPrice, diff.newLowPrice)
+                ReanchorRow("参考上界", diff.plan.highPrice, diff.newHighPrice)
+                Text(
+                    "确认后档位参数将更新，到档提醒状态重置。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            AppTextButton(onClick = onConfirm, text = "确认更新")
+        },
+        dismissButton = {
+            AppTextButton(onClick = onDismiss, text = "取消")
+        }
+    )
+}
+
+@Composable
+private fun ReanchorRow(label: String, old: Double, new: Double) {
+    val changed = old != new
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            text = "%.2f → %.2f".format(old, new) + if (changed) "" else "（不变）",
+            style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
+            fontWeight = if (changed) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (changed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
 @Composable
 private fun GridPlanCard(
     item: GridPlanItem,
+    state: GridPlanUiState,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onToggleNotify: () -> Unit,
+    onReanchor: () -> Unit,
+    onBacktest: () -> Unit,
     onAddTransaction: (stockCode: String, price: Double, shares: Int) -> Unit
 ) {
     val plan = item.plan
@@ -180,8 +306,78 @@ private fun GridPlanCard(
                 }
             }
 
+            // 到档提醒开关（价格到达下一买入档时推送本地通知；通知检查每小时一次）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "到档提醒",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Switch(
+                    checked = plan.notifyEnabled,
+                    onCheckedChange = { onToggleNotify() }
+                )
+            }
+
+            // 系统通知权限被关 → 到档提醒会静默失效，给可见提示
+            if (state.notificationBlocked == true) {
+                Text(
+                    text = "⚠ 系统通知已关闭，到档提醒无法推送（请在系统设置中允许本应用通知）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = extendedColors.negative
+                )
+            }
+            // 一键重锚定失败提示（数据不足等）
+            state.reanchorError?.let { err ->
+                Text(
+                    text = "⚠ $err",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = extendedColors.negative
+                )
+            }
+
+            // 档位刻度尺：价格轴上一眼看出各档/已触发/下一买与现价距离
+            if (result.levels.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                GridLevelScale(
+                    currentPrice = item.currentPrice,
+                    levels = result.levels,
+                    nextBuyHint = result.nextBuyHint
+                )
+            }
+
+            // 股息展望：全部打完后的年股息（收息定位的终极答案）
+            item.dividendOutlook?.let { outlook ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.small)
+                        .background(extendedColors.positive.copy(alpha = 0.08f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "全部打完后预计年股息",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "${MoneyFormatter.withSymbol(outlook.annualDividend)} · 占资金 " +
+                            (outlook.yieldOnCapitalPct?.let { "${"%.1f".format(it)}%" } ?: "—"),
+                        style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
+                        color = extendedColors.positive,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
             // 资金执行跟踪（已投入/剩余/浮盈）—— 有实际买入时才展示
-            ExecutionSummary(item.execution)
+            ExecutionSummary(item.execution, item.holdingShares)
 
             // 计划过期预警（现价远高于买入起点，行情已偏离当初锚定）
             item.stalenessHint?.let { hint ->
@@ -191,13 +387,19 @@ private fun GridPlanCard(
                         .fillMaxWidth()
                         .clip(MaterialTheme.shapes.small)
                         .background(extendedColors.negative.copy(alpha = 0.1f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "⚠ $hint",
                         style = MaterialTheme.typography.labelMedium,
-                        color = extendedColors.negative
+                        color = extendedColors.negative,
+                        modifier = Modifier.weight(1f)
+                    )
+                    // 一键重锚定：重拉 BOLL+分红 → 弹窗确认新旧三价
+                    AppTextButton(
+                        onClick = onReanchor,
+                        text = if (state.isReanchoring) "锁定中…" else "重新锁定"
                     )
                 }
             }
@@ -267,15 +469,97 @@ private fun GridPlanCard(
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
-                result.levels.forEach { level -> GridLevelRow(level, item.currentPrice) }
+                result.levels.forEach { level ->
+                    GridLevelRow(level, item.currentPrice, item.fillsByLevel[level.price])
+                }
             }
+
+            // ── 历史回测（按需触发）──
+            BacktestSection(
+                planId = plan.id,
+                state = state,
+                onBacktest = onBacktest
+            )
         }
     }
 }
 
-/** 资金执行跟踪摘要：进度条 + 已投入/剩余 + 浮盈。有买入才展示，否则隐藏（返回空）。 */
+/** 回测区块：运行按钮 → 触发/均价/一次性对比/资金使用率 + 口径声明。 */
 @Composable
-private fun ExecutionSummary(execution: GridExecution) {
+private fun BacktestSection(
+    planId: String,
+    state: GridPlanUiState,
+    onBacktest: () -> Unit
+) {
+    val extendedColors = LocalExtendedColors.current
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "历史回测（近 250 交易日）",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        AppTextButton(
+            onClick = onBacktest,
+            text = if (planId in state.backtestingIds) "回测中…" else
+                if (state.backtestResults.containsKey(planId)) "重跑" else "运行"
+        )
+    }
+    state.backtestErrors[planId]?.let { err ->
+        Text(
+            text = "⚠ $err",
+            style = MaterialTheme.typography.labelSmall,
+            color = extendedColors.negative
+        )
+    }
+    state.backtestResults[planId]?.let { r -> BacktestResultRows(r) }
+}
+
+@Composable
+private fun BacktestResultRows(r: GridBacktestResult) {
+    val extendedColors = LocalExtendedColors.current
+    Spacer(modifier = Modifier.height(4.dp))
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FinanceMetric(
+            label = "触发",
+            value = "${r.triggeredCount}/${r.totalLevels} 档",
+            modifier = Modifier.weight(1f)
+        )
+        FinanceMetric(
+            label = "网格均价",
+            value = r.avgBuyPrice?.let { MoneyFormatter.withSymbol(it) } ?: "—",
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Center
+        )
+        FinanceMetric(
+            label = "一次性对比",
+            value = r.costSavingPct?.let { "省 ${"%.1f".format(it)}%" } ?: "—",
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End
+        )
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = "窗口 ${r.windowStart} ~ ${r.windowEnd}（${r.tradingDays} 日，最低 ${"%.2f".format(r.minClose)}）" +
+            " · 首日 ${MoneyFormatter.withSymbol(r.lumpSumPrice)} 一次性买 ${r.lumpSumShares} 股" +
+            " · 资金使用 ${r.capitalUtilizationPct?.let { "${"%.0f".format(it)}%" } ?: "—"}",
+        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Text(
+        text = "口径：按日收盘价回放（盘中触及未还原），成交按档位价假设。",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    )
+}
+
+/** 资金执行跟踪摘要：进度条 + 已投入/剩余 + 浮盈 + 持仓口径。有买入才展示，否则隐藏（返回空）。 */
+@Composable
+private fun ExecutionSummary(execution: GridExecution, holdingShares: Int = 0) {
     if (execution.triggeredCount == 0) return  // 无买入，不展示，避免噪音
     val extendedColors = LocalExtendedColors.current
     Spacer(modifier = Modifier.height(8.dp))
@@ -339,15 +623,36 @@ private fun ExecutionSummary(execution: GridExecution) {
     execution.avgBuyPrice?.let { avg ->
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "已买 ${execution.boughtShares} 股 · 均价 ${MoneyFormatter.withSymbol(avg)}",
+            text = "网格累计买入 ${execution.boughtShares} 股 · 均价 ${MoneyFormatter.withSymbol(avg)}" +
+                // 实际持仓与网格累计买入是两个口径：卖出/网格外买入都会造成差异
+                (if (holdingShares != execution.boughtShares && holdingShares > 0) {
+                    " · 当前实际持仓 ${holdingShares} 股"
+                } else ""),
             style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+    // 执行偏差（实际成交价 vs 档位价）：检验手动执行有没有跟上网格（正=买贵了）
+    execution.avgDeviationPercent?.let { avg ->
+        val worst = execution.worstDeviationPercent
+        if (worst != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "执行偏差 平均 ${PercentFormatter.withSign(avg)} · 最差 ${PercentFormatter.withSign(worst)}" +
+                    "（正=成交价高于档位价）",
+                style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
+                color = when {
+                    avg > 0.0 -> extendedColors.negative   // 买贵了 → 警示
+                    avg < 0.0 -> extendedColors.positive    // 买得更便宜 → 有利
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+        }
+    }
 }
 
 @Composable
-private fun GridLevelRow(level: GridLevel, currentPrice: Double?) {
+private fun GridLevelRow(level: GridLevel, currentPrice: Double?, fill: GridLevelFill? = null) {
     // 当前价恰好落在该档附近（误差 < 0.5%）时高亮
     val near = currentPrice != null && kotlin.math.abs(level.price - currentPrice) / level.price < 0.005
     val extendedColors = LocalExtendedColors.current
@@ -368,12 +673,17 @@ private fun GridLevelRow(level: GridLevel, currentPrice: Double?) {
                 else -> MaterialTheme.colorScheme.onSurface
             }
         )
-        // 纯买入模型：所有档位均为「买」；已触发档标记 ✓
+        // 纯买入模型：所有档位均为「买」；已触发档标 ✓ 并尾注最近成交（MM/dd ×累计股数，多笔标笔数）
         Text(
-            text = if (level.triggered) "买✓" else "买",
-            style = MaterialTheme.typography.labelSmall,
-            color = if (level.triggered) extendedColors.positive else extendedColors.positive,
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+            text = if (level.triggered) {
+                "买✓" + (fill?.let { f ->
+                    val date = f.lastDate?.takeLast(5)?.replace("-", "/") ?: ""
+                    (if (f.fills > 1) "×${f.fills} " else " ") + "$date ×${f.shares}"
+                } ?: "")
+            } else "买",
+            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+            color = extendedColors.positive,
+            modifier = Modifier.weight(1.4f).padding(horizontal = 8.dp)
         )
         Text(
             text = "${level.shares} 股",
@@ -428,6 +738,27 @@ private fun GridGeneratorSheet(
             // ── 智能锚定（日/周/月 BOLL + 目标股息率 → 纯买入网格）──
             AnchorSection(state, viewModel)
             Spacer(modifier = Modifier.height(12.dp))
+
+            // 档位分布：等差（绝对价差均分）/ 等比（百分比步长，高价股适用）
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = state.gridTypeInput == GridType.ARITHMETIC,
+                    onClick = { viewModel.onGridTypeChanged(GridType.ARITHMETIC) },
+                    label = { Text("等差") }
+                )
+                FilterChip(
+                    selected = state.gridTypeInput == GridType.GEOMETRIC,
+                    onClick = { viewModel.onGridTypeChanged(GridType.GEOMETRIC) },
+                    label = { Text("等比") }
+                )
+                Text(
+                    text = if (state.gridTypeInput == GridType.GEOMETRIC) "相邻档按固定百分比递减" else "相邻档按固定价差均分",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 10.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
 
             ParamField("买入起点（第一档）", state.basePriceInput, viewModel::onBasePriceChanged, "元/股")
             Spacer(modifier = Modifier.height(10.dp))
@@ -666,7 +997,7 @@ private fun EmptyGridPlans(modifier: Modifier = Modifier, onCreate: () -> Unit) 
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "设定基准价/区间/档数/资金，生成买卖档位表，\n震荡市分档套利。仅计划与提示，不自动下单。",
+            text = "用 BOLL + 目标股息率智能锚定买入区间，生成纯买入档位表，\n越跌越买、持有收息，到档自动提醒。仅计划与提示，不自动下单。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center

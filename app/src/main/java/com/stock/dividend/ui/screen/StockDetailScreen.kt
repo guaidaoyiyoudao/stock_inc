@@ -96,7 +96,6 @@ fun StockDetailScreen(
     stockCode: String,
     onBack: () -> Unit,
     onEditHolding: (String) -> Unit = {},
-    onOpenDividendValuation: (String) -> Unit = {},
     onOpenDripSimulation: (String) -> Unit = {},
     onOpenGridPlan: (String) -> Unit = {},
     onOpenNotificationSettings: (String) -> Unit = {},
@@ -117,7 +116,6 @@ fun StockDetailScreen(
                         isRefreshing = uiState.isRefreshing,
                         onClick = { viewModel.refreshDividends() }
                     )
-                    AppTextButton(onClick = { onOpenDividendValuation(stockCode) }, text = "估值")
                     IconButton(onClick = { onOpenNotificationSettings(stockCode) }) {
                         Icon(
                             imageVector = Icons.Filled.Notifications,
@@ -240,14 +238,6 @@ fun StockDetailScreen(
                                     selectedPeriod = uiState.selectedPeriod
                                 )
                             }
-                        }
-                    }
-
-                    if (stock != null) {
-                        item {
-                            DividendValuationEntryCard(
-                                onClick = { onOpenDividendValuation(stockCode) }
-                            )
                         }
                     }
 
@@ -422,43 +412,6 @@ private fun BuyThresholdMultiplierDialog(
             )
         }
     )
-}
-
-@Composable
-private fun DividendValuationEntryCard(onClick: () -> Unit) {
-    AppCard(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(AppCardDefaults.ListPadding),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = "股息折现估值",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "基于近 5 年股息和未来增长假设评估合理价值",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            AppTextButton(
-                onClick = onClick,
-                text = "查看",
-            )
-        }
-    }
 }
 
 @Composable

@@ -30,3 +30,10 @@ fun channelFor(ruleType: String): String = when (ruleType) {
     NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_BELOW_THRESHOLD -> NotificationChannels.DIVIDEND_EVENTS
     else -> NotificationChannels.PRICE_EVENTS
 }
+
+/**
+ * 网格到档提醒的「规则类型」标识。**不落 notification_rules 表**（提醒去重状态存在
+ * grid_plans.lastNotifiedLevelPrice），仅用于复用 sendNotificationRuleAlert 的
+ * 文案/渠道路由。
+ */
+const val GRID_NEXT_LEVEL_ALERT = "GRID_NEXT_LEVEL"

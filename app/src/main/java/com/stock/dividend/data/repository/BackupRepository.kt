@@ -8,6 +8,7 @@ import com.google.gson.GsonBuilder
 import com.google.gson.JsonSyntaxException
 import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.backup.BackupContainer
+import com.stock.dividend.data.local.backup.normalizeGridPlans
 import com.stock.dividend.data.local.backup.BackupCounts
 import com.stock.dividend.data.local.backup.BackupMetadata
 import com.stock.dividend.data.local.backup.BackupSummary
@@ -157,8 +158,12 @@ class BackupRepository @Inject constructor(
                 tradeStrategyDao.insertAll(container.tradeStrategies)
                 // 旧备份可能不含 industryTargets 字段（Gson 绕过构造函数 → null），orEmpty 兜底
                 industryTargetDao.insertAll(container.industryTargets.orEmpty())
-                // grid_plans v20 起新增，旧备份无此字段 → null → orEmpty 兜底
-                gridPlanDao.insertAll(container.gridPlans.orEmpty())
+                // grid_plans v20 起新增，旧备份无此字段 → null → orEmpty 兜底；
+                // 再按备份 dbVersion 归一化（v20 缺 notifyEnabled、v21 缺 gridType——
+                // 后者 Gson → null 会撞 NOT NULL 约束使恢复事务整体失败）
+                gridPlanDao.insertAll(
+                    normalizeGridPlans(container.gridPlans, container.metadata?.dbVersion ?: 0)
+                )
 
                 // 交易记录已全部回灌，按移动加权平均重算每只股票的持仓量与成本，
                 // 确保旧备份恢复后立即使用统一算法（避免沿用快照里的旧算法值）。

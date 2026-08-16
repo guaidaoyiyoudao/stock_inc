@@ -18,6 +18,7 @@ import com.stock.dividend.data.agent.tools.GetEtfInfoTool
 import com.stock.dividend.data.agent.tools.GetFinancialStatementsTool
 import com.stock.dividend.data.agent.tools.GetFundamentalsTool
 import com.stock.dividend.data.agent.tools.GetNotificationRulesTool
+import com.stock.dividend.data.agent.tools.GetGridPlansTool
 import com.stock.dividend.data.agent.tools.GetHoldingsTool
 import com.stock.dividend.data.agent.tools.GetIndustryListTool
 import com.stock.dividend.data.agent.tools.GetIndustryPeersTool
@@ -35,7 +36,6 @@ import com.stock.dividend.data.agent.tools.GetTransactionsTool
 import com.stock.dividend.data.agent.tools.GetTreasuryYieldsTool
 import com.stock.dividend.data.agent.tools.GetUserStrategiesTool
 import com.stock.dividend.data.agent.tools.GetValuationMetricsTool
-import com.stock.dividend.data.agent.tools.GetValuationTool
 import com.stock.dividend.data.agent.tools.RemoveStockTool
 import com.stock.dividend.data.agent.tools.RemoveLivingExpenseTool
 import com.stock.dividend.data.agent.tools.SearchStockTool
@@ -50,6 +50,7 @@ import com.stock.dividend.data.local.dao.StockYearlyIncome
 import com.stock.dividend.data.local.dao.YearlyTotal
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
+import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.StockTagEntity
@@ -66,6 +67,7 @@ import com.stock.dividend.data.repository.FinancialStatements
 import com.stock.dividend.data.repository.FinancialStatementsRepository
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
+import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.IndexQuote
 import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
@@ -81,6 +83,7 @@ import com.stock.dividend.data.repository.StockAnnouncement
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StockSearchResult
 import com.stock.dividend.data.repository.TradeStrategyRepository
+import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.repository.TransactionRepository
 import com.stock.dividend.data.repository.TreasuryYields
 import io.mockk.coEvery
@@ -788,18 +791,6 @@ class StockAgentToolsTest {
     }
 
     @Test
-    fun getValuationTool_returnsErrorOnInsufficientData() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
-        coEvery { dividendRepo.observeDividends(any()) } returns flowOf(emptyList())
-        val tool = GetValuationTool(stockRepo, dividendRepo)
-        val context = mockk<ToolContext>(relaxed = true)
-        val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
-        assertThat(result["error"]?.toString()).contains("分红数据不足")
-    }
-
-    @Test
     fun getBuyThresholdTool_returnsThresholdFields() = runTest {
         val stockRepo = mockk<StockRepository>(relaxed = true)
         coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
@@ -857,6 +848,77 @@ class StockAgentToolsTest {
         val result = tool.run(context, mapOf("code" to "000000")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("未找到")
     }
+
+    // ── get_grid_plans（网格计划查询）──────────────────────
+
+    /** 现价 9.0、4 档网格（8/8.67/9.33/10）、已有一笔 BUY@8.7 → 下一档 8.67 + 执行进度 1/4。 */
+    @Test
+    fun getGridPlansTool_returnsPlansWithNextLevelAndExecution() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.observeAllStocksForSnapshot() } returns
+            listOf(StockEntity(code = "sh.600000", name = "浦发银行", marketCode = "1"))
+        coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600000" to 9.0)
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(
+            listOf(gridPlanOf("p1", "sh.600000"))
+        )
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        coEvery { txRepo.getAll() } returns listOf(
+            TransactionEntity(stockCode = "sh.600000", type = "BUY", shares = 200, price = 8.7, date = "2026-08-01")
+        )
+        val tool = GetGridPlansTool(stockRepo, gridRepo, txRepo)
+        val context = mockk<ToolContext>(relaxed = true)
+
+        val result = tool.run(context, emptyMap()) as Map<*, *>
+        val plans = result["plans"] as List<*>
+        assertThat(plans).hasSize(1)
+        val plan = plans[0] as Map<*, *>
+        assertThat(plan["nextBuyLevel"]).isEqualTo(8.67)
+        assertThat(plan["triggeredLevels"]).isEqualTo(1)
+        assertThat(plan["totalLevels"]).isEqualTo(4)
+        assertThat(plan["investedAmount"]).isEqualTo(1740.0)  // 8.7 × 200
+        assertThat(plan["notifyEnabled"]).isEqualTo(true)
+        assertThat(result["note"]?.toString()).contains("不自动下单")
+    }
+
+    /** 传 code 只返回该标的的计划。 */
+    @Test
+    fun getGridPlansTool_filtersByCode() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("600000") } returns
+            StockSearchResult(code = "sh.600000", name = "浦发银行", marketCode = "1")
+        coEvery { stockRepo.observeAllStocksForSnapshot() } returns
+            listOf(StockEntity(code = "sh.600000", name = "浦发银行", marketCode = "1"))
+        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(
+            listOf(gridPlanOf("p1", "sh.600000"), gridPlanOf("p2", "sz.000001"))
+        )
+        val tool = GetGridPlansTool(stockRepo, gridRepo, mockk(relaxed = true))
+        val context = mockk<ToolContext>(relaxed = true)
+
+        val result = tool.run(context, mapOf("code" to "600000")) as Map<*, *>
+        val plans = result["plans"] as List<*>
+        assertThat(plans).hasSize(1)
+        assertThat((plans[0] as Map<*, *>)["code"]).isEqualTo("sh.600000")
+    }
+
+    /** 未知 code → 报错。 */
+    @Test
+    fun getGridPlansTool_returnsErrorWhenCodeNotFound() = runTest {
+        val stockRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { stockRepo.resolveStock("000000") } returns null
+        val tool = GetGridPlansTool(stockRepo, mockk(relaxed = true), mockk(relaxed = true))
+        val context = mockk<ToolContext>(relaxed = true)
+        val result = tool.run(context, mapOf("code" to "000000")) as Map<*, *>
+        assertThat(result["error"]?.toString()).contains("未找到")
+    }
+
+    private fun gridPlanOf(id: String, stockCode: String) = GridPlanEntity(
+        id = id, stockCode = stockCode, stockName = "示例股票",
+        basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0,
+        grids = 4, totalCapital = 100000.0
+    )
 
     @Test
     fun getNotificationRulesTool_returnsEmptyForEmptyHoldings() = runTest {

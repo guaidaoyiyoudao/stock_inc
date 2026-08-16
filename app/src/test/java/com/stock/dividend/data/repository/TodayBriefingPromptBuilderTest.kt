@@ -10,7 +10,7 @@ class TodayBriefingPromptBuilderTest {
         val prompt = TodayBriefingPromptBuilder.build(
             portfolioLine = "组合今日 +0.80%（跑赢沪深300 0.50pp）",
             signals = listOf(
-                TodaySignal(TodaySignalType.BUY_TRIGGER, "sh.600000", "Test", "三周期共振买入", "现价 8.80", 0)
+                TodaySignal(TodaySignalType.BUY_TRIGGER, "sh.600000", "Test", "三周期共振买入", "现价 8.80", 0, "buy-sh.600000")
             ),
             dividendLine = "未来30天1笔除权",
         )
@@ -28,7 +28,7 @@ class TodayBriefingPromptBuilderTest {
     @Test
     fun takesTopThreeSignals() {
         val signals = (1..5).map {
-            TodaySignal(TodaySignalType.BUY_TRIGGER, "c$it", "S$it", "买入", "d$it", 0)
+            TodaySignal(TodaySignalType.BUY_TRIGGER, "c$it", "S$it", "买入", "d$it", 0, "buy-c$it")
         }
         val prompt = TodayBriefingPromptBuilder.build("p", signals, null)
         assertThat(prompt).contains("S1")

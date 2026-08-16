@@ -18,6 +18,7 @@ import com.stock.dividend.data.agent.tools.GetDragonTigerTool
 import com.stock.dividend.data.agent.tools.GetEtfInfoTool
 import com.stock.dividend.data.agent.tools.GetFinancialStatementsTool
 import com.stock.dividend.data.agent.tools.GetFundamentalsTool
+import com.stock.dividend.data.agent.tools.GetGridPlansTool
 import com.stock.dividend.data.agent.tools.GetHoldingsTool
 import com.stock.dividend.data.agent.tools.GetIndustryAllocationTool
 import com.stock.dividend.data.agent.tools.GetIndustryListTool
@@ -39,7 +40,6 @@ import com.stock.dividend.data.agent.tools.GetTransactionsTool
 import com.stock.dividend.data.agent.tools.GetTreasuryYieldsTool
 import com.stock.dividend.data.agent.tools.GetUserStrategiesTool
 import com.stock.dividend.data.agent.tools.GetValuationMetricsTool
-import com.stock.dividend.data.agent.tools.GetValuationTool
 import com.stock.dividend.data.agent.tools.RemoveLivingExpenseTool
 import com.stock.dividend.data.agent.tools.RemoveStockTool
 import com.stock.dividend.data.agent.tools.SearchStockTool
@@ -54,6 +54,7 @@ import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendIncomeRepository
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.FireGoalRepository
+import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.FinancialStatementsRepository
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.KlineRepository
@@ -86,6 +87,7 @@ class AiAgentFactory @Inject constructor(
     private val fireGoalRepository: FireGoalRepository,
     private val livingExpenseRepository: LivingExpenseRepository,
     private val transactionRepository: TransactionRepository,
+    private val gridPlanRepository: GridPlanRepository,
     private val notificationRuleRepository: NotificationRuleRepository,
     private val tradeStrategyRepository: TradeStrategyRepository,
     private val marketDataRepository: MarketDataRepository,
@@ -118,7 +120,6 @@ class AiAgentFactory @Inject constructor(
             SearchStockTool(stockRepository),
             GetDividendHistoryTool(dividendRepository, stockRepository),
             GetDividendForecastTool(dividendRepository, stockRepository),
-            GetValuationTool(stockRepository, dividendRepository),
             GetBuyThresholdTool(stockRepository, dividendRepository, bondYieldRepository),
             GetStockEvaluationTool(stockRepository, dividendRepository, notificationRuleRepository),
             GetFundamentalsTool(stockRepository, dividendRepository, fundamentalsCacheRepository),
@@ -153,9 +154,10 @@ class AiAgentFactory @Inject constructor(
             GetUserStrategiesTool(tradeStrategyRepository),
             GetPortfolioSignalsTool(stockRepository, dividendRepository, notificationRuleRepository),
             GetDividendIncomeTool(dividendIncomeRepository, stockRepository),
+            GetGridPlansTool(stockRepository, gridPlanRepository, transactionRepository),
             // ── 组合分析（2026-08-15 新增）──
             GetCompareStocksTool(stockRepository, dividendRepository, notificationRuleRepository),
-            GetPortfolioDiagnosisTool(stockRepository, diagnosisAssembler),
+            GetPortfolioDiagnosisTool(stockRepository, diagnosisAssembler, gridPlanRepository, transactionRepository),
         )
         val actionTools = listOf(
             AddStockTool(stockRepository),
