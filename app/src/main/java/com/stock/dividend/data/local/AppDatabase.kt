@@ -12,6 +12,7 @@ import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.FundamentalsCacheDao
 import com.stock.dividend.data.local.dao.GridPlanDao
 import com.stock.dividend.data.local.dao.IndustryTargetDao
+import com.stock.dividend.data.local.dao.KlineCacheDao
 import com.stock.dividend.data.local.dao.LivingExpenseItemDao
 import com.stock.dividend.data.local.dao.LlmAnalysisCacheDao
 import com.stock.dividend.data.local.dao.NotificationRuleDao
@@ -29,6 +30,8 @@ import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.FundamentalsCacheEntity
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
+import com.stock.dividend.data.local.entity.KlineCacheEntity
+import com.stock.dividend.data.local.entity.KlineCacheMetaEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.LlmAnalysisCacheEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
@@ -57,9 +60,11 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         FundamentalsCacheEntity::class,
         LlmAnalysisCacheEntity::class,
         FinancialStatementsCacheEntity::class,
-        GridPlanEntity::class
+        GridPlanEntity::class,
+        KlineCacheEntity::class,
+        KlineCacheMetaEntity::class
     ],
-    version = 22,
+    version = 24,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -80,6 +85,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun llmAnalysisCacheDao(): LlmAnalysisCacheDao
     abstract fun financialStatementsCacheDao(): FinancialStatementsCacheDao
     abstract fun gridPlanDao(): GridPlanDao
+    abstract fun klineCacheDao(): KlineCacheDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -380,6 +386,33 @@ abstract class AppDatabase : RoomDatabase() {
                     "ALTER TABLE grid_plans ADD COLUMN gridType TEXT NOT NULL DEFAULT 'ARITH'"
                 )
                 db.execSQL("ALTER TABLE grid_plans ADD COLUMN targetYieldPercent REAL")
+            }
+        }
+
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 按股息率网格（YIELD）：档位价换算基准的年度每股分红快照（可空——仅 YIELD 计划填充）
+                db.execSQL("ALTER TABLE grid_plans ADD COLUMN dpsPerShare REAL")
+            }
+        }
+
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // K 线本地缓存（历史不可变数据持久化：离线可用 + 增量刷新）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `kline_cache` (" +
+                        "`stockCode` TEXT NOT NULL, `period` TEXT NOT NULL, `date` TEXT NOT NULL, " +
+                        "`open` REAL NOT NULL, `high` REAL NOT NULL, `low` REAL NOT NULL, " +
+                        "`close` REAL NOT NULL, `volume` REAL NOT NULL, " +
+                        "PRIMARY KEY(`stockCode`, `period`, `date`))"
+                )
+                // 每股每周期同步状态：fetchedAt + 写入时最新除权日（前复权漂移检测）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `kline_cache_meta` (" +
+                        "`stockCode` TEXT NOT NULL, `period` TEXT NOT NULL, " +
+                        "`fetchedAt` INTEGER NOT NULL, `lastExDividendDate` TEXT, " +
+                        "PRIMARY KEY(`stockCode`, `period`))"
+                )
             }
         }
     }

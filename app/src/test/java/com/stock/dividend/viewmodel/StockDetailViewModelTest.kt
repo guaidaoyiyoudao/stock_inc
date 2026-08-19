@@ -1,21 +1,18 @@
 package com.stock.dividend.viewmodel
 
 import com.google.common.truth.Truth.assertThat
-import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.repository.BondYieldRepository
-import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.Fundamentals
-import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.KlinePeriod
-import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.LlmAnalysisRepository
 import com.stock.dividend.data.repository.StockLlmAnalysis
 import com.stock.dividend.data.repository.StockLlmAnalysisResult
 import com.stock.dividend.data.repository.StockLlmAnalysisState
 import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.enrichPayoutRatio
 import com.stock.dividend.data.repository.TradeStrategyRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -38,22 +35,19 @@ import org.junit.Test
 class StockDetailViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
-    private val stockRepository: StockRepository = mockk()
-    private val dividendDao: DividendDao = mockk()
-    private val bondYieldRepository: BondYieldRepository = mockk()
+
+    /** 数据平面 mock：读路径唯一入口。 */
+    private val plane: MarketDataPlane = mockk()
+
+    /** 写路径仓库 mock（updateYieldPeriod/updateBuyThresholdMultiplier 等）。 */
+    private val stockRepository: StockRepository = mockk(relaxed = true)
     private val llmAnalysisRepository: LlmAnalysisRepository = mockk {
         coEvery { analyzeStock(any(), any(), any()) } returns StockLlmAnalysisResult.Success(
             StockLlmAnalysis("", "", "", emptyList())
         )
     }
-    private val fundamentalsCacheRepository: FundamentalsCacheRepository = mockk {
-        coEvery { getFundamentals(any(), any()) } returns null
-    }
     private val tradeStrategyRepository: TradeStrategyRepository = mockk {
         coEvery { activeStrategies() } returns emptyList()
-    }
-    private val klineRepository: KlineRepository = mockk {
-        coEvery { fetchKlines(any(), any(), any()) } returns emptyList()
     }
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
@@ -63,12 +57,24 @@ class StockDetailViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        coEvery { stockRepository.observeStock(any()) } returns stockFlow
-        coEvery { stockRepository.getFirstBuyDate(any()) } returns null
-        coEvery { bondYieldRepository.fetch10YBondYield(any()) } returns BondYieldRepository.DEFAULT_YIELD
-        coEvery { stockRepository.fetchQuotes(any()) } returns emptyMap()
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns emptyMap()
-        coEvery { stockRepository.fetchBoll(any(), any()) } returns null
+        coEvery { plane.observeStock(any()) } returns stockFlow
+        coEvery { plane.observeDividends(any()) } returns dividendsFlow
+        coEvery { plane.get10YBondYield(any()) } returns
+            com.stock.dividend.data.repository.BondYieldRepository.DEFAULT_YIELD
+        coEvery { plane.getPrices(any(), any()) } returns emptyMap()
+        coEvery { plane.getQuoteSnapshots(any(), any()) } returns emptyMap()
+        coEvery { plane.getBoll(any(), any()) } returns null
+        coEvery { plane.getKlines(any(), any(), any(), any()) } returns emptyList()
+        coEvery { plane.getFundamentals(any(), any()) } returns null
+        coEvery { plane.refreshDividends(any()) } returns Result.success(Unit)
+        // enrichFundamentals 按平面真实口径用测试 dividendsFlow 补派息率（纯函数）
+        coEvery { plane.enrichFundamentals(any(), any()) } coAnswers {
+            val f: Fundamentals = firstArg()
+            val epsDiv = dividendsFlow.value
+                .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
+                .associate { it.reportDate to it.cashPerShare }
+            enrichPayoutRatio(f, epsDiv)
+        }
     }
 
     @After
@@ -76,25 +82,10 @@ class StockDetailViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun mockDividendRepository(): DividendRepository = mockk {
-        coEvery { observeDividends(any()) } returns dividendsFlow
-        coEvery { getLatestDividend(any()) } returns null
-    }
-
     @Test
     fun `initial state has isLoading true`() = runTest {
-        coEvery { dividendDao.observeByStock("sz.000001") } returns dividendsFlow
 
-        val viewModel = StockDetailViewModel(
-            savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
-            stockRepository = stockRepository,
-            dividendRepository = mockDividendRepository(),
-            bondYieldRepository = bondYieldRepository,
-            llmAnalysisRepository = llmAnalysisRepository,
-            fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository,
-        klineRepository = klineRepository
-        )
+        val viewModel = createVm("sz.000001")
 
         assertThat(viewModel.uiState.value.isLoading).isTrue()
     }
@@ -104,16 +95,7 @@ class StockDetailViewModelTest {
         val stock = StockEntity("sz.000001", "平安银行", "0")
         stockFlow.value = stock
 
-        val viewModel = StockDetailViewModel(
-            savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
-            stockRepository = stockRepository,
-            dividendRepository = mockDividendRepository(),
-            bondYieldRepository = bondYieldRepository,
-            llmAnalysisRepository = llmAnalysisRepository,
-            fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository,
-        klineRepository = klineRepository
-        )
+        val viewModel = createVm("sz.000001")
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.stock?.name).isEqualTo("平安银行")
@@ -135,16 +117,7 @@ class StockDetailViewModelTest {
         )
         dividendsFlow.value = dividends
 
-        val viewModel = StockDetailViewModel(
-            savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
-            stockRepository = stockRepository,
-            dividendRepository = mockDividendRepository(),
-            bondYieldRepository = bondYieldRepository,
-            llmAnalysisRepository = llmAnalysisRepository,
-            fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository,
-        klineRepository = klineRepository
-        )
+        val viewModel = createVm("sz.000001")
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.dividends).hasSize(1)
@@ -156,16 +129,7 @@ class StockDetailViewModelTest {
     fun `stock remains null when not found in repository`() = runTest {
         stockFlow.value = null
 
-        val viewModel = StockDetailViewModel(
-            savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.999999")),
-            stockRepository = stockRepository,
-            dividendRepository = mockDividendRepository(),
-            bondYieldRepository = bondYieldRepository,
-            llmAnalysisRepository = llmAnalysisRepository,
-            fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository,
-        klineRepository = klineRepository
-        )
+        val viewModel = createVm("sz.999999")
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.stock).isNull()
@@ -173,16 +137,7 @@ class StockDetailViewModelTest {
 
     @Test
     fun `empty dividends list sets isLoading to false`() = runTest {
-        val viewModel = StockDetailViewModel(
-            savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
-            stockRepository = stockRepository,
-            dividendRepository = mockDividendRepository(),
-            bondYieldRepository = bondYieldRepository,
-            llmAnalysisRepository = llmAnalysisRepository,
-            fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository,
-        klineRepository = klineRepository
-        )
+        val viewModel = createVm("sz.000001")
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.dividends).isEmpty()
@@ -191,16 +146,7 @@ class StockDetailViewModelTest {
 
     @Test
     fun `initial error is null`() = runTest {
-        val viewModel = StockDetailViewModel(
-            savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to "sz.000001")),
-            stockRepository = stockRepository,
-            dividendRepository = mockDividendRepository(),
-            bondYieldRepository = bondYieldRepository,
-            llmAnalysisRepository = llmAnalysisRepository,
-            fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository,
-        klineRepository = klineRepository
-        )
+        val viewModel = createVm("sz.000001")
 
         assertThat(viewModel.uiState.value.error).isNull()
     }
@@ -210,18 +156,16 @@ class StockDetailViewModelTest {
         dividends: List<DividendEntity> = emptyList()
     ): StockDetailViewModel {
         dividendsFlow.value = dividends
-        val repo = mockDividendRepository()
-        return StockDetailViewModel(
-            savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to code)),
-            stockRepository = stockRepository,
-            dividendRepository = repo,
-            bondYieldRepository = bondYieldRepository,
-            llmAnalysisRepository = llmAnalysisRepository,
-            fundamentalsCacheRepository = fundamentalsCacheRepository,
-        tradeStrategyRepository = tradeStrategyRepository,
-        klineRepository = klineRepository
-        )
+        return createVm(code)
     }
+
+    private fun createVm(code: String): StockDetailViewModel = StockDetailViewModel(
+        savedStateHandle = androidx.lifecycle.SavedStateHandle(mapOf("code" to code)),
+        marketDataPlane = plane,
+        llmAnalysisRepository = llmAnalysisRepository,
+        tradeStrategyRepository = tradeStrategyRepository,
+        stockRepository = stockRepository
+    )
 
     private fun makeDividends(count: Int): List<DividendEntity> {
         return (1..count).map { i ->
@@ -449,11 +393,11 @@ class StockDetailViewModelTest {
 
     @Test
     fun `analyzeWithLlm fetches three-period boll before delegating`() = runTest {
-        coEvery { stockRepository.fetchBoll("sz.000001", KlinePeriod.DAILY) } returns
+        coEvery { plane.getBoll("sz.000001", KlinePeriod.DAILY) } returns
             com.stock.dividend.data.repository.BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
-        coEvery { stockRepository.fetchBoll("sz.000001", KlinePeriod.WEEKLY) } returns
+        coEvery { plane.getBoll("sz.000001", KlinePeriod.WEEKLY) } returns
             com.stock.dividend.data.repository.BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
-        coEvery { stockRepository.fetchBoll("sz.000001", KlinePeriod.MONTHLY) } returns
+        coEvery { plane.getBoll("sz.000001", KlinePeriod.MONTHLY) } returns
             com.stock.dividend.data.repository.BollBand(middle = 12.0, upper = 14.0, lower = 10.0)
 
         val viewModel = createViewModelWithStock()
@@ -463,9 +407,9 @@ class StockDetailViewModelTest {
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertThat(viewModel.uiState.value.llmAnalysis).isInstanceOf(StockLlmAnalysisState.Success::class.java)
-        coVerify { stockRepository.fetchBoll("sz.000001", KlinePeriod.DAILY) }
-        coVerify { stockRepository.fetchBoll("sz.000001", KlinePeriod.WEEKLY) }
-        coVerify { stockRepository.fetchBoll("sz.000001", KlinePeriod.MONTHLY) }
+        coVerify { plane.getBoll("sz.000001", KlinePeriod.DAILY) }
+        coVerify { plane.getBoll("sz.000001", KlinePeriod.WEEKLY) }
+        coVerify { plane.getBoll("sz.000001", KlinePeriod.MONTHLY) }
         coVerify { llmAnalysisRepository.analyzeStock(any(), any(), false) }
     }
 
@@ -543,7 +487,7 @@ class StockDetailViewModelTest {
     @Test
     fun `fundamentals load and payout ratio enriched from dividends`() = runTest {
         // 原始基本面（payoutRatio=null，basicEps=1.20）——经缓存仓库返回
-        coEvery { fundamentalsCacheRepository.getFundamentals("sz.000001", false) } returns Fundamentals(
+        coEvery { plane.getFundamentals("sz.000001", false) } returns Fundamentals(
             periods = listOf(
                 Fundamentals.Period("2024-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = 1.20, payoutRatio = null)
             )
@@ -568,7 +512,7 @@ class StockDetailViewModelTest {
 
     @Test
     fun `fundamentals degrade to null when cache repository throws and loading flag resets`() = runTest {
-        coEvery { fundamentalsCacheRepository.getFundamentals(any(), any()) } throws RuntimeException("network")
+        coEvery { plane.getFundamentals(any(), any()) } throws RuntimeException("network")
 
         val viewModel = createViewModelWithStock()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -580,10 +524,10 @@ class StockDetailViewModelTest {
 
     @Test
     fun `refreshFundamentals forces refresh through cache repository`() = runTest {
-        coEvery { fundamentalsCacheRepository.getFundamentals("sz.000001", false) } returns Fundamentals(
+        coEvery { plane.getFundamentals("sz.000001", false) } returns Fundamentals(
             periods = listOf(Fundamentals.Period("2024-12-31", 12.0, 60.0, 8.0, 5.0, basicEps = 1.0, payoutRatio = null))
         )
-        coEvery { fundamentalsCacheRepository.getFundamentals("sz.000001", true) } returns Fundamentals(
+        coEvery { plane.getFundamentals("sz.000001", true) } returns Fundamentals(
             periods = listOf(Fundamentals.Period("2025-03-31", 11.0, 61.0, 6.0, 4.0, basicEps = 1.0, payoutRatio = null))
         )
 
@@ -596,7 +540,7 @@ class StockDetailViewModelTest {
 
         assertThat(viewModel.uiState.value.fundamentals).isNotEqualTo(before)
         assertThat(viewModel.uiState.value.fundamentals!!.periods[0].reportDate).isEqualTo("2025-03-31")
-        coVerify { fundamentalsCacheRepository.getFundamentals("sz.000001", true) }
+        coVerify { plane.getFundamentals("sz.000001", true) }
     }
 
     // endregion

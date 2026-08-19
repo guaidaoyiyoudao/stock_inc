@@ -1,11 +1,9 @@
 package com.stock.dividend.viewmodel
 
 import com.google.common.truth.Truth.assertThat
-import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.repository.DividendRepository
-import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -25,18 +23,16 @@ import org.junit.Test
 class DividendCalendarViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
-    private val dividendDao: DividendDao = mockk()
-    private val stockRepository: StockRepository = mockk()
-    private val dividendRepository: DividendRepository = mockk()
+    private val marketDataPlane: MarketDataPlane = mockk()
     private val dividendsFlow = MutableStateFlow<List<DividendEntity>>(emptyList())
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        every { dividendDao.observeAll() } returns dividendsFlow
-        every { stockRepository.observeAllStocks() } returns stocksFlow
-        coEvery { dividendRepository.fetchAndCacheDividends(any(), any()) } returns Result.success(Unit)
+        every { marketDataPlane.observeAllDividends() } returns dividendsFlow
+        every { marketDataPlane.observeAllStocks() } returns stocksFlow
+        coEvery { marketDataPlane.refreshDividends(any()) } returns Result.success(Unit)
     }
 
     @After
@@ -46,7 +42,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `calendar events use preferred date and estimate amount from current shares`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sz.000001", name = "平安银行", marketCode = "0", shares = 200),
             StockEntity(code = "sh.600000", name = "浦发银行", marketCode = "1", shares = 100)
@@ -88,7 +84,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `future filter only keeps future ex dividend date events`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sz.000001", name = "平安银行", marketCode = "0", shares = 100)
         )
@@ -123,7 +119,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `calendar grid contains six weeks and marks event days`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sz.000001", name = "平安银行", marketCode = "0", shares = 100)
         )
@@ -151,7 +147,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `select date exposes only events on that day`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sz.000001", name = "平安银行", marketCode = "0", shares = 100),
             StockEntity(code = "sh.600000", name = "浦发银行", marketCode = "1", shares = 100)
@@ -183,7 +179,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `calendar normalizes stored space time dates for month and selected day`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sh.600398", name = "海澜之家", marketCode = "1", shares = 100)
         )
@@ -210,7 +206,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `refresh fetches dividends for all stocks`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sh.600398", name = "海澜之家", marketCode = "1", shares = 100),
             StockEntity(code = "sz.000001", name = "平安银行", marketCode = "0", shares = 100)
@@ -220,14 +216,14 @@ class DividendCalendarViewModelTest {
         viewModel.refreshDividends()
         testDispatcher.scheduler.advanceUntilIdle()
 
-        coVerify { dividendRepository.fetchAndCacheDividends("sh.600398", "600398") }
-        coVerify { dividendRepository.fetchAndCacheDividends("sz.000001", "000001") }
+        coVerify { marketDataPlane.refreshDividends("sh.600398") }
+        coVerify { marketDataPlane.refreshDividends("sz.000001") }
         assertThat(viewModel.uiState.value.isRefreshing).isFalse()
     }
 
     @Test
     fun `go to today restores current month and selected date`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         viewModel.onVisibleMonthChanged("2001-06")
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -241,7 +237,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `history filter jumps to latest historical event date`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sh.600398", name = "海澜之家", marketCode = "1", shares = 100)
         )
@@ -273,7 +269,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `month filter shows events when navigating to historical month`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sh.600398", name = "海澜之家", marketCode = "1", shares = 100)
         )
@@ -298,7 +294,7 @@ class DividendCalendarViewModelTest {
 
     @Test
     fun `calendar ignores dividend plans without execution dates`() = runTest {
-        val viewModel = DividendCalendarViewModel(dividendDao, stockRepository, dividendRepository)
+        val viewModel = DividendCalendarViewModel(marketDataPlane)
         stocksFlow.value = listOf(
             StockEntity(code = "sh.600398", name = "海澜之家", marketCode = "1", shares = 100)
         )

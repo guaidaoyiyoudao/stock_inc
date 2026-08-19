@@ -15,6 +15,7 @@ import com.stock.dividend.data.agent.tools.AddStockTool
 import com.stock.dividend.data.agent.tools.GetHoldingsTool
 import com.stock.dividend.data.repository.LlmConfig
 import com.stock.dividend.data.repository.LlmConfigSource
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StockSearchResult
 import io.mockk.coEvery
@@ -49,8 +50,9 @@ class AiChatRepositoryTest {
     @Test
     fun readOnlyToolLoop_emitsToolStatusAndFinal() = runTest {
         val stockRepository = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepository.observeAllStocksForSnapshot() } returns emptyList()
-        coEvery { stockRepository.getCachedPrices(emptyList()) } returns emptyMap()
+        val marketDataPlane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { marketDataPlane.cachedPrices(emptyList()) } returns emptyMap()
         val model = ScriptedModel(
             mutableListOf(
                 {
@@ -74,7 +76,7 @@ class AiChatRepositoryTest {
             name = "ai_tab_agent",
             model = model,
             instruction = Instruction("test"),
-            tools = listOf(GetHoldingsTool(stockRepository))
+            tools = listOf(GetHoldingsTool(marketDataPlane, stockRepository))
         )
         val repository = AiChatRepository(
             configSource(LlmConfig("http://x", "k", "m")),
@@ -106,8 +108,9 @@ class AiChatRepositoryTest {
     @Test
     fun loadMessages_restoresUserAndAssistantMessages() = runTest {
         val stockRepository = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepository.observeAllStocksForSnapshot() } returns emptyList()
-        coEvery { stockRepository.getCachedPrices(emptyList()) } returns emptyMap()
+        val marketDataPlane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { marketDataPlane.cachedPrices(emptyList()) } returns emptyMap()
         val model = ScriptedModel(
             mutableListOf(
                 {
@@ -128,7 +131,7 @@ class AiChatRepositoryTest {
             name = "ai_tab_agent",
             model = model,
             instruction = Instruction("test"),
-            tools = listOf(GetHoldingsTool(stockRepository))
+            tools = listOf(GetHoldingsTool(marketDataPlane, stockRepository))
         )
         val sessionService = com.google.adk.kt.sessions.InMemorySessionService()
         val repository = AiChatRepository(

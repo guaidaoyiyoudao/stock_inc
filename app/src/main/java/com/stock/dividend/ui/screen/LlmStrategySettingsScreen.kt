@@ -82,6 +82,9 @@ fun LlmStrategySettingsScreen(
             )
             LlmConfigSettingsContent(viewModel)
 
+            // ── 视觉识别模型（截图导入）──
+            VisionConfigSettingsContent(viewModel)
+
             // ── 策略库（跳转）──
             SettingsNavRow(
                 title = "策略库",
@@ -200,5 +203,55 @@ internal fun LlmConfigSettingsContent(viewModel: NotificationSettingsViewModel) 
                 onCheckedChange = { viewModel.saveWebSearch(it) }
             )
         }
+    }
+}
+
+/** 视觉识别模型配置：截图导入持仓/交易记录用（GLM-4.6V-Flash，智谱 BigModel，免费）。 */
+@Composable
+internal fun VisionConfigSettingsContent(viewModel: NotificationSettingsViewModel) {
+    val config by viewModel.visionConfigState.collectAsStateWithLifecycle()
+    var apiKey by remember(config.apiKey) { mutableStateOf(config.apiKey) }
+    var model by remember(config.model) { mutableStateOf(config.model) }
+    var showKey by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            text = "视觉识别模型（截图导入）",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "截图导入持仓/交易记录用 GLM-4.6V-Flash 视觉模型（智谱 BigModel，免费）。图片压缩后上传识别，识别失败自动重试；Key 仅存本机。Key 留空时，若上方 LLM 也配的智谱则自动复用其 Key。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        AppTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it },
+            label = { Text("API Key（智谱 BigModel）") },
+            singleLine = true,
+            visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                AppTextButton(
+                    onClick = { showKey = !showKey },
+                    text = if (showKey) "隐藏" else "显示",
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        AppTextField(
+            value = model,
+            onValueChange = { model = it },
+            label = { Text("Model（默认 glm-4.6v-flash）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(12.dp))
+        AppButton(
+            onClick = { viewModel.saveVisionConfig(apiKey, model) },
+            text = "保存",
+        )
     }
 }

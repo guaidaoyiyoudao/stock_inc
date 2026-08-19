@@ -2,7 +2,7 @@ package com.stock.dividend.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StockSearchResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -38,8 +38,9 @@ data class AddStockUiState(
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class AddStockViewModel @Inject constructor(
-    private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository
+    /** 读股市数据（搜索/行业/分红）走数据平面；addStock 写操作留 StockRepository。 */
+    private val marketDataPlane: MarketDataPlane,
+    private val stockRepository: StockRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AddStockUiState())
@@ -142,8 +143,8 @@ class AddStockViewModel @Inject constructor(
                 .onSuccess {
                     val securityCode = result.code.substringAfter(".")
                     // 拉取行业信息（失败不影响添加）
-                    try { stockRepository.fetchAndCacheIndustry(result.code) } catch (_: Exception) {}
-                    dividendRepository.fetchAndCacheDividends(result.code, securityCode)
+                    runCatching { marketDataPlane.ensureIndustry(result.code) }
+                    marketDataPlane.refreshDividends(result.code)
                         .onSuccess {
                             _uiState.value = _uiState.value.copy(
                                 addedStock = result.name,
@@ -208,7 +209,7 @@ class AddStockViewModel @Inject constructor(
     private suspend fun performSearch(query: String) {
         lastSearchQuery = query
         _uiState.value = _uiState.value.copy(isSearching = true, error = null, canRetry = false)
-        stockRepository.searchStocks(query)
+        marketDataPlane.searchStocks(query)
             .onSuccess { results ->
                 _uiState.value = _uiState.value.copy(
                     searchResults = results,

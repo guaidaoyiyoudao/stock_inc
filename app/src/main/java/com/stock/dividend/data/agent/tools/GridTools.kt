@@ -3,11 +3,11 @@ package com.stock.dividend.data.agent.tools
 import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.GridCalculator
 import com.stock.dividend.data.repository.GridType
 import com.stock.dividend.data.repository.GridExecutionCalculator
 import com.stock.dividend.data.repository.GridPlanRepository
-import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import kotlinx.coroutines.flow.first
 
@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.first
  * 与 App 网格页同口径（GridCalculator + GridExecutionCalculator，纯程序计算）。
  */
 class GetGridPlansTool(
-    private val stockRepository: StockRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val gridPlanRepository: GridPlanRepository,
     private val transactionRepository: TransactionRepository,
 ) : ReadTool(
@@ -36,7 +36,7 @@ class GetGridPlansTool(
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
         val code = args.stringArg("code")
         val resolvedCode = code?.let {
-            stockRepository.resolveStock(it)?.code ?: return@runCatching mapOf("error" to "未找到股票：$it")
+            marketDataPlane.resolveStock(it)?.code ?: return@runCatching mapOf("error" to "未找到股票：$it")
         }
 
         val plans = gridPlanRepository.observeAll().first()
@@ -48,9 +48,7 @@ class GetGridPlansTool(
             )
         }
 
-        val planCodes = plans.map { it.stockCode }.toSet()
-        val stocks = stockRepository.observeAllStocksForSnapshot().filter { it.code in planCodes }
-        val prices = stockRepository.fetchFreshPrices(stocks)
+        val prices = marketDataPlane.getPricesForCodes(plans.map { it.stockCode })
         val transactionsByStock = transactionRepository.getAll().groupBy { it.stockCode }
 
         mapOf(
@@ -65,7 +63,8 @@ class GetGridPlansTool(
                         grids = plan.grids,
                         totalCapital = plan.totalCapital,
                         currentPrice = price,
-                        gridType = GridType.fromRaw(plan.gridType)
+                        gridType = GridType.fromRaw(plan.gridType),
+                        dps = plan.dpsPerShare
                     ),
                     planTxs
                 )
@@ -77,11 +76,19 @@ class GetGridPlansTool(
                     put("lowPrice", plan.lowPrice)        // 资金用完位（最后一档/最便宜档）
                     put("highPrice", plan.highPrice)      // 参考上界（超过不追买）
                     put("grids", plan.grids)
+                    put("gridType", plan.gridType)        // ARITH 等差 / GEOM 等比 / YIELD 按股息率
                     put("totalCapital", plan.totalCapital)
+                    // 按股息率计划：补档位分布口径（档位价 = 年分红 ÷ 股息率）
+                    if (plan.gridType == "YIELD" && plan.dpsPerShare != null && plan.dpsPerShare > 0.0) {
+                        put("yieldRange",
+                            "按股息率 ${"%.2f".format(plan.dpsPerShare / plan.basePrice * 100.0)}%" +
+                                "→${"%.2f".format(plan.dpsPerShare / plan.lowPrice * 100.0)}% 分档" +
+                                "（档位价 = 每股年分红 ${plan.dpsPerShare} ÷ 股息率）")
+                    }
                     put("notifyEnabled", plan.notifyEnabled)
                     put("currentPrice", price)
                     result.validationError?.let { put("validationError", it) }
-                    // 现价高于起点或跌破资金用完位时 nextBuyHint 为 null（无下一档）
+                    // 现价高于起点、跌破资金用完位或下方档全部已买时为 null（已买档不重复提示）
                     val nextBuy = result.nextBuyHint
                     put("nextBuyLevel", nextBuy)
                     if (nextBuy != null) {

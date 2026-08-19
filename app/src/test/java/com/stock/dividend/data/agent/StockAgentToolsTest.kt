@@ -57,6 +57,7 @@ import com.stock.dividend.data.local.entity.StockTagEntity
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.CapitalFlow
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.DividendIncomeRepository
 import com.stock.dividend.data.repository.DividendMetrics
 import com.stock.dividend.data.repository.DividendRepository
@@ -217,11 +218,13 @@ class StockAgentToolsTest {
 
     @Test
     fun getHoldingsTool_returnsHoldingsAndCachedPrices() = runTest {
-        val repo = mockk<StockRepository>(relaxed = true)
-        coEvery { repo.observeAllStocksForSnapshot() } returns emptyList()
-        coEvery { repo.getCachedPrices(emptyList()) } returns emptyMap()
-        coEvery { repo.observeAllStockTags() } returns flowOf(emptyList())
-        val tool = GetHoldingsTool(repo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { plane.getPrices(any(), any()) } returns emptyMap()
+        coEvery { plane.cachedPrices(emptyList()) } returns emptyMap()
+        val tagRepo = mockk<StockRepository>(relaxed = true)
+        coEvery { tagRepo.observeAllStockTags() } returns flowOf(emptyList())
+        val tool = GetHoldingsTool(plane, tagRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["holdings"]).isNotNull()
@@ -229,16 +232,16 @@ class StockAgentToolsTest {
 
     @Test
     fun getHoldingsTool_includesTagsAndLastUpdated() = runTest {
-        val repo = mockk<StockRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val tagRepo = mockk<StockRepository>(relaxed = true)
         val stock = StockEntity(
             code = "sh.600519", name = "贵州茅台", marketCode = "1",
             shares = 100, costPerShare = 100.0, industry = "白酒", lastUpdated = 123456789L
         )
-        coEvery { repo.observeAllStocksForSnapshot() } returns listOf(stock)
-        coEvery { repo.fetchQuotes(listOf(stock)) } returns mapOf("sh.600519" to 200.0)
-        coEvery { repo.getCachedPrices(listOf("sh.600519")) } returns mapOf("sh.600519" to 200.0)
-        coEvery { repo.observeAllStockTags() } returns flowOf(listOf(StockTagEntity("sh.600519", "红利")))
-        val tool = GetHoldingsTool(repo)
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { plane.getPrices(any(), any()) } returns mapOf("sh.600519" to 200.0)
+        coEvery { tagRepo.observeAllStockTags() } returns flowOf(listOf(StockTagEntity("sh.600519", "红利")))
+        val tool = GetHoldingsTool(plane, tagRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         val holding = (result["holdings"] as List<*>).single() as Map<*, *>
@@ -248,16 +251,17 @@ class StockAgentToolsTest {
 
     @Test
     fun getHoldingsTool_usesFreshQuotesOverCache() = runTest {
-        val repo = mockk<StockRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val tagRepo = mockk<StockRepository>(relaxed = true)
         val stock = StockEntity(
             code = "sh.600036", name = "招商银行", marketCode = "1", shares = 100, costPerShare = 30.0
         )
-        coEvery { repo.observeAllStocksForSnapshot() } returns listOf(stock)
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock))
         // 实时价 210 优先于缓存价 200：同一会话内与其他实时工具口径一致
-        coEvery { repo.fetchQuotes(listOf(stock)) } returns mapOf("sh.600036" to 210.0)
-        coEvery { repo.getCachedPrices(listOf("sh.600036")) } returns mapOf("sh.600036" to 200.0)
-        coEvery { repo.observeAllStockTags() } returns flowOf(emptyList())
-        val tool = GetHoldingsTool(repo)
+        coEvery { plane.getPrices(any(), any()) } returns mapOf("sh.600036" to 210.0)
+        coEvery { plane.cachedPrices(listOf("sh.600036")) } returns mapOf("sh.600036" to 200.0)
+        coEvery { tagRepo.observeAllStockTags() } returns flowOf(emptyList())
+        val tool = GetHoldingsTool(plane, tagRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         val holding = (result["holdings"] as List<*>).single() as Map<*, *>
@@ -267,15 +271,16 @@ class StockAgentToolsTest {
 
     @Test
     fun getHoldingsTool_fallsBackToCachedPricesWhenQuotesFail() = runTest {
-        val repo = mockk<StockRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val tagRepo = mockk<StockRepository>(relaxed = true)
         val stock = StockEntity(
             code = "sh.600036", name = "招商银行", marketCode = "1", shares = 100, costPerShare = 30.0
         )
-        coEvery { repo.observeAllStocksForSnapshot() } returns listOf(stock)
-        coEvery { repo.fetchQuotes(any()) } returns emptyMap()
-        coEvery { repo.getCachedPrices(listOf("sh.600036")) } returns mapOf("sh.600036" to 200.0)
-        coEvery { repo.observeAllStockTags() } returns flowOf(emptyList())
-        val tool = GetHoldingsTool(repo)
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { plane.getPrices(any(), any()) } returns emptyMap()
+        coEvery { plane.cachedPrices(listOf("sh.600036")) } returns mapOf("sh.600036" to 200.0)
+        coEvery { tagRepo.observeAllStockTags() } returns flowOf(emptyList())
+        val tool = GetHoldingsTool(plane, tagRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         val holding = (result["holdings"] as List<*>).single() as Map<*, *>
@@ -491,9 +496,9 @@ class StockAgentToolsTest {
 
     @Test
     fun getStockInfoTool_returnsErrorWhenNotFound() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("000000") } returns null
-        val tool = GetStockInfoTool(stockRepo, mockk(relaxed = true))
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("000000") } returns null
+        val tool = GetStockInfoTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "000000")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("未找到")
@@ -501,16 +506,16 @@ class StockAgentToolsTest {
 
     @Test
     fun getStockInfoTool_includesLastUpdated() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600519" to 1500.0)
-        coEvery { stockRepo.observeStock("sh.600519") } returns flowOf(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getQuoteSnapshots(any(), any()) } returns
+            mapOf("sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1500.0))
+        coEvery { plane.observeStock("sh.600519") } returns flowOf(
             StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1", lastUpdated = 999L)
         )
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
-        coEvery { dividendRepo.getLatestDividend("sh.600519") } returns null
-        coEvery { dividendRepo.observeDividends("sh.600519") } returns flowOf(emptyList())
-        val tool = GetStockInfoTool(stockRepo, dividendRepo)
+        coEvery { plane.getLatestDividend("sh.600519") } returns null
+        coEvery { plane.getDps("sh.600519") } returns null
+        val tool = GetStockInfoTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["lastUpdated"]).isEqualTo(999L)
@@ -518,18 +523,18 @@ class StockAgentToolsTest {
 
     @Test
     fun getStockInfoTool_computesDividendYieldByCurrentPrice() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600519" to 1500.0)
-        coEvery { stockRepo.observeStock("sh.600519") } returns flowOf(null)
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getQuoteSnapshots(any(), any()) } returns
+            mapOf("sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1500.0))
+        coEvery { plane.observeStock("sh.600519") } returns flowOf(null)
         val entity = DividendEntity(
             id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 2.0,
             dividendYield = 5.0, exDividendDate = "2025-06-20"
         )
-        coEvery { dividendRepo.getLatestDividend("sh.600519") } returns entity
-        coEvery { dividendRepo.observeDividends("sh.600519") } returns flowOf(listOf(entity))
-        val tool = GetStockInfoTool(stockRepo, dividendRepo)
+        coEvery { plane.getLatestDividend("sh.600519") } returns entity
+        coEvery { plane.getDps("sh.600519") } returns 2.0
+        val tool = GetStockInfoTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         // 股息率按现价实时计算（与 get_stock_evaluation/get_buy_threshold 同口径），
@@ -540,19 +545,18 @@ class StockAgentToolsTest {
 
     @Test
     fun getStockInfoTool_omitsDividendYieldWithoutPriceOrDividend() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
-        coEvery { stockRepo.getCachedPrices(any()) } returns emptyMap()
-        coEvery { stockRepo.observeStock("sh.600519") } returns flowOf(null)
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getQuoteSnapshots(any(), any()) } returns emptyMap()
+        coEvery { plane.cachedPrices(any()) } returns emptyMap()
+        coEvery { plane.observeStock("sh.600519") } returns flowOf(null)
         val entity = DividendEntity(
             id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 2.0,
             dividendYield = 5.0, exDividendDate = "2025-06-20"
         )
-        coEvery { dividendRepo.getLatestDividend("sh.600519") } returns entity
-        coEvery { dividendRepo.observeDividends("sh.600519") } returns flowOf(listOf(entity))
-        val tool = GetStockInfoTool(stockRepo, dividendRepo)
+        coEvery { plane.getLatestDividend("sh.600519") } returns entity
+        coEvery { plane.getDps("sh.600519") } returns 2.0
+        val tool = GetStockInfoTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         // 无有效现价时不臆造股息率（缺失而非错误值）
@@ -562,14 +566,10 @@ class StockAgentToolsTest {
 
     @Test
     fun getFundamentalsTool_returnsPeriods() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
-        coEvery { dividendRepo.observeDividends(any()) } returns flowOf(
-            listOf(DividendEntity(id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 2.0))
-        )
-        val fundRepo = mockk<FundamentalsCacheRepository>(relaxed = true)
-        coEvery { fundRepo.getFundamentals("sh.600519", false) } returns Fundamentals(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        // 平面版基本面已补派息率，直接返回带 payoutRatio 的产物
+        coEvery { plane.getFundamentals("sh.600519", false) } returns Fundamentals(
             periods = listOf(
                 Fundamentals.Period(
                     reportDate = "2024-12-31", roe = 15.0, debtToAssetRatio = 30.0,
@@ -578,7 +578,7 @@ class StockAgentToolsTest {
                 )
             )
         )
-        val tool = GetFundamentalsTool(stockRepo, dividendRepo, fundRepo)
+        val tool = GetFundamentalsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         val period = (result["periods"] as List<*>).single() as Map<*, *>
@@ -590,11 +590,10 @@ class StockAgentToolsTest {
 
     @Test
     fun getFundamentalsTool_returnsErrorWhenDataMissing() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val fundRepo = mockk<FundamentalsCacheRepository>(relaxed = true)
-        coEvery { fundRepo.getFundamentals(any(), any()) } returns null
-        val tool = GetFundamentalsTool(stockRepo, mockk(relaxed = true), fundRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getFundamentals(any(), any()) } returns null
+        val tool = GetFundamentalsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("基本面数据不足")
@@ -602,23 +601,19 @@ class StockAgentToolsTest {
 
     @Test
     fun getFundamentalsTool_passesForceRefresh() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val fundRepo = mockk<FundamentalsCacheRepository>(relaxed = true)
-        coEvery { fundRepo.getFundamentals("sh.600519", true) } returns Fundamentals(periods = emptyList())
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
-        coEvery { dividendRepo.observeDividends(any()) } returns flowOf(emptyList())
-        val tool = GetFundamentalsTool(stockRepo, dividendRepo, fundRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getFundamentals("sh.600519", true) } returns Fundamentals(periods = emptyList())
+        val tool = GetFundamentalsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         tool.run(context, mapOf("code" to "600519", "forceRefresh" to true))
-        coVerify { fundRepo.getFundamentals("sh.600519", true) }
+        coVerify { plane.getFundamentals("sh.600519", true) }
     }
 
     @Test
     fun getKlineTool_returnsClosesAndBollBand() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
         val klines = (1..20).map {
             KlineBar(
                 date = "2026-01-%02d".format(it),
@@ -629,8 +624,8 @@ class StockAgentToolsTest {
                 volume = 1000.0
             )
         }
-        coEvery { klineRepo.fetchKlines("sh.600519", KlinePeriod.WEEKLY, 40) } returns klines
-        val tool = GetKlineTool(stockRepo, klineRepo)
+        coEvery { plane.getKlines("sh.600519", KlinePeriod.WEEKLY, 40, any()) } returns klines
+        val tool = GetKlineTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["closes"]).isEqualTo((1..20).map { it * 10.0 })
@@ -645,9 +640,9 @@ class StockAgentToolsTest {
 
     @Test
     fun getKlineTool_rejectsInvalidPeriod() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val tool = GetKlineTool(stockRepo, mockk(relaxed = true))
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        val tool = GetKlineTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519", "period" to "YEARLY")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("period")
@@ -655,15 +650,14 @@ class StockAgentToolsTest {
 
     @Test
     fun getKlineTool_returnsClosesWithoutBandWhenInsufficient() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
-        coEvery { klineRepo.fetchKlines(any(), any(), any()) } returns listOf(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getKlines(any(), any(), any(), any()) } returns listOf(
             KlineBar("2026-01-01", 1.0, 1.0, 1.0, 1.0, 0.0),
             KlineBar("2026-01-02", 2.0, 2.0, 2.0, 2.0, 0.0),
             KlineBar("2026-01-03", 3.0, 3.0, 3.0, 3.0, 0.0)
         )
-        val tool = GetKlineTool(stockRepo, klineRepo)
+        val tool = GetKlineTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["closes"]).isEqualTo(listOf(1.0, 2.0, 3.0))
@@ -673,11 +667,11 @@ class StockAgentToolsTest {
 
     @Test
     fun getPortfolioSignalsTool_emptyPortfolioReturnsZeros() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         val ruleRepo = mockk<NotificationRuleRepository>(relaxed = true)
         coEvery { ruleRepo.observeEvalThresholds() } returns flowOf(DividendThresholds())
-        val tool = GetPortfolioSignalsTool(stockRepo, mockk(relaxed = true), ruleRepo)
+        val tool = GetPortfolioSignalsTool(plane, ruleRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         val pc = result["positionControl"] as Map<*, *>
@@ -688,23 +682,19 @@ class StockAgentToolsTest {
 
     @Test
     fun getPortfolioSignalsTool_detectsResonantBuySignal() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val stock = StockEntity(
             code = "sh.600519", name = "贵州茅台", marketCode = "1", shares = 100, industry = "白酒"
         )
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns listOf(stock)
-        coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600519" to 100.0)
-        coEvery { stockRepo.getCachedPrices(any()) } returns mapOf("sh.600519" to 100.0)
-        coEvery { stockRepo.fetchBoll("sh.600519", KlinePeriod.WEEKLY) } returns BollBand(110.0, 125.0, 100.0)
-        coEvery { stockRepo.fetchBoll("sh.600519", KlinePeriod.DAILY) } returns BollBand(110.0, 125.0, 100.0)
-        coEvery { stockRepo.fetchBoll("sh.600519", KlinePeriod.MONTHLY) } returns BollBand(105.0, 125.0, 95.0)
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
-        coEvery { dividendRepo.observeDividends(any()) } returns flowOf(
-            listOf(DividendEntity(id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 5.0))
-        )
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { plane.getPrices(any(), any()) } returns mapOf("sh.600519" to 100.0)
+        coEvery { plane.getBoll("sh.600519", KlinePeriod.WEEKLY) } returns BollBand(110.0, 125.0, 100.0)
+        coEvery { plane.getBoll("sh.600519", KlinePeriod.DAILY) } returns BollBand(110.0, 125.0, 100.0)
+        coEvery { plane.getBoll("sh.600519", KlinePeriod.MONTHLY) } returns BollBand(105.0, 125.0, 95.0)
+        coEvery { plane.getDps("sh.600519") } returns 5.0
         val ruleRepo = mockk<NotificationRuleRepository>(relaxed = true)
         coEvery { ruleRepo.observeEvalThresholds() } returns flowOf(DividendThresholds())
-        val tool = GetPortfolioSignalsTool(stockRepo, dividendRepo, ruleRepo)
+        val tool = GetPortfolioSignalsTool(plane, ruleRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         val buySignals = result["buySignals"] as List<*>
@@ -727,10 +717,10 @@ class StockAgentToolsTest {
         )
         coEvery { incomeRepo.observeRecordCount() } returns flowOf(2)
         coEvery { incomeRepo.observeMaxSingleIncome() } returns flowOf(120.0)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns
-            listOf(StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1"))
-        val tool = GetDividendIncomeTool(incomeRepo, stockRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.observeAllStocks() } returns
+            flowOf(listOf(StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1")))
+        val tool = GetDividendIncomeTool(incomeRepo, plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["years"] as List<*>).containsExactly(2024, 2025)
@@ -753,10 +743,10 @@ class StockAgentToolsTest {
             )
         )
         coEvery { incomeRepo.observeTotalByYear(2026) } returns flowOf(300.0)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns
-            listOf(StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1"))
-        val tool = GetDividendIncomeTool(incomeRepo, stockRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.observeAllStocks() } returns
+            flowOf(listOf(StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1")))
+        val tool = GetDividendIncomeTool(incomeRepo, plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("year" to "2026")) as Map<*, *>
         assertThat(result["year"]).isEqualTo(2026)
@@ -768,11 +758,11 @@ class StockAgentToolsTest {
 
     @Test
     fun searchStockTool_returnsResults() = runTest {
-        val repo = mockk<StockRepository>(relaxed = true)
-        coEvery { repo.searchStocks("茅台") } returns Result.success(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.searchStocks("茅台") } returns Result.success(
             listOf(StockSearchResult("sh.600519", "贵州茅台", "1", 1500.0))
         )
-        val tool = SearchStockTool(repo)
+        val tool = SearchStockTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("query" to "茅台")) as Map<*, *>
         val list = result["results"] as List<*>
@@ -782,9 +772,9 @@ class StockAgentToolsTest {
 
     @Test
     fun getDividendHistoryTool_returnsErrorWhenNotFound() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("000000") } returns null
-        val tool = GetDividendHistoryTool(mockk(relaxed = true), stockRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("000000") } returns null
+        val tool = GetDividendHistoryTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "000000")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("未找到")
@@ -792,15 +782,14 @@ class StockAgentToolsTest {
 
     @Test
     fun getBuyThresholdTool_returnsThresholdFields() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600519" to 1500.0)
-        coEvery { stockRepo.observeStock(any()) } returns flowOf(null)
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
-        coEvery { dividendRepo.observeDividends(any()) } returns flowOf(emptyList())
-        val bondRepo = mockk<BondYieldRepository>(relaxed = true)
-        coEvery { bondRepo.fetch10YBondYield() } returns 2.0
-        val tool = GetBuyThresholdTool(stockRepo, dividendRepo, bondRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getQuoteSnapshots(any(), any()) } returns
+            mapOf("sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1500.0))
+        coEvery { plane.observeStock(any()) } returns flowOf(null)
+        coEvery { plane.getDps(any()) } returns null
+        coEvery { plane.get10YBondYield(any()) } returns 2.0
+        val tool = GetBuyThresholdTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["bondYield10Y"]).isEqualTo(2.0)
@@ -810,11 +799,11 @@ class StockAgentToolsTest {
 
     @Test
     fun getStockEvaluationTool_returnsErrorWithoutPrice() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
-        coEvery { stockRepo.getCachedPrices(any()) } returns emptyMap()
-        val tool = GetStockEvaluationTool(stockRepo, mockk(relaxed = true), mockk(relaxed = true))
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getQuoteSnapshots(any(), any()) } returns emptyMap()
+        coEvery { plane.cachedPrices(any()) } returns emptyMap()
+        val tool = GetStockEvaluationTool(plane, mockk(relaxed = true))
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("无有效现价")
@@ -822,16 +811,16 @@ class StockAgentToolsTest {
 
     @Test
     fun getPortfolioSummaryTool_returnsZerosForEmptyPortfolio() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
-        coEvery { stockRepo.getCachedPrices(emptyList()) } returns emptyMap()
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { plane.getPrices(any(), any()) } returns emptyMap()
         val incomeRepo = mockk<DividendIncomeRepository>(relaxed = true)
         coEvery { incomeRepo.observeForecastTotal() } returns flowOf(100.0)
         val fireRepo = mockk<FireGoalRepository>(relaxed = true)
         coEvery { fireRepo.getGoalOnce() } returns null
         val expenseRepo = mockk<LivingExpenseRepository>(relaxed = true)
         coEvery { expenseRepo.observeExpenses() } returns flowOf(emptyList())
-        val tool = GetPortfolioSummaryTool(stockRepo, incomeRepo, fireRepo, expenseRepo)
+        val tool = GetPortfolioSummaryTool(plane, incomeRepo, fireRepo, expenseRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["totalMarketValue"]).isEqualTo(0.0)
@@ -841,9 +830,9 @@ class StockAgentToolsTest {
 
     @Test
     fun getTransactionsTool_returnsErrorWhenCodeNotFound() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("000000") } returns null
-        val tool = GetTransactionsTool(stockRepo, mockk(relaxed = true))
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("000000") } returns null
+        val tool = GetTransactionsTool(plane, mockk(relaxed = true))
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "000000")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("未找到")
@@ -851,13 +840,11 @@ class StockAgentToolsTest {
 
     // ── get_grid_plans（网格计划查询）──────────────────────
 
-    /** 现价 9.0、4 档网格（8/8.67/9.33/10）、已有一笔 BUY@8.7 → 下一档 8.67 + 执行进度 1/4。 */
+    /** 现价 9.0、4 档网格（8/8.67/9.33/10）、已有一笔 BUY@8.7 买掉 8.67 档 → 下一档 8.0（跳过已买档）+ 执行进度 1/4。 */
     @Test
     fun getGridPlansTool_returnsPlansWithNextLevelAndExecution() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns
-            listOf(StockEntity(code = "sh.600000", name = "浦发银行", marketCode = "1"))
-        coEvery { stockRepo.fetchQuotes(any()) } returns mapOf("sh.600000" to 9.0)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getPricesForCodes(any()) } returns mapOf("sh.600000" to 9.0)
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(
             listOf(gridPlanOf("p1", "sh.600000"))
@@ -866,14 +853,14 @@ class StockAgentToolsTest {
         coEvery { txRepo.getAll() } returns listOf(
             TransactionEntity(stockCode = "sh.600000", type = "BUY", shares = 200, price = 8.7, date = "2026-08-01")
         )
-        val tool = GetGridPlansTool(stockRepo, gridRepo, txRepo)
+        val tool = GetGridPlansTool(plane, gridRepo, txRepo)
         val context = mockk<ToolContext>(relaxed = true)
 
         val result = tool.run(context, emptyMap()) as Map<*, *>
         val plans = result["plans"] as List<*>
         assertThat(plans).hasSize(1)
         val plan = plans[0] as Map<*, *>
-        assertThat(plan["nextBuyLevel"]).isEqualTo(8.67)
+        assertThat(plan["nextBuyLevel"]).isEqualTo(8.0)  // 已买的 8.67 被跳过
         assertThat(plan["triggeredLevels"]).isEqualTo(1)
         assertThat(plan["totalLevels"]).isEqualTo(4)
         assertThat(plan["investedAmount"]).isEqualTo(1740.0)  // 8.7 × 200
@@ -884,17 +871,15 @@ class StockAgentToolsTest {
     /** 传 code 只返回该标的的计划。 */
     @Test
     fun getGridPlansTool_filtersByCode() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600000") } returns
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600000") } returns
             StockSearchResult(code = "sh.600000", name = "浦发银行", marketCode = "1")
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns
-            listOf(StockEntity(code = "sh.600000", name = "浦发银行", marketCode = "1"))
-        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
+        coEvery { plane.getPricesForCodes(any()) } returns emptyMap()
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(
             listOf(gridPlanOf("p1", "sh.600000"), gridPlanOf("p2", "sz.000001"))
         )
-        val tool = GetGridPlansTool(stockRepo, gridRepo, mockk(relaxed = true))
+        val tool = GetGridPlansTool(plane, gridRepo, mockk(relaxed = true))
         val context = mockk<ToolContext>(relaxed = true)
 
         val result = tool.run(context, mapOf("code" to "600000")) as Map<*, *>
@@ -906,9 +891,9 @@ class StockAgentToolsTest {
     /** 未知 code → 报错。 */
     @Test
     fun getGridPlansTool_returnsErrorWhenCodeNotFound() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("000000") } returns null
-        val tool = GetGridPlansTool(stockRepo, mockk(relaxed = true), mockk(relaxed = true))
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("000000") } returns null
+        val tool = GetGridPlansTool(plane, mockk(relaxed = true), mockk(relaxed = true))
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "000000")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("未找到")
@@ -922,12 +907,12 @@ class StockAgentToolsTest {
 
     @Test
     fun getNotificationRulesTool_returnsEmptyForEmptyHoldings() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         val ruleRepo = mockk<NotificationRuleRepository>(relaxed = true)
         coEvery { ruleRepo.getEnabledStockRules(emptyList()) } returns emptyMap()
         coEvery { ruleRepo.getGlobalDividendYieldRule() } returns null
-        val tool = GetNotificationRulesTool(stockRepo, ruleRepo)
+        val tool = GetNotificationRulesTool(plane, ruleRepo)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["stocks"] as List<*>).isEmpty()
@@ -963,24 +948,23 @@ class StockAgentToolsTest {
 
     @Test
     fun getCapitalFlowTool_declaration_requiresCode() {
-        val tool = GetCapitalFlowTool(mockk(), mockk())
+        val tool = GetCapitalFlowTool(mockk())
         assertThat(tool.declaration().name).isEqualTo("get_capital_flow")
         assertThat(tool.declaration().parameters!!.required).containsExactly("code")
     }
 
     @Test
     fun getCapitalFlowTool_returnsFlowFields() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
-        coEvery { marketRepo.fetchCapitalFlow("sh.600519") } returns CapitalFlow(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getCapitalFlow("sh.600519") } returns CapitalFlow(
             mainNetInflow = 1.2e9, mainNetInflowPct = 5.0,
             superLargeNetInflow = 8.0e8, largeNetInflow = 4.0e8,
             mediumNetInflow = -2.0e8, smallNetInflow = -1.0e8,
             superLargeNetInflowPct = 3.0, largeNetInflowPct = 2.0,
             mediumNetInflowPct = -1.0, smallNetInflowPct = -0.5
         )
-        val tool = GetCapitalFlowTool(stockRepo, marketRepo)
+        val tool = GetCapitalFlowTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["code"]).isEqualTo("sh.600519")
@@ -990,9 +974,9 @@ class StockAgentToolsTest {
 
     @Test
     fun getCapitalFlowTool_returnsErrorWhenNotFound() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("000000") } returns null
-        val tool = GetCapitalFlowTool(stockRepo, mockk(relaxed = true))
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("000000") } returns null
+        val tool = GetCapitalFlowTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "000000")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("未找到股票")
@@ -1000,9 +984,9 @@ class StockAgentToolsTest {
 
     @Test
     fun getValuationMetricsTool_returnsPePbMarketCap() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        coEvery { stockRepo.fetchQuoteSnapshots(any()) } returns mapOf(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getQuoteSnapshots(any(), any()) } returns mapOf(
             "sh.600519" to QuoteSnapshot(
                 stockCode = "sh.600519", price = 1500.0,
                 pe = 25.0, pb = 8.0,
@@ -1010,7 +994,7 @@ class StockAgentToolsTest {
                 turnoverRate = 0.3, amplitude = 1.2, volumeRatio = 0.8
             )
         )
-        val tool = GetValuationMetricsTool(stockRepo)
+        val tool = GetValuationMetricsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["peTtm"]).isEqualTo(25.0)
@@ -1020,14 +1004,14 @@ class StockAgentToolsTest {
 
     @Test
     fun getDragonTigerTool_returnsItemsWithoutCode() = runTest {
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
-        coEvery { marketRepo.fetchDragonTiger(null, 20) } returns listOf(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getDragonTiger(null, 20) } returns listOf(
             DragonTigerItem(
                 tradeDate = "2026-07-31", securityCode = "600519", securityName = "贵州茅台",
                 explain = "日涨幅偏离值达7%", netBuy = 1.0e8, billboardDealAmt = 5.0e8
             )
         )
-        val tool = GetDragonTigerTool(marketRepo)
+        val tool = GetDragonTigerTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         val item = (result["items"] as List<*>).single() as Map<*, *>
@@ -1037,17 +1021,17 @@ class StockAgentToolsTest {
 
     @Test
     fun getMarketSentimentTool_returnsIndicesAndIndustries() = runTest {
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
-        coEvery { marketRepo.fetchIndexQuotes() } returns listOf(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getIndexQuotes() } returns listOf(
             IndexQuote("000001", "上证指数", 3000.0, 1.5, null, null, null, null, 1.0e11)
         )
-        coEvery { marketRepo.fetchIndustryList(any(), any()) } returns listOf(
+        coEvery { plane.getIndustryList(any(), any()) } returns listOf(
             MarketListItem(code = "BK1277", name = "白酒", changePct = 3.0, leaderName = "贵州茅台",
                 price = null, pe = null, pb = null, totalMarketCap = null, turnoverRate = null,
                 industry = null, mainNetInflow = null, mainNetInflowPct = null,
                 leaderCode = null, leaderChangePct = null)
         )
-        val tool = GetMarketSentimentTool(marketRepo)
+        val tool = GetMarketSentimentTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat((result["indices"] as List<*>)).isNotEmpty()
@@ -1056,10 +1040,9 @@ class StockAgentToolsTest {
 
     @Test
     fun getFinancialStatementsTool_returnsPeriods() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val finRepo = mockk<FinancialStatementsRepository>(relaxed = true)
-        coEvery { finRepo.getFinancialStatements("sh.600519", false) } returns FinancialStatements(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getFinancialStatements("sh.600519", false) } returns FinancialStatements(
             periods = listOf(
                 FinancialStatements.Period(
                     reportDate = "2024-12-31",
@@ -1075,7 +1058,7 @@ class StockAgentToolsTest {
                 )
             )
         )
-        val tool = GetFinancialStatementsTool(stockRepo, finRepo)
+        val tool = GetFinancialStatementsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         val period = (result["periods"] as List<*>).single() as Map<*, *>
@@ -1086,29 +1069,29 @@ class StockAgentToolsTest {
 
     @Test
     fun getFinancialStatementsTool_passesForceRefresh() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val finRepo = mockk<FinancialStatementsRepository>(relaxed = true)
-        coEvery { finRepo.getFinancialStatements("sh.600519", true) } returns FinancialStatements(periods = emptyList())
-        val tool = GetFinancialStatementsTool(stockRepo, finRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getFinancialStatements("sh.600519", true) } returns FinancialStatements(periods = emptyList())
+        val tool = GetFinancialStatementsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         tool.run(context, mapOf("code" to "600519", "forceRefresh" to true))
-        coVerify { finRepo.getFinancialStatements("sh.600519", true) }
+        coVerify { plane.getFinancialStatements("sh.600519", true) }
     }
 
     @Test
     fun getDividendMetricsTool_returnsMetrics() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
-        coEvery { dividendRepo.observeDividends("sh.600519") } returns flowOf(
-            listOf(
-                DividendEntity(id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 1.0),
-                DividendEntity(id = "d2", stockCode = "sh.600519", reportDate = "2023-12-31", cashPerShare = 1.1),
-                DividendEntity(id = "d3", stockCode = "sh.600519", reportDate = "2022-12-31", cashPerShare = 1.21)
-            )
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getDividends("sh.600519") } returns listOf(
+            DividendEntity(id = "d1", stockCode = "sh.600519", reportDate = "2024-12-31", cashPerShare = 1.0),
+            DividendEntity(id = "d2", stockCode = "sh.600519", reportDate = "2023-12-31", cashPerShare = 1.1),
+            DividendEntity(id = "d3", stockCode = "sh.600519", reportDate = "2022-12-31", cashPerShare = 1.21)
         )
-        val tool = GetDividendMetricsTool(stockRepo, dividendRepo)
+        // 平面透传 getDividendMetrics 会被 relaxed mock 成全 0，这里接真实纯函数保口径
+        coEvery { plane.getDividendMetrics(any()) } answers {
+            com.stock.dividend.data.repository.DividendMetricsCalculator.calculate(firstArg())
+        }
+        val tool = GetDividendMetricsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["totalYears"]).isEqualTo(3)
@@ -1119,11 +1102,13 @@ class StockAgentToolsTest {
 
     @Test
     fun getDividendMetricsTool_returnsErrorWhenNoData() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val dividendRepo = mockk<DividendRepository>(relaxed = true)
-        coEvery { dividendRepo.observeDividends(any()) } returns flowOf(emptyList())
-        val tool = GetDividendMetricsTool(stockRepo, dividendRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getDividends(any()) } returns emptyList()
+        coEvery { plane.getDividendMetrics(any()) } answers {
+            com.stock.dividend.data.repository.DividendMetricsCalculator.calculate(firstArg())
+        }
+        val tool = GetDividendMetricsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("分红数据不足")
@@ -1131,16 +1116,16 @@ class StockAgentToolsTest {
 
     @Test
     fun getIndustryListTool_returnsIndustries() = runTest {
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         coEvery {
-            marketRepo.fetchIndustryList(MarketDataRepository.SortBy.CHANGE, 15)
+            plane.getIndustryList(MarketDataRepository.SortBy.CHANGE, 15)
         } returns listOf(
             MarketListItem(code = "BK1277", name = "白酒", changePct = 3.0, leaderName = "贵州茅台",
                 price = null, pe = null, pb = null, totalMarketCap = null, turnoverRate = null,
                 industry = null, mainNetInflow = null, mainNetInflowPct = null,
                 leaderCode = null, leaderChangePct = null)
         )
-        val tool = GetIndustryListTool(marketRepo)
+        val tool = GetIndustryListTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["sortBy"]).isEqualTo("CHANGE")
@@ -1150,17 +1135,17 @@ class StockAgentToolsTest {
 
     @Test
     fun getIndustryListTool_parsesSortByInflow() = runTest {
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
-        coEvery { marketRepo.fetchIndustryList(MarketDataRepository.SortBy.INFLOW, any()) } returns emptyList()
-        val tool = GetIndustryListTool(marketRepo)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getIndustryList(MarketDataRepository.SortBy.INFLOW, any()) } returns emptyList()
+        val tool = GetIndustryListTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         tool.run(context, mapOf("sortBy" to "INFLOW"))
-        coVerify { marketRepo.fetchIndustryList(MarketDataRepository.SortBy.INFLOW, any()) }
+        coVerify { plane.getIndustryList(MarketDataRepository.SortBy.INFLOW, any()) }
     }
 
     @Test
     fun getIndustryPeersTool_requiresCodeOrIndustry() = runTest {
-        val tool = GetIndustryPeersTool(mockk(relaxed = true), mockk(relaxed = true))
+        val tool = GetIndustryPeersTool(mockk(relaxed = true))
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["error"]?.toString()).contains("code 或 industry")
@@ -1168,16 +1153,16 @@ class StockAgentToolsTest {
 
     @Test
     fun getIndustryPeersTool_returnsPeersByIndustryCode() = runTest {
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         coEvery {
-            marketRepo.fetchIndustryPeers("BK1277", MarketDataRepository.PeerSortBy.MARKET_CAP, 15)
+            plane.getIndustryPeers("BK1277", MarketDataRepository.PeerSortBy.MARKET_CAP, 15)
         } returns listOf(
             MarketListItem(code = "600519", name = "贵州茅台", price = 1500.0, pe = 25.0, totalMarketCap = 1.8e12,
                 changePct = null, pb = null, turnoverRate = null, industry = null,
                 mainNetInflow = null, mainNetInflowPct = null, leaderName = null,
                 leaderCode = null, leaderChangePct = null)
         )
-        val tool = GetIndustryPeersTool(mockk(relaxed = true), marketRepo)
+        val tool = GetIndustryPeersTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("industry" to "BK1277")) as Map<*, *>
         val peer = (result["peers"] as List<*>).single() as Map<*, *>
@@ -1187,10 +1172,9 @@ class StockAgentToolsTest {
 
     @Test
     fun getResearchReportsTool_returnsReports() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val researchRepo = mockk<ResearchRepository>(relaxed = true)
-        coEvery { researchRepo.fetchReports("600519", 10) } returns listOf(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getResearchReports("600519", 10, any()) } returns listOf(
                 ResearchReport(
                     title = "需求根基稳固", stockCode = "600519", stockName = "贵州茅台",
                     orgName = "中邮证券", publishDate = "2026-07-23",
@@ -1198,7 +1182,7 @@ class StockAgentToolsTest {
                     predictNextYearEps = null, predictNextYearPe = null, rating = "买入"
                 )
         )
-        val tool = GetResearchReportsTool(stockRepo, researchRepo)
+        val tool = GetResearchReportsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         val r = (result["reports"] as List<*>).single() as Map<*, *>
@@ -1209,13 +1193,12 @@ class StockAgentToolsTest {
 
     @Test
     fun getStockNewsTool_returnsAnnouncements() = runTest {
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        coEvery { stockRepo.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
-        val researchRepo = mockk<ResearchRepository>(relaxed = true)
-        coEvery { researchRepo.fetchAnnouncements("600519", 10) } returns listOf(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.resolveStock("600519") } returns StockSearchResult("sh.600519", "贵州茅台", "1")
+        coEvery { plane.getAnnouncements("600519", 10) } returns listOf(
             StockAnnouncement(title = "贵州茅台重大事项公告", noticeDate = "2026-07-18", artCode = "AN123")
         )
-        val tool = GetStockNewsTool(stockRepo, researchRepo)
+        val tool = GetStockNewsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "600519")) as Map<*, *>
         val a = (result["announcements"] as List<*>).single() as Map<*, *>
@@ -1225,11 +1208,11 @@ class StockAgentToolsTest {
 
     @Test
     fun getMarketIndexTool_returnsAllIndicesWhenNoCode() = runTest {
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
-        coEvery { marketRepo.fetchIndexQuotes() } returns listOf(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getIndexQuotes() } returns listOf(
             IndexQuote("000001", "上证指数", 3000.0, 1.5, null, null, null, null, 1.0e11)
         )
-        val tool = GetMarketIndexTool(marketRepo)
+        val tool = GetMarketIndexTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         val idx = (result["indices"] as List<*>).single() as Map<*, *>
@@ -1239,10 +1222,10 @@ class StockAgentToolsTest {
 
     @Test
     fun getMarketIndexTool_returnsSingleIndexByCode() = runTest {
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
-        coEvery { marketRepo.fetchIndexOrEtfQuote("000300") } returns
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getIndexOrEtfQuote("000300") } returns
             IndexQuote("000300", "沪深300", 4000.0, 0.8, null, null, null, null, null)
-        val tool = GetMarketIndexTool(marketRepo)
+        val tool = GetMarketIndexTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "000300")) as Map<*, *>
         val idx = (result["indices"] as List<*>).single() as Map<*, *>
@@ -1251,10 +1234,10 @@ class StockAgentToolsTest {
 
     @Test
     fun getEtfInfoTool_returnsEtfQuote() = runTest {
-        val marketRepo = mockk<MarketDataRepository>(relaxed = true)
-        coEvery { marketRepo.fetchIndexOrEtfQuote("510300") } returns
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getIndexOrEtfQuote("510300") } returns
             IndexQuote("510300", "沪深300ETF", 4.65, 1.04, null, null, null, null, 7.0e9)
-        val tool = GetEtfInfoTool(marketRepo)
+        val tool = GetEtfInfoTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, mapOf("code" to "510300")) as Map<*, *>
         assertThat(result["name"]).isEqualTo("沪深300ETF")
@@ -1263,13 +1246,13 @@ class StockAgentToolsTest {
 
     @Test
     fun getTreasuryYieldsTool_returnsYields() = runTest {
-        val bondRepo = mockk<BondYieldRepository>(relaxed = true)
-        coEvery { bondRepo.fetchAllYields() } returns TreasuryYields(
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getAllYields() } returns TreasuryYields(
             date = "2026-07-31",
             yield2Y = 1.26, yield5Y = 1.41, yield10Y = 1.71, yield30Y = 2.19,
             cnUsSpread10Y = 0.45, lpr1Y = 4.28, lpr5Y = 4.75
         )
-        val tool = GetTreasuryYieldsTool(bondRepo)
+        val tool = GetTreasuryYieldsTool(plane)
         val context = mockk<ToolContext>(relaxed = true)
         val result = tool.run(context, emptyMap()) as Map<*, *>
         assertThat(result["cnGovBond10Y"]).isEqualTo(1.71)

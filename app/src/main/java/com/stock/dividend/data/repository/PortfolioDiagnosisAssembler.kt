@@ -1,8 +1,8 @@
 package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.plane.MarketDataPlane
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import javax.inject.Inject
@@ -22,9 +22,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class PortfolioDiagnosisAssembler @Inject constructor(
-    private val dividendRepository: DividendRepository,
-    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
-    private val bondYieldRepository: BondYieldRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) {
 
     /**
@@ -35,26 +33,21 @@ class PortfolioDiagnosisAssembler @Inject constructor(
     suspend fun assemble(stocks: List<StockEntity>, prices: Map<String, Double>): PortfolioRiskDiagnosis? =
         runCatching {
             if (stocks.isEmpty()) return@runCatching null
-            val bondYield = runCatching { bondYieldRepository.fetch10YBondYield() }.getOrNull()
+            val bondYield = runCatching { marketDataPlane.get10YBondYield() }.getOrNull()
             // 基本面 7 天缓存读为主，过期刷新会联网——限流防高频（红线 #5 精神）
             val semaphore = Semaphore(3)
             coroutineScope {
                 val holdings = stocks.mapNotNull { s ->
                     val price = prices[s.code]?.takeIf { it > 0.0 } ?: return@mapNotNull null
-                    val dividends = runCatching { dividendRepository.observeDividends(s.code).first() }
+                    val dividends = runCatching { marketDataPlane.getDividends(s.code) }
                         .getOrDefault(emptyList())
                     val yearlyCash = ForecastCalculator.latestYearlyCashPerShare(dividends)
                     val metrics = DividendMetricsCalculator.calculate(dividends)
+                    // 平面版基本面已补派息率（enrichPayoutRatio 收敛于数据平面）
                     val payoutRatio = semaphore.withPermit {
-                        runCatching { fundamentalsCacheRepository.getFundamentals(s.code) }
+                        runCatching { marketDataPlane.getFundamentals(s.code) }
                             .getOrNull()
-                            ?.let { raw ->
-                                val cashByReportDate = dividends
-                                    .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
-                                    .associate { it.reportDate to it.cashPerShare }
-                                enrichPayoutRatio(raw, cashByReportDate)
-                                    .periods.firstOrNull { it.payoutRatio != null }?.payoutRatio
-                            }
+                            ?.periods?.firstOrNull { it.payoutRatio != null }?.payoutRatio
                     }
                     DiagnoseHolding(
                         code = s.code,

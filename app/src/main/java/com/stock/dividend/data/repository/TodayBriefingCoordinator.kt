@@ -1,8 +1,8 @@
 package com.stock.dividend.data.repository
 
-import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.LlmAnalysisCacheDao
 import com.stock.dividend.data.local.entity.LlmAnalysisCacheEntity
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.remote.LlmApi
 import com.stock.dividend.data.remote.dto.LlmChatRequest
 import com.stock.dividend.data.remote.dto.LlmMessage
@@ -24,16 +24,14 @@ import javax.inject.Singleton
  *
  * 缓存复用 `llm_analysis_cache` 表，scope = [SCOPE]，key = "today_briefing_yyyy-MM-dd"。
  *
- * 注：后台编排口径略放宽——`latestYearlyDividend` 不在此装配（需按股聚合分红表），
- * 故 BOLL 共振信号仍生效，股息率达线信号缺位；完整两类信号由前台 [TodayViewModel] 装配。
+ * 数据获取统一走 [MarketDataPlane]（数据平面）；`latestYearlyDividend` 经平面 getDps 装配
+ * （自动 ensureFresh），后台信号与前台 [TodayViewModel] 口径一致（2026-08-18 补齐曾缺位的股息率达线信号）。
  */
 @Singleton
 class TodayBriefingCoordinator @Inject constructor(
-    private val stockRepository: StockRepository,
-    private val marketDataRepository: MarketDataRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val gridPlanRepository: GridPlanRepository,
-    private val dividendDao: DividendDao,
-    private val bondYieldRepository: BondYieldRepository,
+    private val transactionRepository: TransactionRepository,
     private val diagnosisAssembler: PortfolioDiagnosisAssembler,
     private val llmApi: LlmApi,
     private val llmConfigRepository: LlmConfigRepository,
@@ -43,21 +41,22 @@ class TodayBriefingCoordinator @Inject constructor(
         val config = llmConfigRepository.snapshot()
         if (!config.isComplete) return@withContext false
         try {
-            // 1. 拉数据（各步吞异常返回空，红线 #2）
-            val stocks = runCatching { stockRepository.observeAllStocks().first() }.getOrDefault(emptyList())
-            val snapshots = runCatching { stockRepository.fetchQuoteSnapshots(stocks) }.getOrDefault(emptyMap())
-            val bond = runCatching { bondYieldRepository.fetch10YBondYield() }.getOrDefault(BondYieldRepository.DEFAULT_YIELD)
+            // 1. 拉数据（数据平面；各步吞异常返回空，红线 #2）
+            val stocks = runCatching { marketDataPlane.observeAllStocks().first() }.getOrDefault(emptyList())
+            val snapshots = runCatching { marketDataPlane.getQuoteSnapshots(stocks, force = true) }.getOrDefault(emptyMap())
+            val bond = runCatching { marketDataPlane.get10YBondYield() }.getOrDefault(BondYieldRepository.DEFAULT_YIELD)
             val gridPlans = runCatching { gridPlanRepository.observeAll().first() }.getOrDefault(emptyList())
-            val dividends = runCatching { dividendDao.getAllWithExDate() }.getOrDefault(emptyList())
-            val indices = runCatching { marketDataRepository.fetchIndexQuotes() }.getOrDefault(emptyList())
+            val dividends = runCatching { marketDataPlane.getAllDividendsWithExDate() }.getOrDefault(emptyList())
+            val indices = runCatching { marketDataPlane.getIndexQuotes() }.getOrDefault(emptyList())
 
-            // 2. 聚合信号（每只股拉周线 BOLL；后台 Worker 容忍耗时）
+            // 2. 聚合信号（每只股拉周线 BOLL——平面内置限流/缓存；DPS 经平面自动 ensureFresh）
             val stockSnapshots = stocks.map { entity ->
                 TodayStockSnapshot(
                     code = entity.code,
                     name = entity.name,
                     price = snapshots[entity.code]?.price,
-                    weeklyBand = runCatching { stockRepository.fetchBoll(entity.code) }.getOrNull(),
+                    weeklyBand = runCatching { marketDataPlane.getBoll(entity.code) }.getOrNull(),
+                    latestYearlyDividend = runCatching { marketDataPlane.getDps(entity.code) }.getOrNull(),
                     bondYield10Y = bond,
                     buyThresholdMultiplier = entity.buyThresholdMultiplier,
                 )
@@ -68,6 +67,9 @@ class TodayBriefingCoordinator @Inject constructor(
                 gridCurrentPrices = snapshots.mapValues { it.value.price ?: 0.0 },
                 dividends = dividends,
                 today = date,
+                // 已买档不再出现在「网格下一档」信号里（每档只买一次）
+                gridTransactionsByStock = runCatching { transactionRepository.getAll() }
+                    .getOrDefault(emptyList()).groupBy { it.stockCode },
             )
             val signals = TodaySignalAggregator.aggregate(input)
 
@@ -82,7 +84,7 @@ class TodayBriefingCoordinator @Inject constructor(
                 diagnosisAssembler.assemble(stocks.filter { it.shares > 0 }, prices)
             }.getOrNull()?.let(::buildDiagnosisLine)
             val marketLine = runCatching {
-                marketDataRepository.fetchIndustryList(MarketDataRepository.SortBy.CHANGE, limit = 30)
+                marketDataPlane.getIndustryList(MarketDataRepository.SortBy.CHANGE, limit = 30)
             }.getOrDefault(emptyList())
                 .takeIf { it.isNotEmpty() }
                 ?.let(MarketMoodCalculator::splitGainersLosers)

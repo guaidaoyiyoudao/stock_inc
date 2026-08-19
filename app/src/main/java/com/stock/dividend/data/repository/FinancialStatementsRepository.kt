@@ -15,6 +15,7 @@ import javax.inject.Singleton
  * 网络失败回退旧缓存、无缓存则 null。全程吞异常（红线 #2）。
  *
  * 与 [FundamentalsCacheRepository] 同构，区别在拉取三表（利润/现金流/资产负债）。
+ * 刷新时按报告期 [mergeByReportDate] 合并——历史期次不可变，远端窗口没返回的旧期次从缓存续接，不随刷新丢失。
  */
 @Singleton
 class FinancialStatementsRepository @Inject constructor(
@@ -31,16 +32,19 @@ class FinancialStatementsRepository @Inject constructor(
 
         val remote = runCatching { fetchFromNetwork(stockCode) }.getOrNull()
         if (remote != null) {
+            // 历史期次不可变：远端窗口没返回的旧期次从缓存续接，不随刷新丢失
+            val cachedPeriods = cached?.let { parse(it.payload)?.periods }.orEmpty()
+            val merged = FinancialStatements(mergeByReportDate(cachedPeriods, remote.periods) { it.reportDate })
             runCatching {
                 financialStatementsCacheDao.upsert(
                     FinancialStatementsCacheEntity(
                         stockCode = stockCode,
-                        payload = gson.toJson(remote),
+                        payload = gson.toJson(merged),
                         fetchedAt = System.currentTimeMillis()
                     )
                 )
             }
-            return remote
+            return merged
         }
         return cached?.let { parse(it.payload) }
     }

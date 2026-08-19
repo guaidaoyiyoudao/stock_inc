@@ -6,25 +6,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.repository.BollBand
-import com.stock.dividend.data.repository.BondYieldRepository
-import com.stock.dividend.data.repository.BuyThresholdStatus
-import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.Fundamentals
-import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
-import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.LlmAnalysisRepository
 import com.stock.dividend.data.repository.QuoteSnapshot
 import com.stock.dividend.data.repository.StockLlmAnalysisResult
 import com.stock.dividend.data.repository.StockLlmAnalysisState
 import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.TradeStrategyRepository
-import com.stock.dividend.data.repository.enrichPayoutRatio
 import com.stock.dividend.data.repository.toUserStrategyRef
-import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.data.repository.BuyThresholdStatus
 import com.stock.dividend.data.repository.computeBuyThreshold
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
@@ -78,13 +73,11 @@ data class StockDetailUiState(
 @HiltViewModel
 class StockDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository,
-    private val bondYieldRepository: BondYieldRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val llmAnalysisRepository: LlmAnalysisRepository,
-    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
     private val tradeStrategyRepository: TradeStrategyRepository,
-    private val klineRepository: KlineRepository
+    /** 仅用于写操作（updateYieldPeriod/updateBuyThresholdMultiplier）；读一律走数据平面。 */
+    private val stockRepository: com.stock.dividend.data.repository.StockRepository
 ) : ViewModel() {
 
     private val stockCode: String = savedStateHandle["code"] ?: ""
@@ -92,13 +85,13 @@ class StockDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(StockDetailUiState())
     val uiState: StateFlow<StockDetailUiState> = _uiState.asStateFlow()
 
-    /** fetchFundamentals 的原始结果（payoutRatio 未补全）；由 recomputeFundamentals 补全后写入 uiState。 */
+    /** 数据平面基本面产物（已补派息率）；分红更新时经 recomputeFundamentals 幂等重算。 */
     private var rawFundamentals: Fundamentals? = null
 
-    private val stockFlow = stockRepository.observeStock(stockCode)
+    private val stockFlow = marketDataPlane.observeStock(stockCode)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    private val dividendsFlow = dividendRepository.observeDividends(stockCode)
+    private val dividendsFlow = marketDataPlane.observeDividends(stockCode)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -169,7 +162,7 @@ class StockDetailViewModel @Inject constructor(
                 runCatching { sf.first() }.getOrNull()
             } ?: return@launch
             val snapshot = runCatching {
-                stockRepository.fetchQuoteSnapshots(listOf(stock))[stock.code]
+                marketDataPlane.getQuoteSnapshots(listOf(stock))[stock.code]
             }.getOrNull()
             if (snapshot != null) {
                 _uiState.value = _uiState.value.copy(quote = snapshot)
@@ -181,7 +174,7 @@ class StockDetailViewModel @Inject constructor(
     private fun loadKlines() {
         viewModelScope.launch {
             val bars = runCatching {
-                klineRepository.fetchKlines(stockCode, KlinePeriod.DAILY, KLINE_BARS)
+                marketDataPlane.getKlines(stockCode, KlinePeriod.DAILY, KLINE_BARS)
             }.getOrDefault(emptyList())
             if (bars.isNotEmpty()) {
                 _uiState.value = _uiState.value.copy(klines = bars)
@@ -189,40 +182,42 @@ class StockDetailViewModel @Inject constructor(
         }
     }
 
-    /** 拉取单股基本面（走缓存仓库，非 forceRefresh）并补全派息率；失败降级为 null（红线 #2）。成功/失败均复位 fundamentalsLoading（红线 #3）。 */
+    /** 拉取单股基本面（数据平面：7 天缓存 + 已补派息率）；失败降级为 null（红线 #2）。成功/失败均复位 fundamentalsLoading（红线 #3）。 */
     private fun loadFundamentals() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(fundamentalsLoading = true)
-            val result = runCatching { fundamentalsCacheRepository.getFundamentals(stockCode) }.getOrNull()
-            rawFundamentals = result
-            recomputeFundamentals()
-            _uiState.value = _uiState.value.copy(fundamentalsLoading = false)
+            rawFundamentals = runCatching { marketDataPlane.getFundamentals(stockCode) }.getOrNull()
+            _uiState.value = _uiState.value.copy(
+                fundamentals = rawFundamentals,
+                fundamentalsLoading = false
+            )
         }
     }
 
-    /** 用当前分红数据（EPS_DIV）补全 [rawFundamentals] 的派息率并写入 uiState（纯函数 enrichPayoutRatio）。 */
+    /** 分红更新后用最新 EPS_DIV 重算各期派息率（幂等，经数据平面；不重读 7 天缓存）。 */
     private fun recomputeFundamentals() {
         val raw = rawFundamentals ?: run {
             _uiState.value = _uiState.value.copy(fundamentals = null)
             return
         }
-        val epsDivByDate = _uiState.value.dividends
-            .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
-            .associate { it.reportDate to it.cashPerShare }
-        val enriched = enrichPayoutRatio(raw, epsDivByDate)
-        _uiState.value = _uiState.value.copy(fundamentals = enriched)
+        viewModelScope.launch {
+            val enriched = runCatching { marketDataPlane.enrichFundamentals(raw, stockCode) }
+                .getOrDefault(raw)
+            _uiState.value = _uiState.value.copy(fundamentals = enriched)
+        }
     }
 
     /** 手动刷新基本面（卡片「更新」入口调用，forceRefresh 绕过 7 天缓存）。 */
     fun refreshFundamentals() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(fundamentalsLoading = true)
-            val result = runCatching {
-                fundamentalsCacheRepository.getFundamentals(stockCode, forceRefresh = true)
+            rawFundamentals = runCatching {
+                marketDataPlane.getFundamentals(stockCode, forceRefresh = true)
             }.getOrNull()
-            rawFundamentals = result
-            recomputeFundamentals()
-            _uiState.value = _uiState.value.copy(fundamentalsLoading = false)
+            _uiState.value = _uiState.value.copy(
+                fundamentals = rawFundamentals,
+                fundamentalsLoading = false
+            )
         }
     }
 
@@ -234,11 +229,11 @@ class StockDetailViewModel @Inject constructor(
         val stock = _uiState.value.stock ?: return
         val dividends = _uiState.value.dividends
         viewModelScope.launch {
-            val bondYield = runCatching { bondYieldRepository.fetch10YBondYield() }
-                .getOrDefault(BondYieldRepository.DEFAULT_YIELD)
+            val bondYield = runCatching { marketDataPlane.get10YBondYield() }
+                .getOrDefault(com.stock.dividend.data.repository.BondYieldRepository.DEFAULT_YIELD)
             // 优先复用已加载的行情快照现价；缺失时才单独拉一次（loadQuote 异步，首帧可能未就绪）
             val currentPrice = _uiState.value.quote?.price
-                ?: runCatching { stockRepository.fetchQuotes(listOf(stock))[stock.code] }.getOrNull()
+                ?: runCatching { marketDataPlane.getPrices(listOf(stock))[stock.code] }.getOrNull()
             val latestCash = ForecastCalculator.latestYearlyCashPerShare(dividends)
             val status = computeBuyThreshold(
                 bondYield10Y = bondYield,
@@ -278,8 +273,7 @@ class StockDetailViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRefreshing = true)
-            val securityCode = stockCode.substringAfter(".")
-            dividendRepository.fetchAndCacheDividends(stockCode, securityCode)
+            marketDataPlane.refreshDividends(stockCode)
             _uiState.value = _uiState.value.copy(isRefreshing = false)
         }
     }
@@ -338,15 +332,15 @@ class StockDetailViewModel @Inject constructor(
 
             // 并发拉三周期 BOLL（单股仅 3 请求，无需 Semaphore 限流）；失败降级 null
             val (dailyBand, weeklyBand, monthlyBand) = listOf(
-                async { runCatching { stockRepository.fetchBoll(stockCode, KlinePeriod.DAILY) }.getOrNull() },
-                async { runCatching { stockRepository.fetchBoll(stockCode, KlinePeriod.WEEKLY) }.getOrNull() },
-                async { runCatching { stockRepository.fetchBoll(stockCode, KlinePeriod.MONTHLY) }.getOrNull() }
+                async { runCatching { marketDataPlane.getBoll(stockCode, KlinePeriod.DAILY) }.getOrNull() },
+                async { runCatching { marketDataPlane.getBoll(stockCode, KlinePeriod.WEEKLY) }.getOrNull() },
+                async { runCatching { marketDataPlane.getBoll(stockCode, KlinePeriod.MONTHLY) }.getOrNull() }
             ).awaitAll().let { Triple(it[0] as BollBand?, it[1] as BollBand?, it[2] as BollBand?) }
 
             // 现价：优先复用已加载的行情快照（含 PE/PB/市值）；缺失才单独拉一次
             val quote = state.quote
             val currentPrice = quote?.price
-                ?: runCatching { stockRepository.fetchQuotes(listOf(stock))[stock.code] }.getOrNull()
+                ?: runCatching { marketDataPlane.getPrices(listOf(stock))[stock.code] }.getOrNull()
 
             val input = buildStockLlmInput(stock, state, currentPrice, dailyBand, weeklyBand, monthlyBand, quote)
             // 回流全局用户投资原则（失败降级空，不阻塞分析，红线 #2）

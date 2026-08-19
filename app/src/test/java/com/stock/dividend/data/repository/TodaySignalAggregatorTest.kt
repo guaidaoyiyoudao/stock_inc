@@ -3,6 +3,7 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.GridPlanEntity
+import com.stock.dividend.data.local.entity.TransactionEntity
 import org.junit.Test
 import java.time.LocalDate
 
@@ -142,5 +143,27 @@ class TodaySignalAggregatorTest {
         )
         assertThat(result).hasSize(3)
         assertThat(result.map { it.key }.distinct()).hasSize(3)
+    }
+    /** 已买档不出现在「网格下一档」信号（每档只买一次）：BUY@9.4 买掉 9.33 档 → 信号指向 8.67。 */
+    @Test
+    fun gridNextLevel_skipsBoughtLevel() {
+        val plan = GridPlanEntity(
+            id = "g1", stockCode = "sh.600003", stockName = "Grid",
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 11.0, grids = 3, totalCapital = 9000.0
+        )
+        val prices = mapOf("sh.600003" to 9.5)
+        // 3 档网格 8/9/10；BUY@9.4 命中 9.0 档？——半步长 = (9-8)/2 = 0.5，|9.4-9|=0.4 ≤ 0.5 → 9.0 档已买
+        val txs = mapOf(
+            "sh.600003" to listOf(
+                TransactionEntity(id = 1L, stockCode = "sh.600003", type = "BUY", shares = 100, price = 9.4, date = "2026-08-01")
+            )
+        )
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(emptyList(), listOf(plan), prices, emptyList(), today, gridTransactionsByStock = txs)
+        )
+        val grid = result.first { it.type == TodaySignalType.GRID_NEXT_LEVEL }
+        // 下一档跳过已买的 9.0，指向 8.0
+        assertThat(grid.detail).contains("8.00")
+        assertThat(grid.detail).doesNotContain("9.00")
     }
 }

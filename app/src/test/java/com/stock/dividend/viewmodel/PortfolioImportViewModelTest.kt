@@ -5,20 +5,28 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.ImportRow
 import com.stock.dividend.data.repository.ImportSummary
-import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.repository.LlmConfig
+import com.stock.dividend.data.repository.LlmConfigRepository
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.VisionImportRepository
+import com.stock.dividend.data.repository.VisionImportResult
+import com.stock.dividend.data.repository.VisionParseMode
 import com.stock.dividend.data.scan.OcrElement
+import com.stock.dividend.data.scan.ParsedHoldingRow
 import com.stock.dividend.data.scan.TextRecognitionService
 import com.stock.dividend.data.scan.loadSampledBitmap
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -34,9 +42,11 @@ import org.robolectric.RobolectricTestRunner
 class PortfolioImportViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
+    private val marketDataPlane: MarketDataPlane = mockk(relaxed = true)
     private val stockRepository: StockRepository = mockk()
-    private val dividendRepository: DividendRepository = mockk(relaxed = true)
     private val textRecognitionService: TextRecognitionService = mockk()
+    private val visionImportRepository: VisionImportRepository = mockk()
+    private val llmConfigRepository: LlmConfigRepository = mockk()
     // Robolectric 提供真实 Context；Uri.parse 在 Robolectric 下返回真实 Uri，无需 mockkStatic(Uri::class)
     private lateinit var context: Context
     private val fakeBitmap: Bitmap = mockk(relaxed = true)
@@ -48,6 +58,8 @@ class PortfolioImportViewModelTest {
         // loadSampledBitmap 真实实现会解码图片文件，单测里仍需 mock
         mockkStatic("com.stock.dividend.data.scan.BitmapLoaderKt")
         coEvery { loadSampledBitmap(any(), any<Uri>()) } returns fakeBitmap
+        // 默认视觉模型未配置（engine 保持 LOCAL_OCR，与旧行为一致）；单测可覆盖
+        every { llmConfigRepository.observeVisionConfig() } returns flowOf(LlmConfig("", "", ""))
     }
 
     @After
@@ -228,5 +240,76 @@ class PortfolioImportViewModelTest {
     }
 
     private fun createViewModel() =
-        PortfolioImportViewModel(stockRepository, dividendRepository, textRecognitionService, context)
+        PortfolioImportViewModel(
+            marketDataPlane, stockRepository, textRecognitionService,
+            visionImportRepository, llmConfigRepository, context
+        )
+
+    // ── AI 视觉引擎 ──
+
+    @Test
+    fun `vision configured defaults engine to AI and fills rows from vision result`() = runTest {
+        every { llmConfigRepository.observeVisionConfig() } returns flowOf(
+            LlmConfig("https://open.bigmodel.cn/api/paas/v4/", "key", "glm-4.6v-flash")
+        )
+        coEvery { visionImportRepository.parse(any(), VisionParseMode.HOLDINGS, any()) } returns
+            VisionImportResult.Holdings(
+                listOf(
+                    ParsedHoldingRow("", "600519", 100, 1500.5, "贵州茅台"),
+                    ParsedHoldingRow("", "平安银行", 1000, 12.34, null)
+                )
+            )
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle() // 让 init collector 把默认引擎切成 AI
+        assertThat(viewModel.uiState.value.engine).isEqualTo(ImportEngine.AI_VISION)
+
+        viewModel.onImagePicked(Uri.parse("content://x/1"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertThat(state.phase).isEqualTo(ImportPhase.Review)
+        assertThat(state.rows).hasSize(2)
+        assertThat(state.rows[0].codeOrNameInput).isEqualTo("600519")
+        assertThat(state.rows[0].sharesInput).isEqualTo("100")
+        assertThat(state.rows[0].costPerShareInput).isEqualTo("1500.5")
+        assertThat(state.rows[0].resolvedName).isEqualTo("贵州茅台")
+        coVerify(exactly = 0) { textRecognitionService.recognize(any()) }
+    }
+
+    @Test
+    fun `AI engine NotConfigured yields guidance error`() = runTest {
+        every { llmConfigRepository.observeVisionConfig() } returns flowOf(
+            LlmConfig("https://open.bigmodel.cn/api/paas/v4/", "key", "glm-4.6v-flash")
+        )
+        coEvery { visionImportRepository.parse(any(), VisionParseMode.HOLDINGS, any()) } returns
+            VisionImportResult.NotConfigured
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.onImagePicked(Uri.parse("content://x/1"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertThat(state.phase).isEqualTo(ImportPhase.Error)
+        assertThat(state.errorMessage).contains("视觉模型")
+    }
+
+    @Test
+    fun `manually switched engine to local uses OCR path`() = runTest {
+        every { llmConfigRepository.observeVisionConfig() } returns flowOf(
+            LlmConfig("https://open.bigmodel.cn/api/paas/v4/", "key", "glm-4.6v-flash")
+        )
+        seedRecognized(names = listOf("贵州茅台"), shares = listOf(100), prices = listOf(1500.0))
+
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+        viewModel.onEngineChanged(ImportEngine.LOCAL_OCR)
+        viewModel.onImagePicked(Uri.parse("content://x/1"))
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.phase).isEqualTo(ImportPhase.Review)
+        coVerify(exactly = 0) { visionImportRepository.parse(any(), any(), any()) }
+    }
 }

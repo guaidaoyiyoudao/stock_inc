@@ -9,6 +9,8 @@ import javax.inject.Singleton
 /**
  * 单股基本面缓存编排：新鲜（≤7 天）直接返回；过期/缺失走 [StockRepository.fetchFundamentals]
  * 并写缓存；网络失败回退旧缓存、无缓存则 null。全程吞异常（红线 #2）。
+ *
+ * 刷新时按报告期 [mergeByReportDate] 合并——历史期次不可变，远端窗口没返回的旧期次从缓存续接，不随刷新丢失。
  */
 @Singleton
 class FundamentalsCacheRepository @Inject constructor(
@@ -25,16 +27,19 @@ class FundamentalsCacheRepository @Inject constructor(
 
         val remote = runCatching { stockRepository.fetchFundamentals(stockCode) }.getOrNull()
         if (remote != null) {
+            // 历史期次不可变：远端窗口没返回的旧期次从缓存续接，不随刷新丢失
+            val cachedPeriods = cached?.let { parse(it.payload)?.periods }.orEmpty()
+            val merged = Fundamentals(mergeByReportDate(cachedPeriods, remote.periods) { it.reportDate })
             runCatching {
                 fundamentalsCacheDao.upsert(
                     FundamentalsCacheEntity(
                         stockCode = stockCode,
-                        payload = gson.toJson(remote),
+                        payload = gson.toJson(merged),
                         fetchedAt = System.currentTimeMillis()
                     )
                 )
             }
-            return remote
+            return merged
         }
         return cached?.let { parse(it.payload) }
     }

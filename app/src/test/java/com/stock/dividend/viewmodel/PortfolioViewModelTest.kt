@@ -53,8 +53,8 @@ import org.robolectric.RobolectricTestRunner
 class PortfolioViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
+    private val marketDataPlane: com.stock.dividend.data.plane.MarketDataPlane = mockk(relaxed = true)
     private val stockRepository: StockRepository = mockk()
-    private val dividendDao: DividendDao = mockk()
     private val livingExpenseRepository: LivingExpenseRepository = mockk()
     private val transactionDao: TransactionDao = mockk()
     private val notificationCheckCoordinator: NotificationCheckCoordinator = mockk(relaxed = true)
@@ -62,12 +62,6 @@ class PortfolioViewModelTest {
     private val llmAnalysisRepository: LlmAnalysisRepository = mockk()
     private val tradeStrategyRepository: TradeStrategyRepository = mockk {
         coEvery { activeStrategies() } returns emptyList()
-    }
-    private val fundamentalsCacheRepository: FundamentalsCacheRepository = mockk {
-        coEvery { getFundamentals(any(), any()) } returns null
-    }
-    private val bondYieldRepository: BondYieldRepository = mockk {
-        coEvery { fetch10YBondYield(any()) } returns BondYieldRepository.DEFAULT_YIELD
     }
     // Robolectric 提供真实可用的 Context + SharedPreferences，不再需要 mockk 整条 prefs 链
     private lateinit var context: Context
@@ -81,17 +75,16 @@ class PortfolioViewModelTest {
         context = ApplicationProvider.getApplicationContext()
         every { notificationRuleRepository.observeEvalThresholds() } returns
             MutableStateFlow(DividendThresholds())
-        every { stockRepository.observeAllStocks() } returns stocksFlow
+        every { marketDataPlane.observeAllStocks() } returns stocksFlow
         every { stockRepository.observeAllStockTags() } returns MutableStateFlow(emptyList())
         every { stockRepository.observeAllTags() } returns MutableStateFlow(emptyList())
         every { stockRepository.observeIndustryTargets() } returns MutableStateFlow(emptyList())
-        every { dividendDao.observeByStock(any()) } returns MutableStateFlow(emptyList())
+        every { marketDataPlane.observeDividends(any()) } returns MutableStateFlow(emptyList())
         every { livingExpenseRepository.observeExpenses() } returns livingExpensesFlow
         coEvery { stockRepository.getIndustryTargets() } returns emptyList()
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns emptyMap()
-        coEvery { stockRepository.getCachedPrices(any()) } returns emptyMap()
-        coEvery { stockRepository.fetchBoll(any()) } returns null
-        coEvery { stockRepository.fetchBoll(any(), any()) } returns null
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns emptyMap()
+        coEvery { marketDataPlane.cachedPrices(any()) } returns emptyMap()
+        coEvery { marketDataPlane.getBoll(any(), any()) } returns null
         coEvery { transactionDao.getByStock(any()) } returns emptyList()
         // 已实现盈亏 collector 订阅全量交易流水；默认返回空列表（无卖出 → 无已实现盈亏）。
         every { transactionDao.observeAll() } returns MutableStateFlow(emptyList())
@@ -122,7 +115,7 @@ class PortfolioViewModelTest {
             stock("sz.000001", shares = 100, costPerShare = 10.0)
         )
         // 模拟 fetchQuoteSnapshots 抛异常 → StockRepository 内部 catch 返回 emptyMap()
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } throws java.io.IOException("network down")
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } throws java.io.IOException("network down")
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -140,9 +133,9 @@ class PortfolioViewModelTest {
         stocksFlow.value = listOf(
             stock("sz.000001", shares = 100, costPerShare = 10.0)
         )
-        coEvery { stockRepository.getCachedPrices(any()) } returns mapOf("sz.000001" to 12.0)
+        coEvery { marketDataPlane.cachedPrices(any()) } returns mapOf("sz.000001" to 12.0)
         // 网络拉价失败
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } throws java.io.IOException("down")
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } throws java.io.IOException("down")
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -160,7 +153,7 @@ class PortfolioViewModelTest {
             stock("sz.000001", shares = 100, costPerShare = 10.0),
             stock("sh.600519", shares = 50, costPerShare = 1500.0)
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf(
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf(
             "sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0),
             "sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1800.0)
         )
@@ -187,7 +180,7 @@ class PortfolioViewModelTest {
             stock("sz.000001", shares = 100, costPerShare = 10.0),
             stock("sh.600519", shares = 50, costPerShare = 1500.0)
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf(
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf(
             "sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0),
             "sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1800.0)
         )
@@ -205,7 +198,7 @@ class PortfolioViewModelTest {
             stock("sz.000001", shares = 100, costPerShare = 10.0, targetWeight = 30.0),
             stock("sh.600519", shares = 50, costPerShare = 1500.0, targetWeight = 50.0)
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns emptyMap()
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns emptyMap()
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -223,7 +216,7 @@ class PortfolioViewModelTest {
         stocksFlow.value = listOf(
             stock("sz.000001", shares = 100, costPerShare = 10.0, targetWeight = 10.0, industry = "消费")
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0))
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0))
         // 行业目标 50%，个股占行业 10% → 目标金额 = 400000 * 50% * 10% / 100 = 20000
         coEvery { stockRepository.getIndustryTargets() } returns listOf(
             com.stock.dividend.data.local.entity.IndustryTargetEntity("消费", 50.0)
@@ -244,7 +237,7 @@ class PortfolioViewModelTest {
         stocksFlow.value = listOf(
             stock("sz.000001", shares = 100, costPerShare = 10.0, targetWeight = 10.0)
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0))
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0))
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -288,7 +281,7 @@ class PortfolioViewModelTest {
         stocksFlow.value = listOf(
             stock("sz.000001", shares = 100, costPerShare = 10.0, targetWeight = 10.0)
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0))
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0))
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -339,7 +332,7 @@ class PortfolioViewModelTest {
             stock("sh.601398", shares = 200, costPerShare = 5.0, industry = "银行"),    // 工商银行
             stock("sh.600519", shares = 10, costPerShare = 1500.0, industry = "食品饮料")
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf(
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf(
             "sh.600036" to QuoteSnapshot(stockCode = "sh.600036", price = 40.0),  // 4000
             "sh.601398" to QuoteSnapshot(stockCode = "sh.601398", price = 5.0),   // 1000
             "sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1600.0) // 16000
@@ -381,7 +374,7 @@ class PortfolioViewModelTest {
             stock("sz.000001", shares = 100, costPerShare = 10.0),
             stock("sh.600519", shares = 0, costPerShare = 0.0)   // 纯自选
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0))
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0))
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -406,7 +399,7 @@ class PortfolioViewModelTest {
         )
         // 记录每次 fetchQuoteSnapshots 调用的入参（stocks 列表），断言自选股 code 被包含
         val fetchedStocks = mutableListOf<List<StockEntity>>()
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } answers {
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } answers {
             fetchedStocks += firstArg<List<StockEntity>>()
             mapOf("sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0), "sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1800.0))
         }
@@ -432,13 +425,13 @@ class PortfolioViewModelTest {
         stocksFlow.value = listOf(
             stock("sh.600519", shares = 0, costPerShare = 0.0)   // 仅一只自选股
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf("sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1800.0))
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf("sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1800.0))
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
 
         // 纯自选场景下 fetchQuoteSnapshots 也被调用
-        coVerify { stockRepository.fetchQuoteSnapshots(any()) }
+        coVerify { marketDataPlane.getQuoteSnapshots(any(), any()) }
         // loading 正常复位，刷新按钮不会被卡死
         assertThat(viewModel.uiState.value.isLoading).isFalse()
         // 自选股现价被刷新
@@ -449,7 +442,7 @@ class PortfolioViewModelTest {
     @Test
     fun `forecastTotal sums forecast income for shares-greater-than-zero holdings`() = runTest {
         val holding = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
-        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(
+        every { marketDataPlane.observeDividends("sz.000001") } returns MutableStateFlow(
             listOf(
                 DividendEntity(
                     id = "sz.000001_2025",
@@ -476,7 +469,7 @@ class PortfolioViewModelTest {
     fun `costDividendYield sums latest yearly dividend times shares over total cost`() = runTest {
         // 持仓 A：100 股 × 成本 10，最新年度每股股息 1.0  → 股息合计 100，成本合计 1000
         val holdingA = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
-        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(
+        every { marketDataPlane.observeDividends("sz.000001") } returns MutableStateFlow(
             listOf(
                 DividendEntity(
                     id = "sz.000001_2025",
@@ -488,7 +481,7 @@ class PortfolioViewModelTest {
         )
         // 持仓 B：200 股 × 成本 5，最新年度每股股息 0.5 → 股息合计 100，成本合计 1000
         val holdingB = stock("sz.000002", shares = 200, costPerShare = 5.0, yieldPeriod = "1")
-        every { dividendDao.observeByStock("sz.000002") } returns MutableStateFlow(
+        every { marketDataPlane.observeDividends("sz.000002") } returns MutableStateFlow(
             listOf(
                 DividendEntity(
                     id = "sz.000002_2025",
@@ -519,7 +512,7 @@ class PortfolioViewModelTest {
             stock("sz.000001", shares = 100, costPerShare = 10.0),
             stock("sh.600519", shares = 0, costPerShare = 0.0)
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf(
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf(
             "sz.000001" to QuoteSnapshot(stockCode = "sz.000001", price = 12.0),
             "sh.600519" to QuoteSnapshot(stockCode = "sh.600519", price = 1800.0)
         )
@@ -550,7 +543,7 @@ class PortfolioViewModelTest {
     fun `costDividendYield is null when no dividend data or zero cost`() = runTest {
         // 持仓无股息记录 → 无 latestYearlyDividend
         val holding = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
-        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(emptyList())
+        every { marketDataPlane.observeDividends("sz.000001") } returns MutableStateFlow(emptyList())
         stocksFlow.value = listOf(holding)
 
         val viewModel = createViewModel()
@@ -567,7 +560,7 @@ class PortfolioViewModelTest {
     @Test
     fun `fire progress uses annualized living expenses as denominator`() = runTest {
         val holding = stock("sz.000001", shares = 100, costPerShare = 10.0, yieldPeriod = "1")
-        every { dividendDao.observeByStock("sz.000001") } returns MutableStateFlow(
+        every { marketDataPlane.observeDividends("sz.000001") } returns MutableStateFlow(
             listOf(
                 DividendEntity(
                     id = "sz.000001_2025",
@@ -640,7 +633,7 @@ class PortfolioViewModelTest {
     @Test
     fun `loadBoll fetches band and exposes it via uiState`() = runTest {
         val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
-        coEvery { stockRepository.fetchBoll("sh.600036") } returns band
+        coEvery { marketDataPlane.getBoll("sh.600036") } returns band
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -654,7 +647,7 @@ class PortfolioViewModelTest {
     @Test
     fun `loadBoll caches result and does not refetch on repeat call`() = runTest {
         val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
-        coEvery { stockRepository.fetchBoll("sh.600036") } returns band
+        coEvery { marketDataPlane.getBoll("sh.600036") } returns band
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -664,12 +657,12 @@ class PortfolioViewModelTest {
         viewModel.loadBoll("sh.600036") // 重复调用，应命中缓存不重发请求
         testDispatcher.scheduler.advanceUntilIdle()
 
-        coVerify(exactly = 1) { stockRepository.fetchBoll("sh.600036") }
+        coVerify(exactly = 1) { marketDataPlane.getBoll("sh.600036", any()) }
     }
 
     @Test
     fun `loadBoll caches null on failure to prevent retry storm`() = runTest {
-        coEvery { stockRepository.fetchBoll("sh.600036") } throws java.io.IOException("down")
+        coEvery { marketDataPlane.getBoll("sh.600036") } throws java.io.IOException("down")
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -681,7 +674,7 @@ class PortfolioViewModelTest {
 
         // 失败也算「已尝试」，写入 null；重复调用不应再次发请求
         assertThat(viewModel.uiState.value.stockBands["sh.600036"]).isNull()
-        coVerify(exactly = 1) { stockRepository.fetchBoll("sh.600036") }
+        coVerify(exactly = 1) { marketDataPlane.getBoll("sh.600036", any()) }
     }
 
     // ── evaluateVisibleHoldings：一键评估筛选后的持仓 ─────────────────
@@ -695,16 +688,16 @@ class PortfolioViewModelTest {
             stock("sh.600036", shares = 100, costPerShare = 10.0, industry = "银行"),
             stock("sz.000001", shares = 200, costPerShare = 5.0, industry = "银行")
         )
-        coEvery { stockRepository.fetchBoll("sh.600036") } returns band
-        coEvery { stockRepository.fetchBoll("sh.600036", KlinePeriod.DAILY) } returns band
-        coEvery { stockRepository.fetchBoll("sh.600036", KlinePeriod.MONTHLY) } returns monthly
-        coEvery { stockRepository.fetchBoll("sz.000001") } returns null // 数据不足
-        coEvery { stockRepository.fetchBoll("sz.000001", any()) } returns null
+        coEvery { marketDataPlane.getBoll("sh.600036") } returns band
+        coEvery { marketDataPlane.getBoll("sh.600036", KlinePeriod.DAILY) } returns band
+        coEvery { marketDataPlane.getBoll("sh.600036", KlinePeriod.MONTHLY) } returns monthly
+        coEvery { marketDataPlane.getBoll("sz.000001") } returns null // 数据不足
+        coEvery { marketDataPlane.getBoll("sz.000001", any()) } returns null
         // 给 sh.600036 一个现价 + 股息
-        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(
+        every { marketDataPlane.observeDividends("sh.600036") } returns MutableStateFlow(
             listOf(dividend("sh.600036", 0.50))
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf("sh.600036" to QuoteSnapshot(stockCode = "sh.600036", price = 8.8))
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf("sh.600036" to QuoteSnapshot(stockCode = "sh.600036", price = 8.8))
 
         val viewModel = createViewModel()
         testDispatcher.scheduler.advanceUntilIdle()
@@ -746,13 +739,13 @@ class PortfolioViewModelTest {
         val band = BollBand(middle = 10.0, upper = 11.0, lower = 9.0)
         val monthly = BollBand(middle = 12.0, upper = 14.0, lower = 10.0)
         stocksFlow.value = listOf(stock("sh.600036", shares = 100, costPerShare = 10.0))
-        coEvery { stockRepository.fetchBoll("sh.600036") } returns band
-        coEvery { stockRepository.fetchBoll("sh.600036", KlinePeriod.DAILY) } returns band
-        coEvery { stockRepository.fetchBoll("sh.600036", KlinePeriod.MONTHLY) } returns monthly
-        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(
+        coEvery { marketDataPlane.getBoll("sh.600036") } returns band
+        coEvery { marketDataPlane.getBoll("sh.600036", KlinePeriod.DAILY) } returns band
+        coEvery { marketDataPlane.getBoll("sh.600036", KlinePeriod.MONTHLY) } returns monthly
+        every { marketDataPlane.observeDividends("sh.600036") } returns MutableStateFlow(
             listOf(dividend("sh.600036", 0.22)) // yield ~2.5% at price 8.8
         )
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf("sh.600036" to QuoteSnapshot(stockCode = "sh.600036", price = 8.8))
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf("sh.600036" to QuoteSnapshot(stockCode = "sh.600036", price = 8.8))
         // 严格门槛：min=3 → 三周期共振但 2.5% 应降级 HOLD
         every { notificationRuleRepository.observeEvalThresholds() } returns
             MutableStateFlow(DividendThresholds(minYieldPercent = 3.0, boostYieldPercent = 6.0))
@@ -776,12 +769,12 @@ class PortfolioViewModelTest {
             DividendEntity(id = "sh.600036_2023", stockCode = "sh.600036", reportDate = "2023-12-31", cashPerShare = 0.3),
             DividendEntity(id = "sh.600036_2024", stockCode = "sh.600036", reportDate = "2024-12-31", cashPerShare = 0.4)
         )
-        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(dividends)
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf("sh.600036" to QuoteSnapshot(stockCode = "sh.600036", price = 10.0))
-        coEvery { stockRepository.fetchBoll(any()) } returns BollBand(10.0, 12.0, 8.0)
-        coEvery { stockRepository.fetchBoll(any(), any()) } returns BollBand(10.0, 12.0, 8.0)
-        coEvery { bondYieldRepository.fetch10YBondYield(any()) } returns 2.5
-        coEvery { fundamentalsCacheRepository.getFundamentals("sh.600036", false) } returns Fundamentals(
+        every { marketDataPlane.observeDividends("sh.600036") } returns MutableStateFlow(dividends)
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns mapOf("sh.600036" to QuoteSnapshot(stockCode = "sh.600036", price = 10.0))
+        coEvery { marketDataPlane.getBoll(any()) } returns BollBand(10.0, 12.0, 8.0)
+        coEvery { marketDataPlane.getBoll(any(), any()) } returns BollBand(10.0, 12.0, 8.0)
+        coEvery { marketDataPlane.get10YBondYield(any()) } returns 2.5
+        coEvery { marketDataPlane.getFundamentals("sh.600036", false) } returns Fundamentals(
             periods = listOf(Fundamentals.Period("2024-12-31", 12.0, 60.0, 8.0, 5.0, payoutRatio = 25.0))
         )
     }
@@ -793,7 +786,7 @@ class PortfolioViewModelTest {
             DividendEntity(id = "sh.600036_2023", stockCode = "sh.600036", reportDate = "2023-12-31", cashPerShare = 0.3),
             DividendEntity(id = "sh.600036_2024", stockCode = "sh.600036", reportDate = "2024-12-31", cashPerShare = 0.4)
         )
-        every { dividendDao.observeByStock("sh.600036") } returns MutableStateFlow(dividends)
+        every { marketDataPlane.observeDividends("sh.600036") } returns MutableStateFlow(dividends)
         stocksFlow.value = listOf(stock("sh.600036", shares = 100, costPerShare = 10.0))
 
         val viewModel = createViewModel()
@@ -826,7 +819,7 @@ class PortfolioViewModelTest {
         assertThat(input.stockDetails["sh.600036"]?.fundamentals).isNotNull()
         assertThat(input.stockDetails["sh.600036"]?.forecast?.avgCashPerShare1Y).isEqualTo(0.4)
         assertThat(input.stockDetails["sh.600036"]?.buyThreshold?.reached).isEqualTo(false)
-        coVerify { fundamentalsCacheRepository.getFundamentals("sh.600036", false) }
+        coVerify { marketDataPlane.getFundamentals("sh.600036", false) }
         coVerify { llmAnalysisRepository.analyze(input, false) }
     }
 
@@ -844,7 +837,7 @@ class PortfolioViewModelTest {
         viewModel.analyzeWithLlm(forceRefresh = true)
         testDispatcher.scheduler.advanceUntilIdle()
 
-        coVerify { fundamentalsCacheRepository.getFundamentals("sh.600036", true) }
+        coVerify { marketDataPlane.getFundamentals("sh.600036", true) }
         coVerify { llmAnalysisRepository.analyze(any(), true) }
     }
 
@@ -873,7 +866,7 @@ class PortfolioViewModelTest {
     @Test
     fun `analyzeWithLlm degrades when fundamentals fail`() = runTest {
         deepSetup()
-        coEvery { fundamentalsCacheRepository.getFundamentals(any(), any()) } throws RuntimeException("boom")
+        coEvery { marketDataPlane.getFundamentals(any(), any()) } throws RuntimeException("boom")
         val inputSlot = slot<PortfolioLlmInput>()
         coEvery { llmAnalysisRepository.analyze(capture(inputSlot), any()) } returns LlmAnalysisResult.Success(
             LlmAnalysis("ok", emptyMap(), emptyList())
@@ -891,16 +884,14 @@ class PortfolioViewModelTest {
     }
 
     private fun createViewModel() = PortfolioViewModel(
+        marketDataPlane,
         stockRepository,
-        dividendDao,
         livingExpenseRepository,
         transactionDao,
         notificationCheckCoordinator,
         notificationRuleRepository,
         llmAnalysisRepository,
         tradeStrategyRepository,
-        fundamentalsCacheRepository,
-        bondYieldRepository,
         context
     )
 

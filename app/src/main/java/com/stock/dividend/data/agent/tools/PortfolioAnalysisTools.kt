@@ -4,9 +4,8 @@ import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.DividendMetricsCalculator
-import com.stock.dividend.data.repository.DividendRepository
-import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.GridCalculator
 import com.stock.dividend.data.repository.GridExecutionCalculator
 import com.stock.dividend.data.repository.GridPlanRepository
@@ -17,14 +16,11 @@ import com.stock.dividend.data.repository.MarketDataRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
 import com.stock.dividend.data.repository.PortfolioRiskDiagnoser
-import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 
 /**
  * 组合分析工具集（2026-08-15 新增）：
@@ -34,7 +30,7 @@ import kotlinx.coroutines.sync.withPermit
  *   指标由 [PortfolioRiskDiagnoser] 纯函数产出，结论由程序计算）。
  */
 class GetMarketRankingTool(
-    private val marketDataRepository: MarketDataRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_market_ranking",
     description = "全市场 A 股榜单（约 5500 只沪深个股，按所选维度降序取前 N）：支持按股息率/涨跌幅/总市值/PE/PB/换手率排序，" +
@@ -65,7 +61,7 @@ class GetMarketRankingTool(
         val minDividendYield = args.doubleArg("minDividendYield")
         val maxPe = args.doubleArg("maxPe")
         val limit = args.intArg("limit")?.coerceIn(1, 50) ?: 20
-        val items = marketDataRepository.fetchMarketRanking(sortBy, minDividendYield, maxPe, limit)
+        val items = marketDataPlane.getMarketRanking(sortBy, minDividendYield, maxPe, limit)
         if (items.isEmpty()) {
             return@runCatching mapOf("error" to "暂无榜单数据（过滤条件可能过严或行情数据获取失败）")
         }
@@ -106,8 +102,7 @@ private data class CompareRow(
 )
 
 class GetCompareStocksTool(
-    private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val notificationRuleRepository: NotificationRuleRepository,
 ) : ReadTool(
     name = "compare_stocks",
@@ -136,7 +131,7 @@ class GetCompareStocksTool(
         val tokens = raw.split(",", "，", ";", "；").map { it.trim() }.filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return@runCatching mapOf("error" to "codes 参数为空")
 
-        val resolved = tokens.map { it to stockRepository.resolveStock(it) }
+        val resolved = tokens.map { it to marketDataPlane.resolveStock(it) }
         val found = resolved.mapNotNull { it.second }
         val notFound = resolved.filter { it.second == null }.map { it.first }
         if (found.isEmpty()) {
@@ -146,20 +141,20 @@ class GetCompareStocksTool(
             return@runCatching mapOf("error" to "一次最多对比 8 只，请精简列表（当前 ${found.size} 只）")
         }
 
-        // 快照：单次 ulist 批量请求
+        // 快照：单次 ulist 批量请求（平面会话缓存 + 写透 price_cache）
         val entities = found.map { it.toEntity() }
-        val snapshots = stockRepository.fetchQuoteSnapshots(entities)
+        val snapshots = marketDataPlane.getQuoteSnapshots(entities)
 
-        // 本地深度：dividends 表（零网络请求）
+        // 分红深度：dividends 表本地读取 + DPS 经平面自动 ensureFresh（表空时补拉）
         val rows = found.map { s ->
-            val dividends = dividendRepository.observeDividends(s.code).first()
+            val dividends = marketDataPlane.getDividends(s.code)
             val metrics = DividendMetricsCalculator.calculate(dividends)
-            val yearlyCash = ForecastCalculator.latestYearlyCashPerShare(dividends)
+            val yearlyCash = marketDataPlane.getDps(s.code)
             val price = snapshots[s.code]?.price
             val yieldPct = if (price != null && price > 0.0 && yearlyCash != null && yearlyCash > 0.0) {
                 yearlyCash / price * 100.0
             } else null
-            val holding = stockRepository.observeStock(s.code).first()
+            val holding = marketDataPlane.observeStock(s.code).first()
             CompareRow(
                 code = s.code, name = s.name, entity = entities.first { it.code == s.code },
                 price = price, dividendYieldPct = yieldPct,
@@ -170,24 +165,21 @@ class GetCompareStocksTool(
             )
         }
 
-        // deep：三周期 BOLL + 程序评估（与 get_stock_evaluation 同口径，Semaphore(3) 限流）
+        // deep：三周期 BOLL + 程序评估（与 get_stock_evaluation 同口径；平面内置 Semaphore(3) 限流 + 会话缓存）
         val recommendations = if (deep) {
             val thresholds = notificationRuleRepository.observeEvalThresholds().first()
-            val semaphore = Semaphore(3)
             coroutineScope {
                 rows.map { row ->
                     async {
-                        semaphore.withPermit {
-                            if (row.price == null || row.price <= 0.0) return@withPermit null
-                            val weekly = stockRepository.fetchBoll(row.code, KlinePeriod.WEEKLY)
-                            val daily = stockRepository.fetchBoll(row.code, KlinePeriod.DAILY)
-                            val monthly = stockRepository.fetchBoll(row.code, KlinePeriod.MONTHLY)
-                            HoldingRecommender.recommend(
-                                price = row.price, band = weekly,
-                                latestYearlyDividend = row.latestYearlyCash,
-                                thresholds = thresholds, dailyBand = daily, monthlyBand = monthly
-                            )
-                        }
+                        if (row.price == null || row.price <= 0.0) return@async null
+                        val weekly = marketDataPlane.getBoll(row.code, KlinePeriod.WEEKLY)
+                        val daily = marketDataPlane.getBoll(row.code, KlinePeriod.DAILY)
+                        val monthly = marketDataPlane.getBoll(row.code, KlinePeriod.MONTHLY)
+                        HoldingRecommender.recommend(
+                            price = row.price, band = weekly,
+                            latestYearlyDividend = row.latestYearlyCash,
+                            thresholds = thresholds, dailyBand = daily, monthlyBand = monthly
+                        )
                     }
                 }.awaitAll()
             }
@@ -235,7 +227,7 @@ class GetCompareStocksTool(
 }
 
 class GetPortfolioDiagnosisTool(
-    private val stockRepository: StockRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val diagnosisAssembler: PortfolioDiagnosisAssembler,
     private val gridPlanRepository: GridPlanRepository,
     private val transactionRepository: TransactionRepository,
@@ -247,9 +239,9 @@ class GetPortfolioDiagnosisTool(
     parameters = null,
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
-        val stocks = stockRepository.observeAllStocksForSnapshot().filter { it.shares > 0 }
+        val stocks = marketDataPlane.observeAllStocks().first().filter { it.shares > 0 }
         if (stocks.isEmpty()) return@runCatching mapOf("error" to "没有持仓（shares>0）可诊断")
-        val prices = stockRepository.fetchFreshPrices(stocks)
+        val prices = marketDataPlane.fetchFreshPrices(stocks)
         // 装配口径（分红深度/派息率 enrich/缺价跳过）统一收敛在 PortfolioDiagnosisAssembler，
         // 与今日页「组合体检」共用同一份实现
         val d = diagnosisAssembler.assemble(stocks, prices)
@@ -286,7 +278,8 @@ class GetPortfolioDiagnosisTool(
                         GridCalculator.generate(
                             plan.basePrice, plan.lowPrice, plan.highPrice,
                             plan.grids, plan.totalCapital,
-                            gridType = GridType.fromRaw(plan.gridType)
+                            gridType = GridType.fromRaw(plan.gridType),
+                            dps = plan.dpsPerShare
                         ),
                         planTxs
                     )

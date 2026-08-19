@@ -7,9 +7,8 @@ import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_MONTHLY
 import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_YEARLY
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.DividendIncomeRepository
-import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.EvaluatedStock
-import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.FireGoalRepository
 import com.stock.dividend.data.repository.HoldingRecommender
 import com.stock.dividend.data.repository.KlinePeriod
@@ -27,8 +26,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 
 /** [GetPortfolioSignalsTool] 内部行：评估结果 + 日/月 BOLL。 */
 private data class PortfolioEvalRow(
@@ -38,14 +35,16 @@ private data class PortfolioEvalRow(
 )
 
 class GetHoldingsTool(
+    private val marketDataPlane: MarketDataPlane,
+    /** 仅用于读标签（本地域数据）；行情/股票列表走数据平面。 */
     private val stockRepository: StockRepository,
 ) : ReadTool(
     name = "get_holdings",
     description = "返回全部自选/持仓列表（含观察仓 shares=0）：代码、名称、股数、成本、现价（批量实时刷新）、市值、盈亏、行业、标签、最后更新时间。无需参数。",
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
-        val stocks = stockRepository.observeAllStocksForSnapshot()
-        val prices = stockRepository.fetchFreshPrices(stocks)
+        val stocks = marketDataPlane.observeAllStocks().first()
+        val prices = marketDataPlane.fetchFreshPrices(stocks)
         val tagsByCode = runCatching { stockRepository.observeAllStockTags().first() }
             .getOrDefault(emptyList())
             .groupBy({ it.stockCode }, { it.tag })
@@ -76,7 +75,7 @@ class GetHoldingsTool(
 }
 
 class GetPortfolioSummaryTool(
-    private val stockRepository: StockRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val dividendIncomeRepository: DividendIncomeRepository,
     private val fireGoalRepository: FireGoalRepository,
     private val livingExpenseRepository: LivingExpenseRepository,
@@ -85,8 +84,8 @@ class GetPortfolioSummaryTool(
     description = "组合概况：总市值（元）、总成本、总盈亏、年化股息预测（元）、FIRE 目标进度与支出覆盖率（现价批量实时刷新，与 get_holdings 同口径）。无需参数。",
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
-        val stocks = stockRepository.observeAllStocksForSnapshot()
-        val prices = stockRepository.fetchFreshPrices(stocks)
+        val stocks = marketDataPlane.observeAllStocks().first()
+        val prices = marketDataPlane.fetchFreshPrices(stocks)
         val totalMarketValue = stocks.sumOf { (prices[it.code] ?: 0.0) * it.shares }
         val totalCost = stocks.sumOf { it.costPerShare * it.shares }
         val annualForecast = dividendIncomeRepository.observeForecastTotal().first()
@@ -123,14 +122,16 @@ class GetPortfolioSummaryTool(
 }
 
 class GetIndustryAllocationTool(
+    private val marketDataPlane: MarketDataPlane,
+    /** 仅用于读行业目标配比（本地域数据）。 */
     private val stockRepository: StockRepository,
 ) : ReadTool(
     name = "get_industry_allocation",
     description = "持仓按行业的市值占比与目标配比对比（百分比，现价批量实时刷新，与 get_holdings 同口径）。无需参数。",
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
-        val stocks = stockRepository.observeAllStocksForSnapshot()
-        val prices = stockRepository.fetchFreshPrices(stocks)
+        val stocks = marketDataPlane.observeAllStocks().first()
+        val prices = marketDataPlane.fetchFreshPrices(stocks)
         val targets = stockRepository.getIndustryTargets().associate { it.industry to it.targetWeight }
         val byIndustry = stocks.groupBy { it.industry.takeIf { i -> i.isNotBlank() } ?: "未分类" }
         val total = byIndustry.values.sumOf { list ->
@@ -151,7 +152,7 @@ class GetIndustryAllocationTool(
 }
 
 class GetTransactionsTool(
-    private val stockRepository: StockRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val transactionRepository: TransactionRepository,
 ) : ReadTool(
     name = "get_transactions",
@@ -169,7 +170,7 @@ class GetTransactionsTool(
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
         val code = args.stringArg("code")
         val resolvedCode = code?.let {
-            stockRepository.resolveStock(it)?.code ?: return@runCatching mapOf("error" to "未找到股票：$it")
+            marketDataPlane.resolveStock(it)?.code ?: return@runCatching mapOf("error" to "未找到股票：$it")
         }
         val list = if (resolvedCode != null) {
             transactionRepository.getByStock(resolvedCode)
@@ -191,14 +192,14 @@ class GetTransactionsTool(
 }
 
 class GetNotificationRulesTool(
-    private val stockRepository: StockRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val notificationRuleRepository: NotificationRuleRepository,
 ) : ReadTool(
     name = "get_notification_rules",
     description = "查看当前全局与个股的股息率/价格提醒阈值（百分比）。无需参数。",
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
-        val stocks = stockRepository.observeAllStocksForSnapshot()
+        val stocks = marketDataPlane.observeAllStocks().first()
         val rules = notificationRuleRepository.getEnabledStockRules(stocks.map { it.code })
         val global = notificationRuleRepository.getGlobalDividendYieldRule()
         buildMap<String, Any?> {
@@ -247,34 +248,33 @@ class GetUserStrategiesTool(
 
 /**
  * 组合层策略信号：仓位控制 + 三周期共振买点。
- * 与 App「一键评估」同口径：持仓（shares>0）逐只拉日/周/月 BOLL（Semaphore(3) 限流），
+ * 与 App「一键评估」同口径：现价批量拉取 + 经数据平面拉日/周/月 BOLL（平面内置限流/缓存），
  * 复用 [HoldingRecommender] 与 [PortfolioAdvisor]，结论一律由程序计算。
  */
 class GetPortfolioSignalsTool(
-    private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val notificationRuleRepository: NotificationRuleRepository,
 ) : ReadTool(
     name = "get_portfolio_signals",
     description = "组合层策略信号（基于全部持仓，shares>0）：仓位控制（上轨占比、平均股息率、建议现金比例是否触发）+ 三周期共振买点列表（日下轨+周下轨+月中轨及以下）。无需参数。",
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
-        val stocks = stockRepository.observeAllStocksForSnapshot().filter { it.shares > 0 }
+        val stocks = marketDataPlane.observeAllStocks().first().filter { it.shares > 0 }
         val thresholds = notificationRuleRepository.observeEvalThresholds().first()
-        val semaphore = Semaphore(3)  // 与 App 评估一致，防 Tencent 限流
+        // 现价一次批量拉取（此前逐股单请求 N 次）；BOLL/DPS 走平面（内置 Semaphore(3) 限流 + 会话缓存）
+        val prices = marketDataPlane.fetchFreshPrices(stocks)
         coroutineScope {
             val rows = stocks.map { stock ->
                 async {
-                    semaphore.withPermit {
-                        val price = stockRepository.refreshPrice(stock)
-                        val weekly = stockRepository.fetchBoll(stock.code, KlinePeriod.WEEKLY)
-                        val daily = stockRepository.fetchBoll(stock.code, KlinePeriod.DAILY)
-                        val monthly = stockRepository.fetchBoll(stock.code, KlinePeriod.MONTHLY)
-                        val dividends = dividendRepository.observeDividends(stock.code).first()
+                    run {
+                        val price = prices[stock.code]
+                        val weekly = marketDataPlane.getBoll(stock.code, KlinePeriod.WEEKLY)
+                        val daily = marketDataPlane.getBoll(stock.code, KlinePeriod.DAILY)
+                        val monthly = marketDataPlane.getBoll(stock.code, KlinePeriod.MONTHLY)
                         val rec = HoldingRecommender.recommend(
                             price = price ?: 0.0,
                             band = weekly,
-                            latestYearlyDividend = ForecastCalculator.latestYearlyCashPerShare(dividends),
+                            latestYearlyDividend = marketDataPlane.getDps(stock.code),
                             thresholds = thresholds,
                             dailyBand = daily,
                             monthlyBand = monthly
@@ -321,7 +321,7 @@ class GetPortfolioSignalsTool(
 
 class GetDividendIncomeTool(
     private val dividendIncomeRepository: DividendIncomeRepository,
-    private val stockRepository: StockRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_dividend_income",
     description = "查询实际股息到账记录：不传 year 返回可用年份、各年合计、单股年度收入、记录数与最大单笔；传 year 返回该年全部记录明细（含来源与备注）。",
@@ -337,7 +337,7 @@ class GetDividendIncomeTool(
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any = runCatching {
         val year = args.intArg("year")
-        val names = runCatching { stockRepository.observeAllStocksForSnapshot() }
+        val names = runCatching { marketDataPlane.observeAllStocks().first() }
             .getOrDefault(emptyList())
             .associate { it.code to it.name }
         if (year != null) {

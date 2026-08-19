@@ -76,6 +76,35 @@ class GridCalculatorTest {
         assertThat(r.nextSellHint).isNull()
     }
 
+    /** 已买入的档不再提示（每档只买一次）：9.33 档已成交，现价回升到 9.5 → 下一买应跳到 8.67。 */
+    @Test
+    fun `next buy hint skips triggered levels`() {
+        val base = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0,
+            grids = 4, totalCapital = 100000.0,
+            currentPrice = 9.4
+        )
+        // BUY@9.4 落在 9.33 档触发区间 → 9.33 已买；随后现价回升到 9.5
+        val marked = GridCalculator.markTriggeredLevels(base, listOf(tx("BUY", 9.4, 300)))
+        val recovered = marked.copy(currentPrice = 9.5)
+        assertThat(recovered.nextBuyHint).isEqualTo(8.67)  // 不再指向已买的 9.33
+    }
+
+    /** 现价下方档位全部已买 → 下一买为 null（等跌破更低的未买档）。 */
+    @Test
+    fun `next buy hint null when all lower levels bought`() {
+        val base = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0,
+            grids = 4, totalCapital = 100000.0,
+            currentPrice = 8.9
+        )
+        // 现价 8.9 下方有 8.0 与 8.67 两档，两笔成交分别把它们买掉
+        val marked = GridCalculator.markTriggeredLevels(
+            base, listOf(tx("BUY", 8.1, 500), tx("BUY", 8.7, 400))
+        )
+        assertThat(marked.nextBuyHint).isNull()
+    }
+
     /** 现价已跌破资金用完位 → 无下一档（资金已用完）。 */
     @Test
     fun `no next buy hint below floor`() {
@@ -153,8 +182,8 @@ class GridCalculatorTest {
         assertThat(buyTotal).isWithin(10000.0).of(100000.0)
     }
 
-    private fun tx(type: String, price: Double) = com.stock.dividend.data.local.entity.TransactionEntity(
-        id = 0L, stockCode = "sh.600000", type = type, shares = 100, price = price, date = "2026-01-01"
+    private fun tx(type: String, price: Double, shares: Int = 100) = com.stock.dividend.data.local.entity.TransactionEntity(
+        id = 0L, stockCode = "sh.600000", type = type, shares = shares, price = price, date = "2026-01-01"
     )
 
     /** 关联交易：BUY 成交价落在档位触发区间（档位价 ± 半步长）→ 标记已触发。 */
@@ -259,13 +288,125 @@ class GridCalculatorTest {
         r.levels.forEach { assertThat(it.shares % 100).isEqualTo(0) }
     }
 
-    /** fromRaw：GEOM → 等比；null/ARITH/未知 → 等差（旧数据兼容）。 */
+    /** fromRaw：GEOM → 等比；YIELD → 按股息率；null/ARITH/未知 → 等差（旧数据兼容）。 */
     @Test
     fun `gridType fromRaw falls back to arithmetic`() {
         assertThat(GridType.fromRaw("GEOM")).isEqualTo(GridType.GEOMETRIC)
+        assertThat(GridType.fromRaw("YIELD")).isEqualTo(GridType.YIELD)
         assertThat(GridType.fromRaw("ARITH")).isEqualTo(GridType.ARITHMETIC)
         assertThat(GridType.fromRaw(null)).isEqualTo(GridType.ARITHMETIC)
         assertThat(GridType.fromRaw("WHATEVER")).isEqualTo(GridType.ARITHMETIC)
+    }
+
+    // ── 按股息率网格（YIELD）──────────────────────
+
+    /**
+     * 金标准用例（即用户需求场景）：年分红 0.5 元，股息率 5.5%→6.5% 三档。
+     * 档位价 = DPS ÷ 股息率 → 7.69（6.5%）/ 8.33（6.0%）/ 9.09（5.5%），
+     * 从低到高排列，yieldPercent 严格递减（越便宜息越高）。
+     */
+    @Test
+    fun `yield grid prices are dps divided by level yield`() {
+        // base = 0.5/5.5% = 9.0909、low = 0.5/6.5% = 7.6923（由两端换算传入）
+        val r = GridCalculator.generate(
+            basePrice = 9.0909, lowPrice = 7.6923, highPrice = 9.0909,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.YIELD, dps = 0.5
+        )
+        assertThat(r.validationError).isNull()
+        assertThat(r.levels).hasSize(3)
+        // 价格从低到高：7.69 / 8.33 / 9.09
+        assertThat(r.levels.map { it.price }).containsExactly(7.69, 8.33, 9.09).inOrder()
+        // 每档股息率：6.5% / 6.0% / 5.5%（精确等差递减）
+        assertThat(r.levels.map { it.yieldPercent }).containsExactly(6.5, 6.0, 5.5).inOrder()
+        // 每档股息率步长 = (6.5-5.5)/2 = 0.5 个百分点
+        assertThat(r.yieldStepPercent).isEqualTo(0.5)
+    }
+
+    /** 两端档位价精确等于 low/base（yield 由两端价格反推，含两端闭合）。 */
+    @Test
+    fun `yield grid endpoints are exact`() {
+        val r = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 10.0,
+            grids = 4, totalCapital = 100000.0,
+            gridType = GridType.YIELD, dps = 0.5
+        )
+        assertThat(r.levels.first().price).isEqualTo(8.0)
+        assertThat(r.levels.last().price).isEqualTo(10.0)
+        // 中间档价格单调递增（双曲线递减步长，但序列仍从低到高）
+        val prices = r.levels.map { it.price }
+        assertThat(prices).isInOrder()
+        // 首末档股息率 = dps/low、dps/base
+        assertThat(r.levels.first().yieldPercent).isEqualTo(6.25)
+        assertThat(r.levels.last().yieldPercent).isEqualTo(5.0)
+    }
+
+    /** YIELD 模式缺 DPS（null/非正）→ 参数错误，不臆造档位。 */
+    @Test
+    fun `yield grid requires positive dps`() {
+        val noDps = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 10.0,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.YIELD
+        )
+        assertThat(noDps.validationError).isNotNull()
+        assertThat(noDps.levels).isEmpty()
+
+        val zeroDps = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 10.0,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.YIELD, dps = 0.0
+        )
+        assertThat(zeroDps.validationError).isNotNull()
+    }
+
+    /** YIELD 模式「越便宜买越多」仍成立（1/price 反比权重不变）；整手取整不变。 */
+    @Test
+    fun `yield grid keeps inverse capital weighting`() {
+        val r = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 10.0,
+            grids = 4, totalCapital = 100000.0,
+            gridType = GridType.YIELD, dps = 0.5
+        )
+        assertThat(r.levels.first().amount).isGreaterThan(r.levels.last().amount)
+        r.levels.forEach { assertThat(it.shares % 100).isEqualTo(0) }
+    }
+
+    /** YIELD 模式下一档提示照常：现价 8.5 → 下方最近档 8.33（5.5%→6.5% 场景）。 */
+    @Test
+    fun `yield grid next buy hint works`() {
+        val r = GridCalculator.generate(
+            basePrice = 9.0909, lowPrice = 7.6923, highPrice = 9.0909,
+            grids = 3, totalCapital = 100000.0,
+            currentPrice = 8.5,
+            gridType = GridType.YIELD, dps = 0.5
+        )
+        assertThat(r.nextBuyHint).isEqualTo(8.33)
+    }
+
+    /** YIELD 模式触发标记照常：BUY@8.35 落在 8.33 档触发区间 → 标记已触发。 */
+    @Test
+    fun `yield grid markTriggered works`() {
+        val base = GridCalculator.generate(
+            basePrice = 9.0909, lowPrice = 7.6923, highPrice = 9.0909,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.YIELD, dps = 0.5
+        )
+        // 相邻价差 8.33-7.69=0.64，半步长 0.32；BUY@8.35 距 8.33 仅 0.02 → 命中
+        val marked = GridCalculator.markTriggeredLevels(base, listOf(tx("BUY", 8.35)))
+        assertThat(marked.levels.first { it.price == 8.33 }.triggered).isTrue()
+        assertThat(marked.levels.first { it.price == 7.69 }.triggered).isFalse()
+    }
+
+    /** 等差/等比模式 yieldPercent 恒为 null（只有 YIELD 模式填充）。 */
+    @Test
+    fun `non-yield grids have null yield percent`() {
+        val arith = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0)
+        assertThat(arith.levels.all { it.yieldPercent == null }).isTrue()
+        assertThat(arith.yieldStepPercent).isNull()
+        val geom = GridCalculator.generate(16.0, 4.0, 20.0, 3, 100000.0, gridType = GridType.GEOMETRIC)
+        assertThat(geom.levels.all { it.yieldPercent == null }).isTrue()
+        assertThat(geom.yieldStepPercent).isNull()
     }
 
     // ── 股息展望（dividendOutlook）──────────────────

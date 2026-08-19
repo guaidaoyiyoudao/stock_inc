@@ -1,12 +1,11 @@
 package com.stock.dividend.data.notification
 
-import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
-import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -14,8 +13,7 @@ import javax.inject.Singleton
 
 @Singleton
 class NotificationCheckCoordinator @Inject constructor(
-    private val stockRepository: StockRepository,
-    private val dividendDao: DividendDao,
+    private val marketDataPlane: MarketDataPlane,
     private val ruleRepository: NotificationRuleRepository,
     private val evaluator: NotificationRuleEvaluator,
     private val notifier: DividendAlertNotifier,
@@ -25,9 +23,9 @@ class NotificationCheckCoordinator @Inject constructor(
     internal var clock: () -> Long = { System.currentTimeMillis() }
 
     suspend fun checkActiveHoldings() {
-        val stocks = stockRepository.observeAllStocksForSnapshot()
+        val stocks = marketDataPlane.observeAllStocks().first()
             .filter { it.shares > 0 }
-        val prices = stockRepository.fetchQuotes(stocks)
+        val prices = marketDataPlane.getPrices(stocks, force = true)
         checkWithPrices(stocks, prices)
     }
 
@@ -47,7 +45,7 @@ class NotificationCheckCoordinator @Inject constructor(
         val hasBollRules = stockRules.values.any { rules -> rules.any { it.type == NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER } }
         val bollUpperByCode: Map<String, Double> = if (hasBollRules) {
             activeStocks.mapNotNull { stock ->
-                stockRepository.fetchBoll(stock.code)?.upper?.let { stock.code to it }
+                marketDataPlane.getBoll(stock.code)?.upper?.let { stock.code to it }
             }.toMap()
         } else {
             emptyMap()
@@ -61,7 +59,7 @@ class NotificationCheckCoordinator @Inject constructor(
                 addAll(stockRules[stock.code].orEmpty().filter { it.type != NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD })
             }
             if (rules.isEmpty()) return@forEach
-            val dividends = dividendDao.getByStock(stock.code)
+            val dividends = marketDataPlane.getDividends(stock.code)
             rules.forEach { rule ->
                 val bollUpper = if (rule.type == NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER) {
                     bollUpperByCode[stock.code]
@@ -131,11 +129,13 @@ class NotificationCheckCoordinator @Inject constructor(
 
         val planCodes = plans.map { it.stockCode }.toSet()
         val stocks = runCatching {
-            stockRepository.observeAllStocksForSnapshot().filter { it.code in planCodes }
+            marketDataPlane.observeAllStocks().first().filter { it.code in planCodes }
         }.getOrDefault(emptyList())
         if (stocks.isEmpty()) return
 
-        val prices = runCatching { stockRepository.fetchQuotes(stocks) }.getOrDefault(emptyMap())
+        val prices = runCatching {
+            marketDataPlane.getPrices(stocks, force = true)
+        }.getOrDefault(emptyMap())
         val transactionsByStock = runCatching {
             transactionRepository.getAll().groupBy { it.stockCode }
         }.getOrDefault(emptyMap())

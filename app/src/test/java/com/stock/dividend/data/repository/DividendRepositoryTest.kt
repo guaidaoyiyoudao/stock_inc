@@ -179,21 +179,56 @@ class DividendRepositoryTest {
     }
 
     @Test
-    fun `fetchAndCacheDividends deletes old data before inserting new`() = runTest {
-        val deleteSlot = mutableListOf<String>()
-        coEvery { dao.deleteByStockCode(capture(deleteSlot)) } returns Unit
-        stubTencent(emptyList())
-        // 腾讯空 → 回退到东方财富，也空
-        coEvery { eastMoneyApi.getDividends(filter = any()) } returns DividendResponse(
-            success = true, result = DividendResponse.DividendResult(data = emptyList())
+    fun `fetchAndCacheDividends replaces covered rows without wiping history`() = runTest {
+        // 历史保留式写入：只删本次结果覆盖到的行（id + 除权日），不再整表清空
+        val idsSlot = mutableListOf<List<String>>()
+        val exSlot = mutableListOf<List<String>>()
+        coEvery { dao.deleteByIds("sz.000001", capture(idsSlot)) } returns Unit
+        coEvery { dao.deleteByStockAndExDates("sz.000001", capture(exSlot)) } returns Unit
+        coEvery { dao.insertAll(any()) } returns Unit
+        stubTencent(
+            listOf(
+                dayEntry("2025-07-11", dividendObj("2024", "24.6", "2025-07-10", "2025-07-11"))
+            )
         )
 
         repository.fetchAndCacheDividends("sz.000001", "000001")
 
+        coVerify(exactly = 0) { dao.deleteByStockCode(any()) }
+        assertThat(idsSlot.last()).containsExactly("sz.000001_2025-07-11")
+        assertThat(exSlot.last()).containsExactly("2025-07-11")
         coVerify(ordering = io.mockk.Ordering.ORDERED) {
-            dao.deleteByStockCode("sz.000001")
+            dao.deleteByIds(any(), any())
             dao.insertAll(any())
         }
+    }
+
+    @Test
+    fun `fetchAndCacheDividends purges stale pending rows only in eastmoney fallback`() = runTest {
+        // 东财全量路径携带预案信息：exDate=null 且不在本次结果中的失效预案行应被清洗
+        stubTencent(null)
+        coEvery { eastMoneyApi.getDividends(filter = any()) } returns DividendResponse(
+            success = true, result = DividendResponse.DividendResult(data = listOf(eastMoneyItem()))
+        )
+        coEvery { dao.deleteStalePendingByStock("sz.000001", any()) } returns Unit
+        coEvery { dao.insertAll(any()) } returns Unit
+
+        repository.fetchAndCacheDividends("sz.000001", "000001")
+
+        coVerify(exactly = 1) { dao.deleteStalePendingByStock("sz.000001", listOf("sz.000001_2024-12-31")) }
+    }
+
+    @Test
+    fun `tencent path does not purge pending rows`() = runTest {
+        // 腾讯不携带预案信息（只有已实施的分红），不能据其清洗 pending 行
+        stubTencent(
+            listOf(dayEntry("2025-07-11", dividendObj("2024", "24.6", "2025-07-10", "2025-07-11")))
+        )
+        coEvery { dao.insertAll(any()) } returns Unit
+
+        repository.fetchAndCacheDividends("sz.000001", "000001")
+
+        coVerify(exactly = 0) { dao.deleteStalePendingByStock(any(), any()) }
     }
 
     @Test
@@ -272,7 +307,7 @@ class DividendRepositoryTest {
     @Test
     fun `fetchAndCacheDividends handles empty qfqday`() = runTest {
         stubTencent(emptyList())
-        // 腾讯返回空 → 回退到东方财富，东方财富也空
+        // 腾讯返回空 → 回退到东方财富，东方财富也空 → 双源空结果不清库（历史分红不可变）
         coEvery { eastMoneyApi.getDividends(filter = any()) } returns DividendResponse(
             success = true, result = DividendResponse.DividendResult(data = emptyList())
         )
@@ -280,7 +315,8 @@ class DividendRepositoryTest {
         val result = repository.fetchAndCacheDividends("sz.000001", "000001")
 
         assertThat(result.isSuccess).isTrue()
-        coVerify { dao.insertAll(emptyList()) }
+        coVerify(exactly = 0) { dao.insertAll(any()) }
+        coVerify(exactly = 0) { dao.deleteByStockCode(any()) }
     }
 
     @Test
@@ -297,7 +333,7 @@ class DividendRepositoryTest {
         val result = repository.fetchAndCacheDividends("sz.000001", "000001")
 
         assertThat(result.isSuccess).isTrue()
-        coVerify { dao.insertAll(emptyList()) }
+        coVerify(exactly = 0) { dao.insertAll(any()) }
     }
 
     @Test
@@ -312,7 +348,7 @@ class DividendRepositoryTest {
         val result = repository.fetchAndCacheDividends("sz.000001", "000001")
 
         assertThat(result.isSuccess).isTrue()
-        coVerify { dao.insertAll(emptyList()) }
+        coVerify(exactly = 0) { dao.insertAll(any()) }
     }
 
     @Test

@@ -4,11 +4,10 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.DripResult
 import com.stock.dividend.data.repository.DripCalculator
-import com.stock.dividend.data.repository.DividendRepository
-import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.Locale
 import javax.inject.Inject
@@ -50,17 +49,16 @@ data class DripSimulationUiState(
 @HiltViewModel
 class DripSimulationViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository
+    private val marketDataPlane: MarketDataPlane
 ) : ViewModel() {
 
     private val stockCode: String = savedStateHandle["code"] ?: ""
     private val _uiState = MutableStateFlow(DripSimulationUiState())
     val uiState: StateFlow<DripSimulationUiState> = _uiState.asStateFlow()
 
-    private val stockFlow = stockRepository.observeStock(stockCode)
+    private val stockFlow = marketDataPlane.observeStock(stockCode)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-    private val dividendsFlow = dividendRepository.observeDividends(stockCode)
+    private val dividendsFlow = marketDataPlane.observeDividends(stockCode)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -104,7 +102,7 @@ class DripSimulationViewModel @Inject constructor(
     }
 
     private suspend fun fetchCurrentPrice(stock: StockEntity): Double? = try {
-        stockRepository.fetchQuotes(listOf(stock))[stock.code]
+        marketDataPlane.getPrices(listOf(stock), force = true)[stock.code]
     } catch (_: Exception) {
         null
     }

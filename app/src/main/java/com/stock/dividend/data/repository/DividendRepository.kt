@@ -24,15 +24,37 @@ class DividendRepository @Inject constructor(
     @EastMoneyDividendApi private val eastMoneyApi: DividendApi,
     private val dividendDao: DividendDao
 ) {
+    /**
+     * 拉取并写入分红记录（腾讯主源 + 东财回退/补充）。
+     *
+     * **历史保留式写入**（历史分红不可变）：只定点删除本次结果覆盖到的行（同 id 或同除权日），
+     * 腾讯拉取窗口（~6 年）之外的历史行永续累积，不随窗口滑动丢失；双源均无数据时不清库
+     * （多为网络/反爬抖动，清空不可再生的历史记录比暂时不更新更糟）。
+     */
     suspend fun fetchAndCacheDividends(stockCode: String, securityCode: String): Result<Unit> {
         return try {
-            // 腾讯为主源；若失败或拿不到数据，用东方财富回退补充
-            val entities = fetchFromTencent(stockCode, securityCode)
-                .takeIf { it.isNotEmpty() }
-                ?.let { enrichDividendYieldFromEastMoney(stockCode, securityCode, it) }
-                ?: fetchFromEastMoney(stockCode, securityCode)
+            val fromTencent = fetchFromTencent(stockCode, securityCode)
+            val usedEastMoneyFallback = fromTencent.isEmpty()
+            val entities = if (usedEastMoneyFallback) {
+                fetchFromEastMoney(stockCode, securityCode)
+            } else {
+                enrichDividendYieldFromEastMoney(stockCode, securityCode, fromTencent)
+            }
 
-            dividendDao.deleteByStockCode(stockCode)
+            if (entities.isEmpty()) {
+                return Result.success(Unit)
+            }
+
+            dividendDao.deleteByIds(stockCode, entities.map { it.id }.distinct())
+            entities.mapNotNull { it.exDividendDate }.distinct().takeIf { it.isNotEmpty() }?.let {
+                // 腾讯(id=code_exDate)与东财(id=code_reportDate)两种 id 方案按除权日跨源去重
+                dividendDao.deleteByStockAndExDates(stockCode, it)
+            }
+            if (usedEastMoneyFallback) {
+                // 东财全量路径携带预案信息：清洗已取消/失效的预案行（exDate=null 且不在本次结果中）。
+                // 腾讯只返回已实施分红、不携带预案，不能据其清洗。
+                dividendDao.deleteStalePendingByStock(stockCode, entities.map { it.id })
+            }
             dividendDao.insertAll(entities)
             Result.success(Unit)
         } catch (e: Exception) {
@@ -42,6 +64,29 @@ class DividendRepository @Inject constructor(
 
     fun observeDividends(stockCode: String): Flow<List<DividendEntity>> {
         return dividendDao.observeByStock(stockCode)
+    }
+
+    /** 全表分红记录观察（股息日历等跨股场景用）。 */
+    fun observeAllDividends(): Flow<List<DividendEntity>> {
+        return dividendDao.observeAll()
+    }
+
+    /** 一次性读取该股全部分红记录（非 Flow，不触发网络刷新）。供数据平面同步读取用。 */
+    suspend fun getDividends(stockCode: String): List<DividendEntity> {
+        return try {
+            dividendDao.getByStock(stockCode)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** 全表有除权日的分红记录（今日信号/简报的分红倒计时用）。 */
+    suspend fun getAllWithExDate(): List<DividendEntity> {
+        return try {
+            dividendDao.getAllWithExDate()
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun getLatestDividend(stockCode: String): DividendEntity? {

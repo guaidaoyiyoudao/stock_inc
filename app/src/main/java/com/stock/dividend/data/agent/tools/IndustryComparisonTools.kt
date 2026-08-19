@@ -3,11 +3,11 @@ package com.stock.dividend.data.agent.tools
 import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.MarketDataRepository
-import com.stock.dividend.data.repository.StockRepository
 
 class GetIndustryListTool(
-    private val marketDataRepository: MarketDataRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_industry_list",
     description = "查询 A 股行业板块行情（东财一级行业）：板块代码、名称、涨跌幅、换手率、主力净流入、领涨股。sortBy 可选 CHANGE(涨跌幅,默认)/INFLOW(主力净流入)/TURNOVER(换手率)；limit 默认 15，范围 5-30。",
@@ -26,7 +26,7 @@ class GetIndustryListTool(
         val sortBy = parseSortBy(args.stringArg("sortBy"))
         val limit = args.intArg("limit")?.coerceIn(5, 30) ?: 15
         return runCatching {
-            val list = marketDataRepository.fetchIndustryList(sortBy = sortBy, limit = limit)
+            val list = marketDataPlane.getIndustryList(sortBy = sortBy, limit = limit)
             if (list.isEmpty()) return@runCatching mapOf("error" to "行业数据获取失败")
             mapOf(
                 "sortBy" to sortBy.name,
@@ -44,8 +44,7 @@ class GetIndustryListTool(
 }
 
 class GetIndustryPeersTool(
-    private val stockRepository: StockRepository,
-    private val marketDataRepository: MarketDataRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_industry_peers",
     description = "查询同行业个股对比：传 code（取其所属行业）或 industry（板块代码 BKxxxx 或行业名），返回同行业个股的现价/涨跌幅/PE/PB/总市值/换手率。sortBy 可选 CHANGE/MARKET_CAP(默认)/PE/PB；limit 默认 15，范围 5-30。",
@@ -77,11 +76,11 @@ class GetIndustryPeersTool(
         return runCatching {
             // 若传的是股票 code，先 resolve 拿到 sh./sz. 格式，便于 Repository 反查行业
             val resolvedTarget = if (code != null) {
-                stockRepository.resolveStock(code)?.code ?: return@runCatching mapOf("error" to "未找到股票：$code")
+                marketDataPlane.resolveStock(code)?.code ?: return@runCatching mapOf("error" to "未找到股票：$code")
             } else {
                 target
             }
-            val peers = marketDataRepository.fetchIndustryPeers(resolvedTarget, sortBy, limit)
+            val peers = marketDataPlane.getIndustryPeers(resolvedTarget, sortBy, limit)
             if (peers.isEmpty()) return@runCatching mapOf("error" to "无法解析该股票的行业，请直接传 industry 板块代码")
             mapOf(
                 "count" to peers.size,

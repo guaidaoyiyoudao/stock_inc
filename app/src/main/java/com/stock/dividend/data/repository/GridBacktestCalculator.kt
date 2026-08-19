@@ -56,7 +56,8 @@ object GridBacktestCalculator {
         highPrice: Double,
         grids: Int,
         totalCapital: Double,
-        gridType: GridType = GridType.ARITHMETIC
+        gridType: GridType = GridType.ARITHMETIC,
+        dps: Double? = null
     ): GridBacktestResult? {
         val usable = klines.filter { it.close > 0.0 }
         if (usable.size < 2) return null
@@ -67,7 +68,8 @@ object GridBacktestCalculator {
             highPrice = highPrice,
             grids = grids,
             totalCapital = totalCapital,
-            gridType = gridType
+            gridType = gridType,
+            dps = dps
         )
         if (result.validationError != null || result.levels.isEmpty()) return null
 

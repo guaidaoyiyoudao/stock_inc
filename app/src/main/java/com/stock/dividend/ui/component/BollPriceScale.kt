@@ -1,16 +1,20 @@
 package com.stock.dividend.ui.component
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +26,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BollTone
 import com.stock.dividend.data.repository.HoldingRecommender
@@ -29,7 +36,8 @@ import com.stock.dividend.ui.theme.LocalExtendedColors
 
 /**
  * 周线 BOLL 带→价位 横轴。与 [DividendPriceScale] 视觉对等：一条横轴展示
- * 上轨 / 中轨(MA20) / 下轨 三档价位，并按当前价在带内的位置高亮。
+ * 上轨 / 中轨(MA20) / 下轨 三档价位，**现价点按带内真实比例定位在横轴上**
+ * （0=下轨、1=上轨；下轨→现价区间着色，贴边=破轨），并按当前价位置高亮 tone。
  *
  * 语义（与股息率横轴的买/卖点配色保持一致）：
  *  - 当前价 **触及/跌破下轨**（超卖区，[BollTone.Buy]）→ 绿色，买入信号；
@@ -45,6 +53,7 @@ fun BollPriceScale(
     modifier: Modifier = Modifier
 ) {
     val ext = LocalExtendedColors.current
+    val textMeasurer = rememberTextMeasurer()  // 价签精确量宽（点上方居中 + 两端钳制）
 
     Column(
         modifier = modifier
@@ -128,30 +137,105 @@ fun BollPriceScale(
             )
         }
 
-        // 当前价落点指示：用 fraction 表示 price 在 [lower, upper] 内的相对位置（0=下轨，1=上轨）
+        // 当前价落点：fraction 表示 price 在 [lower, upper] 内的相对位置（0=下轨，1=上轨）
         val span = (upper - lower).takeIf { it > 0.0 } ?: 1.0
         val fraction = ((price - lower) / span).coerceIn(0.0, 1.0)
+
+        // 现价位置轴：横轴按比例定位现价点（0=下轨 … 1=上轨），**价签跟随点移动**（上下正对）；
+        // 点贴到左/右边缘 = 已破下轨/上轨
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+        ) {
+            val dotSize = 12.dp
+            val usable = maxWidth - dotSize  // 点中心可移动范围（两端各让半个点，防裁切）
+            val dotColor = toneColor(tone)
+            val trackY = 32.dp  // 轨道 y（4dp 高，中心 34dp）
+            val dotX = usable * fraction.toFloat()
+            val dotCenterX = dotX + dotSize / 2
+
+            // 价签精确量宽 → 在点正上方居中；靠近两端时钳制在边界内（不裁切）
+            val labelStyle = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 10.sp
+            )
+            val labelText = "%.2f".format(price)
+            val labelWidth = with(LocalDensity.current) {
+                textMeasurer.measure(AnnotatedString(labelText), labelStyle).size.width.toDp()
+            }
+            Text(
+                text = labelText,
+                style = labelStyle,
+                color = dotColor,
+                modifier = Modifier.offset(
+                    x = (dotCenterX - labelWidth / 2).coerceIn(0.dp, maxWidth - labelWidth),
+                    y = 12.dp
+                )
+            )
+
+            // 轨道
+            Box(
+                modifier = Modifier
+                    .offset(x = dotSize / 2, y = trackY)
+                    .width(maxWidth - dotSize)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+            // 下轨→现价已走区间（tone 色半透明）
+            Box(
+                modifier = Modifier
+                    .offset(x = dotSize / 2, y = trackY)
+                    .width(dotX)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(dotColor.copy(alpha = 0.45f))
+            )
+            // 中轨参考刻痕（带正中；BOLL 上下轨对称于中轨）
+            Box(
+                modifier = Modifier
+                    .offset(x = maxWidth / 2 - 1.dp, y = trackY - 3.dp)
+                    .width(2.dp)
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
+            )
+            // 现价点：按真实比例偏移（点中心与价签中心同 x）；表面色描边使其在轨道上突出
+            Box(
+                modifier = Modifier
+                    .offset(x = dotX, y = trackY + 2.dp - dotSize / 2)
+                    .size(dotSize)
+                    .clip(CircleShape)
+                    .background(dotColor)
+                    .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape)
+            )
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "现价",
+                text = "现价落点（下轨 ↔ 上轨）",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "%.2f".format(price),
+                // 破轨时明示（点此刻贴在轴边缘）；带内显示位置百分比
+                text = when {
+                    price > upper -> "破上轨 ↑"
+                    price < lower -> "破下轨 ↓"
+                    else -> "带内 ${(fraction * 100).toInt()}%"
+                },
                 style = MaterialTheme.typography.labelSmall,
-                color = toneColor(tone),
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp
-            )
-            Text(
-                text = "${(fraction * 100).toInt()}%",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                fontWeight = FontWeight.SemiBold,
+                color = when {
+                    price > upper -> ext.negative
+                    price < lower -> ext.positive
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
             )
         }
     }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
@@ -57,6 +58,7 @@ import com.stock.dividend.data.repository.MoneyFormatter
 @Composable
 fun TransactionHistoryScreen(
     onBack: () -> Unit,
+    onImportFromScreenshot: () -> Unit = {},
     viewModel: TransactionHistoryViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -65,7 +67,16 @@ fun TransactionHistoryScreen(
         topBar = {
             CompactTopAppBar(
                 title = "交易流水",
-                onBack = onBack
+                onBack = onBack,
+                actions = {
+                    IconButton(onClick = onImportFromScreenshot) {
+                        Icon(
+                            Icons.Default.PhotoCamera,
+                            contentDescription = "从截图导入交易记录",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             )
         }
     ) { padding ->

@@ -3,12 +3,10 @@ package com.stock.dividend.data.agent.tools
 import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
-import com.stock.dividend.data.repository.FinancialStatementsRepository
-import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 
 class GetFinancialStatementsTool(
-    private val stockRepository: StockRepository,
-    private val financialStatementsRepository: FinancialStatementsRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_financial_statements",
     description = "查询单只股票近 8 期财务三表明细：利润表（营收/营业成本/三费/营业利润/利润总额/所得税/归母净利/扣非净利）、现金流量表（经营/投资/筹资净额/期末现金）、资产负债表（总资产/总负债/净资产/货币资金/应收/存货/应付/固定资产）。金额单位元。forceRefresh=true 绕过 7 天缓存强制刷新。",
@@ -30,10 +28,10 @@ class GetFinancialStatementsTool(
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
         val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
         return runCatching {
-            val stock = stockRepository.resolveStock(code)
+            val stock = marketDataPlane.resolveStock(code)
                 ?: return@runCatching mapOf("error" to "未找到股票：$code")
             val forceRefresh = args.boolArg("forceRefresh") ?: false
-            val stmts = financialStatementsRepository.getFinancialStatements(stock.code, forceRefresh)
+            val stmts = marketDataPlane.getFinancialStatements(stock.code, forceRefresh)
                 ?: return@runCatching mapOf("error" to "财务报表数据不足，无法查询")
             mapOf(
                 "code" to stock.code,

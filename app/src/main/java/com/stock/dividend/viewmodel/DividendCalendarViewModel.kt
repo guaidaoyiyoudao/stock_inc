@@ -3,10 +3,9 @@ package com.stock.dividend.viewmodel
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,9 +82,7 @@ data class DividendCalendarUiState(
 
 @HiltViewModel
 class DividendCalendarViewModel @Inject constructor(
-    dividendDao: DividendDao,
-    stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository
+    private val marketDataPlane: MarketDataPlane
 ) : ViewModel() {
 
     private val selectedFilter = MutableStateFlow(DividendCalendarFilter.MONTH)
@@ -97,8 +94,8 @@ class DividendCalendarViewModel @Inject constructor(
 
     val uiState: StateFlow<DividendCalendarUiState> = combine(
         combine(
-            dividendDao.observeAll(),
-            stockRepository.observeAllStocks(),
+            marketDataPlane.observeAllDividends(),
+            marketDataPlane.observeAllStocks(),
             selectedFilter,
             visibleMonth,
             selectedDate
@@ -174,10 +171,7 @@ class DividendCalendarViewModel @Inject constructor(
             isRefreshing.value = true
             latestStocks.forEach { stock ->
                 try {
-                    dividendRepository.fetchAndCacheDividends(
-                        stockCode = stock.code,
-                        securityCode = stock.code.substringAfter(".")
-                    )
+marketDataPlane.refreshDividends(stock.code)
                 } catch (_: Exception) { /* 单股失败不中断其他股的刷新 */ }
             }
             isRefreshing.value = false

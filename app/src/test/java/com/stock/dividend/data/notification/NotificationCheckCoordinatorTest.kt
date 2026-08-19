@@ -1,6 +1,6 @@
 package com.stock.dividend.data.notification
 
-import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_UPPER
@@ -16,21 +16,20 @@ import com.stock.dividend.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
 class NotificationCheckCoordinatorTest {
 
-    private val stockRepository: StockRepository = mockk()
-    private val dividendDao: DividendDao = mockk()
+    private val marketDataPlane: MarketDataPlane = mockk()
     private val ruleRepository: NotificationRuleRepository = mockk(relaxed = true)
     private val notifier: DividendAlertNotifier = mockk(relaxed = true)
     private val gridPlanRepository: GridPlanRepository = mockk(relaxed = true)
     private val transactionRepository: TransactionRepository = mockk(relaxed = true)
     private val coordinator = NotificationCheckCoordinator(
-        stockRepository = stockRepository,
-        dividendDao = dividendDao,
+        marketDataPlane = marketDataPlane,
         ruleRepository = ruleRepository,
         evaluator = NotificationRuleEvaluator(),
         notifier = notifier,
@@ -45,7 +44,7 @@ class NotificationCheckCoordinatorTest {
         val stock = StockEntity("sz.000001", "平安银行", "0", shares = 100)
         val rule = rule(lastWasAboveThreshold = false, thresholdPercent = 5.0)
         coEvery { ruleRepository.getEffectiveDividendYieldRules(listOf(stock.code)) } returns mapOf(stock.code to rule)
-        coEvery { dividendDao.getByStock(stock.code) } returns listOf(dividend("2025-12-31", 1.2))
+        coEvery { marketDataPlane.getDividends(stock.code) } returns listOf(dividend("2025-12-31", 1.2))
         coEvery { notifier.canNotify() } returns true
 
         coordinator.checkWithPrices(
@@ -74,7 +73,7 @@ class NotificationCheckCoordinatorTest {
         val stock = StockEntity("sz.000001", "平安银行", "0", shares = 100)
         val rule = rule(lastWasAboveThreshold = null, thresholdPercent = 5.0)
         coEvery { ruleRepository.getEffectiveDividendYieldRules(listOf(stock.code)) } returns mapOf(stock.code to rule)
-        coEvery { dividendDao.getByStock(stock.code) } returns listOf(dividend("2025-12-31", 1.2))
+        coEvery { marketDataPlane.getDividends(stock.code) } returns listOf(dividend("2025-12-31", 1.2))
 
         coordinator.checkWithPrices(
             stocks = listOf(stock),
@@ -104,7 +103,7 @@ class NotificationCheckCoordinatorTest {
         )
         coEvery { ruleRepository.getEffectiveDividendYieldRules(listOf(stock.code)) } returns emptyMap()
         coEvery { ruleRepository.getEnabledStockRules(listOf(stock.code)) } returns mapOf(stock.code to listOf(rule))
-        coEvery { dividendDao.getByStock(stock.code) } returns emptyList()
+        coEvery { marketDataPlane.getDividends(stock.code) } returns emptyList()
         coEvery { notifier.canNotify() } returns true
 
         coordinator.checkWithPrices(
@@ -139,9 +138,9 @@ class NotificationCheckCoordinatorTest {
         )
         coEvery { ruleRepository.getEffectiveDividendYieldRules(listOf(stock.code)) } returns emptyMap()
         coEvery { ruleRepository.getEnabledStockRules(listOf(stock.code)) } returns mapOf(stock.code to listOf(rule))
-        coEvery { dividendDao.getByStock(stock.code) } returns emptyList()
+        coEvery { marketDataPlane.getDividends(stock.code) } returns emptyList()
         coEvery { notifier.canNotify() } returns true
-        coEvery { stockRepository.fetchBoll(stock.code) } returns BollBand(middle = 11.0, upper = 12.0, lower = 10.0)
+        coEvery { marketDataPlane.getBoll(stock.code) } returns BollBand(middle = 11.0, upper = 12.0, lower = 10.0)
 
         coordinator.checkWithPrices(
             stocks = listOf(stock),
@@ -175,9 +174,9 @@ class NotificationCheckCoordinatorTest {
         )
         coEvery { ruleRepository.getEffectiveDividendYieldRules(listOf(stock.code)) } returns emptyMap()
         coEvery { ruleRepository.getEnabledStockRules(listOf(stock.code)) } returns mapOf(stock.code to listOf(rule))
-        coEvery { dividendDao.getByStock(stock.code) } returns emptyList()
+        coEvery { marketDataPlane.getDividends(stock.code) } returns emptyList()
         coEvery { notifier.canNotify() } returns true
-        coEvery { stockRepository.fetchBoll(stock.code) } returns null
+        coEvery { marketDataPlane.getBoll(stock.code) } returns null
 
         coordinator.checkWithPrices(
             stocks = listOf(stock),
@@ -199,8 +198,8 @@ class NotificationCheckCoordinatorTest {
     fun `sends grid level notification for watchlist stock without holdings`() = runTest {
         val stock = StockEntity("sz.000001", "平安银行", "0", shares = 0)  // 非持仓也要提醒
         coEvery { gridPlanRepository.observeAll() } returns flowOf(listOf(gridPlan()))
-        coEvery { stockRepository.observeAllStocksForSnapshot() } returns listOf(stock)
-        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf(stock.code to 9.9)
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { marketDataPlane.getPrices(any(), any()) } returns mapOf(stock.code to 9.9)
         coEvery { transactionRepository.getAll() } returns emptyList()
         coEvery { notifier.canNotify() } returns true
 
@@ -226,8 +225,8 @@ class NotificationCheckCoordinatorTest {
         coEvery { gridPlanRepository.observeAll() } returns flowOf(
             listOf(gridPlan(lastNotifiedLevelPrice = 10.0))
         )
-        coEvery { stockRepository.observeAllStocksForSnapshot() } returns listOf(stock)
-        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf(stock.code to 9.9)
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { marketDataPlane.getPrices(any(), any()) } returns mapOf(stock.code to 9.9)
         coEvery { transactionRepository.getAll() } returns emptyList()
         coEvery { notifier.canNotify() } returns true
 
@@ -242,8 +241,8 @@ class NotificationCheckCoordinatorTest {
     fun `does not persist notified level without notification permission`() = runTest {
         val stock = StockEntity("sz.000001", "平安银行", "0", shares = 100)
         coEvery { gridPlanRepository.observeAll() } returns flowOf(listOf(gridPlan()))
-        coEvery { stockRepository.observeAllStocksForSnapshot() } returns listOf(stock)
-        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf(stock.code to 9.9)
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { marketDataPlane.getPrices(any(), any()) } returns mapOf(stock.code to 9.9)
         coEvery { transactionRepository.getAll() } returns emptyList()
         coEvery { notifier.canNotify() } returns false
 
@@ -260,8 +259,8 @@ class NotificationCheckCoordinatorTest {
         coEvery { gridPlanRepository.observeAll() } returns flowOf(
             listOf(gridPlan(lastNotifiedLevelPrice = 8.67))
         )
-        coEvery { stockRepository.observeAllStocksForSnapshot() } returns listOf(stock)
-        coEvery { stockRepository.fetchQuotes(any()) } returns mapOf(stock.code to 9.5)
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { marketDataPlane.getPrices(any(), any()) } returns mapOf(stock.code to 9.5)
         coEvery { transactionRepository.getAll() } returns emptyList()
         coEvery { notifier.canNotify() } returns true
 
@@ -279,7 +278,7 @@ class NotificationCheckCoordinatorTest {
 
         coordinator.checkGridPlans()
 
-        coVerify(exactly = 0) { stockRepository.fetchQuotes(any()) }
+        coVerify(exactly = 0) { marketDataPlane.getPrices(any(), any()) }
     }
 
     private fun gridPlan(lastNotifiedLevelPrice: Double? = null) = GridPlanEntity(

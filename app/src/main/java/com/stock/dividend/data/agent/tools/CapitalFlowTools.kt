@@ -3,8 +3,8 @@ package com.stock.dividend.data.agent.tools
 import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.MarketDataRepository
-import com.stock.dividend.data.repository.StockRepository
 
 private val FLOW_CODE_SCHEMA = Schema(
     type = Type.OBJECT,
@@ -18,8 +18,7 @@ private val FLOW_CODE_SCHEMA = Schema(
 )
 
 class GetCapitalFlowTool(
-    private val stockRepository: StockRepository,
-    private val marketDataRepository: MarketDataRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_capital_flow",
     description = "查询单只股票的资金流向：主力净流入额（元）/占比（%）、超大单/大单/中单/小单净流入额与占比。正值=净流入，负值=净流出。code 参数格式见参数说明。",
@@ -28,9 +27,9 @@ class GetCapitalFlowTool(
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
         val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
         return runCatching {
-            val stock = stockRepository.resolveStock(code)
+            val stock = marketDataPlane.resolveStock(code)
                 ?: return@runCatching mapOf("error" to "未找到股票：$code")
-            val flow = marketDataRepository.fetchCapitalFlow(stock.code)
+            val flow = marketDataPlane.getCapitalFlow(stock.code)
                 ?: return@runCatching mapOf("error" to "资金流数据获取失败")
             buildMap<String, Any?> {
                 put("code", stock.code)
@@ -51,7 +50,7 @@ class GetCapitalFlowTool(
 }
 
 class GetValuationMetricsTool(
-    private val stockRepository: StockRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_valuation_metrics",
     description = "查询单只股票的估值与盘口指标快照：PE(TTM)、PB、总市值、流通市值、换手率、振幅、量比。code 参数格式见参数说明。",
@@ -60,11 +59,11 @@ class GetValuationMetricsTool(
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
         val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
         return runCatching {
-            val stock = stockRepository.resolveStock(code)
+            val stock = marketDataPlane.resolveStock(code)
                 ?: return@runCatching mapOf("error" to "未找到股票：$code")
             val entity = stock.toEntity()
-            stockRepository.refreshPrice(entity) // 触发行情刷新
-            val snapshot = stockRepository.fetchQuoteSnapshots(listOf(entity))[stock.code]
+            // 单次平面行情请求（此前 refreshPrice + fetchQuoteSnapshots 连发两次网络，平面会话缓存已合并）
+            val snapshot = marketDataPlane.getQuoteSnapshots(listOf(entity))[stock.code]
                 ?: return@runCatching mapOf("error" to "行情数据获取失败")
             buildMap<String, Any?> {
                 put("code", stock.code)
@@ -83,7 +82,7 @@ class GetValuationMetricsTool(
 }
 
 class GetDragonTigerTool(
-    private val marketDataRepository: MarketDataRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_dragon_tiger",
     description = "查询龙虎榜（当日上榜个股：交易日期、代码、名称、上榜原因、净买入额、龙虎榜成交额）。传 code 仅查该股；不传返回当日全市场。limit 默认 20，范围 1-50。",
@@ -100,7 +99,7 @@ class GetDragonTigerTool(
         return runCatching {
             val stockCode = args.stringArg("code")
             val resolved = stockCode?.let { stockCodeResolved(it) }
-            val items = marketDataRepository.fetchDragonTiger(stockCode = resolved, limit = limit)
+            val items = marketDataPlane.getDragonTiger(stockCode = resolved, limit = limit)
             if (items.isEmpty()) return@runCatching mapOf("error" to "暂无龙虎榜数据")
             mapOf(
                 "items" to items.map {
@@ -129,7 +128,7 @@ class GetDragonTigerTool(
 }
 
 class GetMarketSentimentTool(
-    private val marketDataRepository: MarketDataRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_market_sentiment",
     description = "查询当日市场情绪快照：主要指数（上证/深证/沪深300/创业板/科创50/中证500/中证1000）现价与涨跌幅、行业板块涨跌榜（领涨/领跌各前 5）、主力资金净流入榜（前 5）。无需参数。",
@@ -137,17 +136,18 @@ class GetMarketSentimentTool(
 ) {
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
         return runCatching {
-            val indices = marketDataRepository.fetchIndexQuotes()
-            val topIndustries = marketDataRepository.fetchIndustryList(
+            // 平面 60s 内存缓存：同参数列表（CHANGE）只发一次请求
+            val indices = marketDataPlane.getIndexQuotes()
+            val topIndustries = marketDataPlane.getIndustryList(
                 sortBy = MarketDataRepository.SortBy.CHANGE, limit = 5
             )
             val bottomIndustries = runCatching {
                 // 领跌：升序取前 5（接口 po=1 是降序，这里取不到升序，改用取较多后排序）
-                marketDataRepository.fetchIndustryList(
+                marketDataPlane.getIndustryList(
                     sortBy = MarketDataRepository.SortBy.CHANGE, limit = 30
                 ).sortedBy { it.changePct ?: Double.MAX_VALUE }.take(5)
             }.getOrDefault(emptyList())
-            val inflowIndustries = marketDataRepository.fetchIndustryList(
+            val inflowIndustries = marketDataPlane.getIndustryList(
                 sortBy = MarketDataRepository.SortBy.INFLOW, limit = 5
             )
             buildMap<String, Any?> {

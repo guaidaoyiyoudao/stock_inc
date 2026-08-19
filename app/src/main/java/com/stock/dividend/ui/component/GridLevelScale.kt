@@ -140,8 +140,12 @@ fun GridLevelScale(
                     fontWeight = FontWeight.SemiBold
                 )
             } else {
+                // 区分两种「无下一档」：跌破用完位 vs 下方档全部已买
+                val allBought = levels.isNotEmpty() &&
+                    currentPrice > levels.first().price &&
+                    levels.filter { it.price < currentPrice }.all { it.triggered }
                 Text(
-                    text = "已到/跌破资金用完位",
+                    text = if (allBought) "下方档位已全部买入" else "已到/跌破资金用完位",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

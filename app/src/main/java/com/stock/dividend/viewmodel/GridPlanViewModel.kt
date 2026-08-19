@@ -8,8 +8,7 @@ import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.notification.DividendAlertNotifier
-import com.stock.dividend.data.repository.DividendRepository
-import com.stock.dividend.data.repository.ForecastCalculator
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.GridAmmoSummary
 import com.stock.dividend.data.repository.GridAnchor
 import com.stock.dividend.data.repository.GridAnchorCalculator
@@ -24,8 +23,6 @@ import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.GridResult
 import com.stock.dividend.data.repository.GridType
 import com.stock.dividend.data.repository.KlinePeriod
-import com.stock.dividend.data.repository.KlineRepository
-import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
@@ -35,7 +32,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -66,7 +62,9 @@ data class ReanchorDiff(
     val newLowPrice: Double,
     val newHighPrice: Double,
     /** 本次锚定实际采用的目标股息率（%）：计划存档值，或由现资金用完位反推。 */
-    val targetYieldUsed: Double
+    val targetYieldUsed: Double,
+    /** 重锚定后的新 DPS 快照（元）；仅按股息率（YIELD）计划填充，随确认一起保存。 */
+    val newDpsPerShare: Double? = null
 )
 
 @Stable
@@ -88,10 +86,17 @@ data class GridPlanUiState(
     val highPriceInput: String = "",
     val gridsInput: String = "4",
     val totalCapitalInput: String = "100000",
-    /** 档位分布：等差（默认）/ 等比（百分比步长）。 */
+    /** 档位分布：等差（默认）/ 等比（百分比步长）/ 按股息率。 */
     val gridTypeInput: GridType = GridType.ARITHMETIC,
     /** 用户目标股息率（%，到达即网格资金用完位）。 */
     val targetYieldInput: String = "6",
+    /** 按股息率模式：起始股息率（%，最贵第一档，价格高于此=股息率低于此不追买）。 */
+    val yieldStartInput: String = "5.5",
+    /** 按股息率模式：结束股息率（%，最便宜最后一档=资金用完位）。 */
+    val yieldEndInput: String = "6.5",
+    /** 当前选中标的的年度每股分红（元，Room 本地缓存）；按股息率模式的档位价换算基准。
+     *  null = 未选标的或该股无分红数据（UI 提示无法按股息率分档）。 */
+    val generatorDps: Double? = null,
     /** 智能锚定结果（BOLL+目标股息率自动填充后）；null=未锚定或失败。 */
     val anchorInfo: GridAnchor? = null,
     /** 锚定按钮 loading（拉 BOLL/分红网络中）。 */
@@ -123,10 +128,8 @@ data class GridPlanUiState(
 class GridPlanViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val gridPlanRepository: GridPlanRepository,
-    private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository,
+    private val marketDataPlane: MarketDataPlane,
     private val transactionRepository: TransactionRepository,
-    private val klineRepository: KlineRepository,
     private val alertNotifier: DividendAlertNotifier
 ) : ViewModel() {
 
@@ -147,7 +150,7 @@ class GridPlanViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 gridPlanRepository.observeAll(),
-                stockRepository.observeAllStocks(),
+                marketDataPlane.observeAllStocks(),
                 pricesByCode,
                 transactionRepository.observeAll(),
                 dpsByCode
@@ -169,7 +172,8 @@ class GridPlanViewModel @Inject constructor(
                             grids = plan.grids,
                             totalCapital = plan.totalCapital,
                             currentPrice = price,
-                            gridType = GridType.fromRaw(plan.gridType)
+                            gridType = GridType.fromRaw(plan.gridType),
+                            dps = plan.dpsPerShare
                         ),
                         planTxs
                     )
@@ -242,28 +246,20 @@ class GridPlanViewModel @Inject constructor(
         } else null
     }
 
-    /** 后台刷新计划标的的当前价（网络）与最新年度每股分红（Room 缓存，股息展望用）。 */
+    /** 后台刷新计划标的的当前价与最新年度每股分红（均走数据平面；失败静默，保留旧值）。 */
     private fun refreshMarketDataFor(codes: List<String>) {
         if (codes.isEmpty()) return
         viewModelScope.launch {
-            try {
-                val stocks = stockRepository.observeAllStocksForSnapshot()
-                    .filter { it.code in codes }
-                if (stocks.isNotEmpty()) {
-                    val quotes = stockRepository.fetchQuotes(stocks)
-                    pricesByCode.value = quotes.filterValues { it > 0.0 }
-                }
-            } catch (_: Exception) {
-                // 网络失败静默，保留空价（提示项为 null）
+            runCatching {
+                val quotes = marketDataPlane.getPricesForCodes(codes)
+                if (quotes.isNotEmpty()) pricesByCode.value = quotes
             }
-            // 分红读 Room 缓存（DividendRepository 本地优先），失败静默
+            // DPS 经平面自动 ensureDividendsFresh：dividends 表空/过期时发网刷新
+            //（此前只读本地——没进过详情页的股票在网格页永远拿不到股息率，即本次痛点根因）
             val dps = codes.mapNotNull { code ->
-                runCatching {
-                    val dividends = dividendRepository.observeDividends(code).first()
-                    ForecastCalculator.latestYearlyCashPerShare(dividends)
-                        ?.takeIf { it > 0.0 }
-                        ?.let { code to it }
-                }.getOrNull()
+                runCatching { marketDataPlane.getDps(code) }
+                    .getOrNull()
+                    ?.let { code to it }
             }.toMap()
             if (dps.isNotEmpty()) dpsByCode.value = dps
         }
@@ -292,6 +288,9 @@ class GridPlanViewModel @Inject constructor(
             totalCapitalInput = "100000",
             gridTypeInput = GridType.ARITHMETIC,
             targetYieldInput = "6",
+            yieldStartInput = "5.5",
+            yieldEndInput = "6.5",
+            generatorDps = null,
             anchorInfo = null,
             isAnchoring = false,
             anchorError = null,
@@ -317,7 +316,21 @@ class GridPlanViewModel @Inject constructor(
             selectedStockCode = code,
             basePriceInput = _uiState.value.basePriceInput.ifBlank { base }
         )
-        recalculatePreview()
+        // 按股息率模式的换算基准：拉取该股年度每股分红（Room 本地，吞异常）
+        fetchGeneratorDps(code)
+    }
+
+    /** 拉取指定标的的年度每股分红写入生成器；按股息率（YIELD）模式用。走数据平面（表空/过期自动拉网）。 */
+    private fun fetchGeneratorDps(code: String) {
+        if (code.isBlank()) return
+        viewModelScope.launch {
+            val dps = runCatching { marketDataPlane.getDps(code) }.getOrNull()
+            // 仅当选中标的未再变化时写入（避免快速切换标的的竞态写出旧值）
+            if (_uiState.value.selectedStockCode == code) {
+                _uiState.value = _uiState.value.copy(generatorDps = dps)
+                recalculatePreview()
+            }
+        }
     }
 
     fun onBasePriceChanged(v: String) = update { copy(basePriceInput = v) }
@@ -326,6 +339,8 @@ class GridPlanViewModel @Inject constructor(
     fun onGridsChanged(v: String) = update { copy(gridsInput = v) }
     fun onTotalCapitalChanged(v: String) = update { copy(totalCapitalInput = v) }
     fun onTargetYieldChanged(v: String) = update { copy(targetYieldInput = v) }
+    fun onYieldStartChanged(v: String) = update { copy(yieldStartInput = v) }
+    fun onYieldEndChanged(v: String) = update { copy(yieldEndInput = v) }
     fun onGridTypeChanged(v: GridType) = update { copy(gridTypeInput = v) }
 
     /**
@@ -333,6 +348,8 @@ class GridPlanViewModel @Inject constructor(
      * （= 资金用完位）自动填充基准价/上下界。网络失败或数据不全时静默提示，不崩。
      */
     fun autoAnchor() {
+        // 按股息率模式不依赖 BOLL 锚定（UI 已隐藏锚定区），防御性跳过
+        if (_uiState.value.gridTypeInput == GridType.YIELD) return
         val code = _uiState.value.selectedStockCode
         if (code.isBlank()) {
             _uiState.value = _uiState.value.copy(anchorError = "请先选择标的股票")
@@ -346,11 +363,10 @@ class GridPlanViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isAnchoring = true, anchorError = null)
         viewModelScope.launch {
             // 并发拉日/周/月三周期 BOLL + 分红，任一失败吞异常（§4.3）
-            val dailyBand = runCatching { stockRepository.fetchBoll(code, KlinePeriod.DAILY) }.getOrNull()
-            val weeklyBand = runCatching { stockRepository.fetchBoll(code, KlinePeriod.WEEKLY) }.getOrNull()
-            val monthlyBand = runCatching { stockRepository.fetchBoll(code, KlinePeriod.MONTHLY) }.getOrNull()
-            val dividends = runCatching { dividendRepository.observeDividends(code).first() }.getOrDefault(emptyList())
-            val latestDps = ForecastCalculator.latestYearlyCashPerShare(dividends)
+            val dailyBand = runCatching { marketDataPlane.getBoll(code, KlinePeriod.DAILY) }.getOrNull()
+            val weeklyBand = runCatching { marketDataPlane.getBoll(code, KlinePeriod.WEEKLY) }.getOrNull()
+            val monthlyBand = runCatching { marketDataPlane.getBoll(code, KlinePeriod.MONTHLY) }.getOrNull()
+            val latestDps = runCatching { marketDataPlane.getDps(code) }.getOrNull()
             val anchor = if (latestDps != null) {
                 // 三周期缺省时锚定内部跳过缺失周期，至少一个周期 + 分红即可
                 GridAnchorCalculator.anchor(dailyBand, weeklyBand, monthlyBand, latestDps, targetYield)
@@ -382,16 +398,39 @@ class GridPlanViewModel @Inject constructor(
 
     private fun recalculatePreview() {
         val s = _uiState.value
+        val grids = s.gridsInput.toIntOrNull()
+        val capital = s.totalCapitalInput.toDoubleOrNull()
+        val price = pricesByCode.value[s.selectedStockCode]
+
+        // 按股息率模式：三价由「DPS ÷ 股息率区间」换算（买入起点=DPS÷起始%，资金用完位=DPS÷结束%，
+        // 参考上界=买入起点——股息率低于起始%即不追买），区间非法（结束≤起始）由 generate 报校验错。
+        if (s.gridTypeInput == GridType.YIELD) {
+            val dps = s.generatorDps
+            val start = s.yieldStartInput.toDoubleOrNull()
+            val end = s.yieldEndInput.toDoubleOrNull()
+            if (dps == null || dps <= 0.0 || start == null || start <= 0.0 ||
+                end == null || end <= 0.0 || grids == null || capital == null
+            ) {
+                _uiState.value = _uiState.value.copy(preview = null)
+                return
+            }
+            val base = dps / (start / 100.0)
+            val low = dps / (end / 100.0)
+            _uiState.value = _uiState.value.copy(
+                preview = GridCalculator.generate(
+                    base, low, base, grids, capital, price, GridType.YIELD, dps
+                )
+            )
+            return
+        }
+
         val base = s.basePriceInput.toDoubleOrNull()
         val low = s.lowPriceInput.toDoubleOrNull()
         val high = s.highPriceInput.toDoubleOrNull()
-        val grids = s.gridsInput.toIntOrNull()
-        val capital = s.totalCapitalInput.toDoubleOrNull()
         if (base == null || low == null || high == null || grids == null || capital == null) {
             _uiState.value = _uiState.value.copy(preview = null)
             return
         }
-        val price = pricesByCode.value[s.selectedStockCode]
         _uiState.value = _uiState.value.copy(
             preview = GridCalculator.generate(
                 base, low, high, grids, capital, price, s.gridTypeInput
@@ -402,19 +441,45 @@ class GridPlanViewModel @Inject constructor(
     /** 保存当前生成器参数为计划（新建或覆盖编辑）。 */
     fun savePlan() {
         val s = _uiState.value
-        val base = s.basePriceInput.toDoubleOrNull()
-        val low = s.lowPriceInput.toDoubleOrNull()
-        val high = s.highPriceInput.toDoubleOrNull()
         val grids = s.gridsInput.toIntOrNull()
         val capital = s.totalCapitalInput.toDoubleOrNull()
+        if (s.selectedStockCode.isBlank()) return setSaveError("请先选择标的股票")
+        if (grids == null || capital == null) {
+            return setSaveError("请完整填写档数与资金")
+        }
+
+        // 按股息率模式：三价由 DPS+股息率区间换算；DPS 存快照（分红变化不使档位漂移）。
+        val isYield = s.gridTypeInput == GridType.YIELD
+        val dps: Double?
+        val startYield: Double?
+        val endYield: Double?
+        val base: Double
+        val low: Double
+        val high: Double
+        if (isYield) {
+            dps = s.generatorDps?.takeIf { it > 0.0 }
+                ?: return setSaveError("该股暂无分红数据，无法按股息率分档")
+            startYield = s.yieldStartInput.toDoubleOrNull()?.takeIf { it > 0.0 }
+                ?: return setSaveError("请输入有效的起始股息率")
+            endYield = s.yieldEndInput.toDoubleOrNull()?.takeIf { it > 0.0 }
+                ?: return setSaveError("请输入有效的结束股息率")
+            base = round2(dps / (startYield / 100.0))
+            low = round2(dps / (endYield / 100.0))
+            high = base  // 参考上界 = 买入起点（股息率低于起始%即不追买）
+        } else {
+            dps = null
+            startYield = null
+            endYield = null
+            base = s.basePriceInput.toDoubleOrNull()
+                ?: return setSaveError("请完整填写基准价、上下界、档数与资金")
+            low = s.lowPriceInput.toDoubleOrNull()
+                ?: return setSaveError("请完整填写基准价、上下界、档数与资金")
+            high = s.highPriceInput.toDoubleOrNull()
+                ?: return setSaveError("请完整填写基准价、上下界、档数与资金")
+        }
         // 校验失败给出可见提示，绝不静默无反应（曾因按钮可点但 savePlan 静默 return 导致「不能保存」）
-        when {
-            s.selectedStockCode.isBlank() ->
-                return setSaveError("请先选择标的股票")
-            base == null || low == null || high == null || grids == null || capital == null ->
-                return setSaveError("请完整填写基准价、上下界、档数与资金")
-            s.preview?.validationError != null ->
-                return setSaveError("参数无效：${s.preview!!.validationError}")
+        if (s.preview?.validationError != null) {
+            return setSaveError("参数无效：${s.preview!!.validationError}")
         }
 
         val stockName = s.stocks.firstOrNull { it.code == s.selectedStockCode }?.name
@@ -430,7 +495,10 @@ class GridPlanViewModel @Inject constructor(
             grids = grids,
             totalCapital = capital,
             gridType = s.gridTypeInput.raw,
-            targetYieldPercent = s.targetYieldInput.toDoubleOrNull()?.takeIf { it > 0.0 },
+            // YIELD 模式：目标股息率 = 结束股息率（到达即资金用完位，重锚定语义一致）
+            targetYieldPercent = endYield
+                ?: s.targetYieldInput.toDoubleOrNull()?.takeIf { it > 0.0 },
+            dpsPerShare = dps,
             // 编辑时保留原创建时间；档位参数可能已变，旧的到档提醒状态作废
             createdAt = s.editingCreatedAt ?: now,
             lastNotifiedLevelPrice = null,
@@ -447,11 +515,22 @@ class GridPlanViewModel @Inject constructor(
         }
     }
 
+    private fun round2(v: Double): Double = kotlin.math.round(v * 100.0) / 100.0
+
     private fun setSaveError(message: String) {
         _uiState.value = _uiState.value.copy(saveError = message)
     }
 
     fun editPlan(plan: GridPlanEntity) {
+        val type = GridType.fromRaw(plan.gridType)
+        // YIELD 计划：股息率区间由存档 DPS 快照反推（dps/base、dps/low），保证编辑预览与存库档位一致
+        val dps = plan.dpsPerShare?.takeIf { it > 0.0 }
+        val yieldStart = if (type == GridType.YIELD && dps != null && plan.basePrice > 0.0) {
+            String.format(java.util.Locale.US, "%.2f", dps / plan.basePrice * 100.0)
+        } else "5.5"
+        val yieldEnd = if (type == GridType.YIELD && dps != null && plan.lowPrice > 0.0) {
+            String.format(java.util.Locale.US, "%.2f", dps / plan.lowPrice * 100.0)
+        } else "6.5"
         _uiState.value = _uiState.value.copy(
             showGenerator = true,
             editingId = plan.id,
@@ -462,7 +541,17 @@ class GridPlanViewModel @Inject constructor(
             highPriceInput = String.format(java.util.Locale.US, "%.2f", plan.highPrice),
             gridsInput = plan.grids.toString(),
             totalCapitalInput = String.format(java.util.Locale.US, "%.0f", plan.totalCapital),
-            gridTypeInput = GridType.fromRaw(plan.gridType)
+            gridTypeInput = type,
+            // 目标股息率回填（YIELD = 结束股息率口径；旧数据/手填计划可能为 null → 默认值）
+            targetYieldInput = plan.targetYieldPercent
+                ?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "6",
+            yieldStartInput = yieldStart,
+            yieldEndInput = yieldEnd,
+            // 编辑 YIELD 计划沿用存档 DPS（不重拉），档位不漂移；切换标的时会重拉
+            generatorDps = dps,
+            anchorInfo = null,
+            anchorError = null,
+            saveError = null
         )
         recalculatePreview()
     }
@@ -488,17 +577,48 @@ class GridPlanViewModel @Inject constructor(
     /**
      * 一键重锚定：重拉该标的三周期 BOLL + 分红，按计划的目标股息率
      * （存档值，缺失时由现资金用完位反推）重算三价，产出新旧对比待确认。
+     *
+     * 按股息率（YIELD）计划不走 BOLL：重拉最新分红，用原股息率区间重算三价
+     * （分红变化 → 同样的股息率档位对应新价格）。
      */
     fun reanchorPlan(plan: GridPlanEntity) {
         _uiState.value = _uiState.value.copy(isReanchoring = true, reanchorError = null)
         viewModelScope.launch {
-            val dailyBand = runCatching { stockRepository.fetchBoll(plan.stockCode, KlinePeriod.DAILY) }.getOrNull()
-            val weeklyBand = runCatching { stockRepository.fetchBoll(plan.stockCode, KlinePeriod.WEEKLY) }.getOrNull()
-            val monthlyBand = runCatching { stockRepository.fetchBoll(plan.stockCode, KlinePeriod.MONTHLY) }.getOrNull()
-            val dividends = runCatching {
-                dividendRepository.observeDividends(plan.stockCode).first()
-            }.getOrDefault(emptyList())
-            val dps = ForecastCalculator.latestYearlyCashPerShare(dividends)
+            val dps = runCatching { marketDataPlane.getDps(plan.stockCode) }.getOrNull()
+
+            if (GridType.fromRaw(plan.gridType) == GridType.YIELD) {
+                // YIELD 重锚定：原股息率区间由存档 DPS 快照反推，新三价 = 新 DPS ÷ 原区间
+                val oldDps = plan.dpsPerShare?.takeIf { it > 0.0 }
+                val startYield = oldDps?.takeIf { plan.basePrice > 0.0 }?.let { it / plan.basePrice }
+                val endYield = oldDps?.takeIf { plan.lowPrice > 0.0 }?.let { it / plan.lowPrice }
+                if (dps == null || dps <= 0.0 || startYield == null || endYield == null ||
+                    startYield <= 0.0 || endYield <= startYield
+                ) {
+                    _uiState.value = _uiState.value.copy(
+                        isReanchoring = false,
+                        reanchorError = "数据不足（需历史分红与存档 DPS），无法重锚定"
+                    )
+                    return@launch
+                }
+                val newBase = round2(dps / startYield)
+                val newLow = round2(dps / endYield)
+                _uiState.value = _uiState.value.copy(
+                    isReanchoring = false,
+                    reanchorDiff = ReanchorDiff(
+                        plan = plan,
+                        newBasePrice = newBase,
+                        newLowPrice = newLow,
+                        newHighPrice = newBase,  // YIELD 模式参考上界 = 买入起点
+                        targetYieldUsed = round2(endYield * 100.0),
+                        newDpsPerShare = dps
+                    )
+                )
+                return@launch
+            }
+
+            val dailyBand = runCatching { marketDataPlane.getBoll(plan.stockCode, KlinePeriod.DAILY) }.getOrNull()
+            val weeklyBand = runCatching { marketDataPlane.getBoll(plan.stockCode, KlinePeriod.WEEKLY) }.getOrNull()
+            val monthlyBand = runCatching { marketDataPlane.getBoll(plan.stockCode, KlinePeriod.MONTHLY) }.getOrNull()
 
             // 目标股息率：优先计划存档值（用户当初意图）；旧数据/手填没有 → 由现资金用完位反推
             val targetYield = plan.targetYieldPercent
@@ -538,6 +658,7 @@ class GridPlanViewModel @Inject constructor(
                         lowPrice = diff.newLowPrice,
                         highPrice = diff.newHighPrice,
                         targetYieldPercent = diff.targetYieldUsed,
+                        dpsPerShare = diff.newDpsPerShare ?: diff.plan.dpsPerShare,
                         lastNotifiedLevelPrice = null,  // 档位变了，旧提醒状态作废
                         updatedAt = System.currentTimeMillis()
                     )
@@ -565,7 +686,7 @@ class GridPlanViewModel @Inject constructor(
         )
         viewModelScope.launch {
             val klines = runCatching {
-                klineRepository.fetchKlines(plan.stockCode, KlinePeriod.DAILY, 250)
+                marketDataPlane.getKlines(plan.stockCode, KlinePeriod.DAILY, 250)
             }.getOrDefault(emptyList())
             val result = GridBacktestCalculator.backtest(
                 klines = klines,
@@ -574,7 +695,8 @@ class GridPlanViewModel @Inject constructor(
                 highPrice = plan.highPrice,
                 grids = plan.grids,
                 totalCapital = plan.totalCapital,
-                gridType = GridType.fromRaw(plan.gridType)
+                gridType = GridType.fromRaw(plan.gridType),
+                dps = plan.dpsPerShare
             )
             _uiState.value = _uiState.value.copy(
                 backtestingIds = _uiState.value.backtestingIds - plan.id,

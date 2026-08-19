@@ -5,12 +5,10 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.notification.DividendAlertNotifier
-import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
-import com.stock.dividend.data.repository.KlineRepository
-import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -59,18 +57,15 @@ class GridPlanViewModelTest {
     @Test
     fun `observeAll renders plans with grid result`() = runTest {
         val gridRepo = mockk<GridPlanRepository>()
-        val stockRepo = mockk<StockRepository>()
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(listOf(plan("1")))
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
+        coEvery { plane.getPricesForCodes(any()) } returns emptyMap()
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.uiState.test {
             // 跳过中间态（init 的权限检查等会先发 items 仍空的状态）
             var state = awaitItem()
@@ -87,18 +82,15 @@ class GridPlanViewModelTest {
     @Test
     fun `savePlan persists entity via repository`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
+        coEvery { plane.getPricesForCodes(any()) } returns emptyMap()
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.showGenerator()
         vm.onStockSelected("sh.600036")
         vm.onBasePriceChanged("10")
@@ -120,17 +112,14 @@ class GridPlanViewModelTest {
     @Test
     fun `savePlan ignores when stock not selected`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.showGenerator()
         // 不选标的，直接保存
         vm.onBasePriceChanged("10")
@@ -147,18 +136,15 @@ class GridPlanViewModelTest {
     @Test
     fun `savePlan with incomplete params sets visible error instead of silent noop`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.fetchQuotes(any()) } returns emptyMap()
+        coEvery { plane.getPricesForCodes(any()) } returns emptyMap()
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.showGenerator()
         vm.onStockSelected("sh.600036")
         // 只填了部分参数（缺 highPrice/grids/capital）
@@ -176,17 +162,14 @@ class GridPlanViewModelTest {
     @Test
     fun `deletePlan calls repository delete`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.deletePlan("abc")
         advanceUntilIdle()
         coVerify { gridRepo.delete("abc") }
@@ -195,17 +178,14 @@ class GridPlanViewModelTest {
     @Test
     fun `preview recalculates on param change`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.showGenerator()
         // 参数不全时 preview 为 null
         assertThat(vm.uiState.value.preview).isNull()
@@ -222,27 +202,22 @@ class GridPlanViewModelTest {
     @Test
     fun `autoAnchor fills params from boll and dividend`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
         // 三周期 BOLL：日(9/10/11)、周(8/10/12)、月(9/11/13)；股息 0.6/股
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
             com.stock.dividend.data.repository.BollBand(10.0, 11.0, 9.0)
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns
             com.stock.dividend.data.repository.BollBand(10.0, 12.0, 8.0)
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns
             com.stock.dividend.data.repository.BollBand(11.0, 13.0, 9.0)
-        coEvery { divRepo.observeDividends(any()) } returns flowOf(
-            listOf(com.stock.dividend.data.local.entity.DividendEntity(id = "1", stockCode = "sh.600036", reportDate = "2024", cashPerShare = 0.6))
-        )
+        coEvery { plane.getDps(any()) } returns 0.6
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.showGenerator()
         vm.onStockSelected("sh.600036")
         vm.onTargetYieldChanged("8")   // 股息底 7.5 < 起点 8
@@ -266,20 +241,17 @@ class GridPlanViewModelTest {
     @Test
     fun `autoAnchor reports error when data insufficient`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
         // BOLL 拉取失败（null）
-        coEvery { stockRepo.fetchBoll(any(), any()) } returns null
-        coEvery { divRepo.observeDividends(any()) } returns flowOf(emptyList())
+        coEvery { plane.getBoll(any(), any()) } returns null
+        coEvery { plane.getDps(any()) } returns null
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.showGenerator()
         vm.onStockSelected("sh.600036")
         vm.onTargetYieldChanged("6")
@@ -294,17 +266,14 @@ class GridPlanViewModelTest {
     @Test
     fun `autoAnchor requires stock selected`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.showGenerator()
         // 不选标的直接锚定
         vm.onTargetYieldChanged("6")
@@ -319,29 +288,24 @@ class GridPlanViewModelTest {
     @Test
     fun `initial stock code auto-opens generator and anchors`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
         // 三周期 BOLL：日(11/12/13)、周(10.5/11.5/12.5)、月(10/11/12)
         // 默认目标 6% → 股息底 10 < 起点 min(11, 10.5, 月BOLL中轨11) = 10.5
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
             com.stock.dividend.data.repository.BollBand(12.0, 13.0, 11.0)
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns
             com.stock.dividend.data.repository.BollBand(11.5, 12.5, 10.5)
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns
             com.stock.dividend.data.repository.BollBand(11.0, 12.0, 10.0)
-        coEvery { divRepo.observeDividends(any()) } returns flowOf(
-            listOf(com.stock.dividend.data.local.entity.DividendEntity(id = "1", stockCode = "sh.600036", reportDate = "2024", cashPerShare = 0.6))
-        )
+        coEvery { plane.getDps(any()) } returns 0.6
 
         // 关键：携带 code 构造，模拟从个股详情页进入
-        val vm = GridPlanViewModel(savedStateHandle("sh.600036"), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle("sh.600036"), gridRepo, plane, txRepo, notifier)
         // init 的 collector 需先跑到（发射自选股 → 触发自动打开+锚定）
         advanceUntilIdle()
 
@@ -358,17 +322,14 @@ class GridPlanViewModelTest {
     @Test
     fun `unknown initial code does not auto-open generator`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock("sh.600000", "浦发银行")))
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock("sh.600000", "浦发银行")))
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle("sz.999999"), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle("sz.999999"), gridRepo, plane, txRepo, notifier)
         advanceUntilIdle()
 
         assertThat(vm.uiState.value.showGenerator).isFalse()
@@ -379,17 +340,14 @@ class GridPlanViewModelTest {
     @Test
     fun `editing plan preserves createdAt and resets notify state`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock()))
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.editPlan(plan("1").copy(createdAt = 111L, lastNotifiedLevelPrice = 9.33))
         // 改一档参数再保存（档位变了，旧的已提醒档位作废）
         vm.onGridsChanged("5")
@@ -410,17 +368,14 @@ class GridPlanViewModelTest {
     @Test
     fun `toggleNotify flips flag without touching updatedAt`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.toggleNotify(plan("1").copy(notifyEnabled = true, updatedAt = 555L))
         advanceUntilIdle()
 
@@ -436,27 +391,22 @@ class GridPlanViewModelTest {
     @Test
     fun `reanchorPlan produces diff dialog`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
         // 三周期 BOLL：日(11/12/13)、周(10.5/11.5/12.5)、月(10/11/12)
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
             com.stock.dividend.data.repository.BollBand(12.0, 13.0, 11.0)
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns
             com.stock.dividend.data.repository.BollBand(11.5, 12.5, 10.5)
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns
             com.stock.dividend.data.repository.BollBand(11.0, 12.0, 10.0)
-        coEvery { divRepo.observeDividends(any()) } returns flowOf(
-            listOf(com.stock.dividend.data.local.entity.DividendEntity(id = "1", stockCode = "sh.600036", reportDate = "2024", cashPerShare = 0.6))
-        )
+        coEvery { plane.getDps(any()) } returns 0.6
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         // 计划存档目标股息率 6% → 股息底 10；起点 = min(11, 10.5, 月中轨 11) = 10.5
         vm.reanchorPlan(plan("1").copy(targetYieldPercent = 6.0))
         advanceUntilIdle()
@@ -472,19 +422,16 @@ class GridPlanViewModelTest {
     @Test
     fun `reanchorPlan reports error when data insufficient`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.fetchBoll(any(), any()) } returns null
-        coEvery { divRepo.observeDividends(any()) } returns flowOf(emptyList())
+        coEvery { plane.getBoll(any(), any()) } returns null
+        coEvery { plane.getDps(any()) } returns null
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.reanchorPlan(plan("1"))
         advanceUntilIdle()
 
@@ -496,25 +443,20 @@ class GridPlanViewModelTest {
     @Test
     fun `confirmReanchor saves new prices preserving createdAt`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
         // 单周期 BOLL（日）+ 分红即可锚定成功
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
             com.stock.dividend.data.repository.BollBand(11.0, 12.0, 10.0)
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns null
-        coEvery { stockRepo.fetchBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns null
-        coEvery { divRepo.observeDividends(any()) } returns flowOf(
-            listOf(com.stock.dividend.data.local.entity.DividendEntity(id = "1", stockCode = "sh.600036", reportDate = "2024", cashPerShare = 0.6))
-        )
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns null
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns null
+        coEvery { plane.getDps(any()) } returns 0.6
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         val original = plan("1").copy(createdAt = 111L, lastNotifiedLevelPrice = 9.33, targetYieldPercent = 8.0)
         vm.reanchorPlan(original)
         advanceUntilIdle()
@@ -541,22 +483,19 @@ class GridPlanViewModelTest {
     @Test
     fun `backtestPlan stores result or error by plan id`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
         // 两根日 K：首日 9.5 → base 档（10.0）触发；次日 8.5 → 9.33/8.67 逐档
-        coEvery { klineRepo.fetchKlines(any(), KlinePeriod.DAILY, 250) } returns listOf(
+        coEvery { plane.getKlines(any(), KlinePeriod.DAILY, 250, any()) } returns listOf(
             KlineBar(date = "2026-01-02", open = 9.5, close = 9.5, high = 9.5, low = 9.5, volume = 1.0),
             KlineBar(date = "2026-01-05", open = 8.5, close = 8.5, high = 8.5, low = 8.5, volume = 1.0)
         )
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         vm.backtestPlan(plan("1"))
         advanceUntilIdle()
         assertThat(vm.uiState.value.backtestResults["1"]).isNotNull()
@@ -564,7 +503,7 @@ class GridPlanViewModelTest {
         assertThat(vm.uiState.value.backtestingIds).isEmpty()
 
         // K 线为空 → 错误可见
-        coEvery { klineRepo.fetchKlines(any(), KlinePeriod.DAILY, 250) } returns emptyList()
+        coEvery { plane.getKlines(any(), KlinePeriod.DAILY, 250, any()) } returns emptyList()
         vm.backtestPlan(plan("2"))
         advanceUntilIdle()
         assertThat(vm.uiState.value.backtestErrors["2"]).isNotNull()
@@ -576,20 +515,17 @@ class GridPlanViewModelTest {
     @Test
     fun `items expose ammo summary holding shares and geometric levels`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         val geom = plan("1").copy(basePrice = 16.0, lowPrice = 4.0, highPrice = 20.0, grids = 3, gridType = "GEOM")
         coEvery { gridRepo.observeAll() } returns flowOf(listOf(geom))
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(
+        coEvery { plane.observeAllStocks() } returns flowOf(
             listOf(stock().copy(shares = 500))
         )
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         advanceUntilIdle()
 
         val item = vm.uiState.value.items.firstOrNull()
@@ -607,19 +543,184 @@ class GridPlanViewModelTest {
     @Test
     fun `notification blocked flag exposed when permission denied`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
-        val divRepo = mockk<DividendRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val klineRepo = mockk<KlineRepository>(relaxed = true)
         val notifier = mockk<DividendAlertNotifier>(relaxed = true)
         coEvery { notifier.canNotify() } returns false
         coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocksForSnapshot() } returns emptyList()
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
 
-        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, stockRepo, divRepo, txRepo, klineRepo, notifier)
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
         advanceUntilIdle()
         assertThat(vm.uiState.value.notificationBlocked).isTrue()
+    }
+
+    // ── 按股息率网格（YIELD）────────────────────────────
+
+    /** 年分红 0.5 元 + 股息率 5.5%→6.5%：预览档位由 DPS÷股息率换算，yieldPercent 递减。 */
+    @Test
+    fun `yield grid preview converts dps and yield range`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        val notifier = mockk<DividendAlertNotifier>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
+        coEvery { txRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.getDps(any()) } returns 0.5
+
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        advanceUntilIdle()  // 等本地 DPS 拉取写入
+        assertThat(vm.uiState.value.generatorDps).isEqualTo(0.5)
+
+        vm.onGridTypeChanged(com.stock.dividend.data.repository.GridType.YIELD)
+        // 默认区间 5.5%→6.5%、4 档：base=0.5/5.5%=9.09、low=0.5/6.5%=7.69
+        val preview = vm.uiState.value.preview
+        assertThat(preview).isNotNull()
+        assertThat(preview!!.validationError).isNull()
+        assertThat(preview.levels.first().price).isEqualTo(7.69)
+        assertThat(preview.levels.last().price).isEqualTo(9.09)
+        assertThat(preview.levels.first().yieldPercent).isEqualTo(6.5)
+        assertThat(preview.levels.last().yieldPercent).isEqualTo(5.5)
+        // 每档股息率步长 = (6.5-5.5)/3 ≈ 0.33
+        assertThat(preview.yieldStepPercent).isEqualTo(0.33)
+    }
+
+    /** 保存 YIELD 计划：三价换算入库、gridType=YIELD、DPS 存快照、targetYield=结束股息率。 */
+    @Test
+    fun `savePlan persists yield grid entity with dps snapshot`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        val notifier = mockk<DividendAlertNotifier>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
+        coEvery { txRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.getDps(any()) } returns 0.5
+
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        advanceUntilIdle()
+        vm.onGridTypeChanged(com.stock.dividend.data.repository.GridType.YIELD)
+        vm.onYieldStartChanged("5.5")
+        vm.onYieldEndChanged("6.5")
+        vm.onGridsChanged("3")
+        vm.savePlan()
+        advanceUntilIdle()
+
+        coVerify {
+            gridRepo.upsert(match {
+                it.stockCode == "sh.600036" &&
+                    it.gridType == "YIELD" &&
+                    it.dpsPerShare == 0.5 &&            // DPS 快照
+                    it.basePrice == 9.09 &&             // 0.5/5.5% 换算
+                    it.lowPrice == 7.69 &&              // 0.5/6.5% 换算
+                    it.highPrice == 9.09 &&             // 参考上界 = 买入起点
+                    it.grids == 3 &&
+                    it.targetYieldPercent == 6.5        // 目标股息率 = 结束股息率
+            })
+        }
+        assertThat(vm.uiState.value.showGenerator).isFalse()
+    }
+
+    /** 该股无分红数据 → YIELD 预览为空、保存给出可见错误（不臆造档位）。 */
+    @Test
+    fun `yield grid without dividend data yields no preview and save error`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        val notifier = mockk<DividendAlertNotifier>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
+        coEvery { txRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.getDps(any()) } returns null
+
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.generatorDps).isNull()
+
+        vm.onGridTypeChanged(com.stock.dividend.data.repository.GridType.YIELD)
+        assertThat(vm.uiState.value.preview).isNull()
+
+        vm.savePlan()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.saveError).contains("分红数据")
+        coVerify(exactly = 0) { gridRepo.upsert(any()) }
+    }
+
+    /** 编辑 YIELD 计划：股息率区间由存档 DPS 快照反推回填，预览档位与存库一致。 */
+    @Test
+    fun `editPlan backfills yield range from dps snapshot`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        val notifier = mockk<DividendAlertNotifier>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { txRepo.observeAll() } returns flowOf(emptyList())
+
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
+        vm.editPlan(
+            plan("1").copy(
+                gridType = "YIELD", basePrice = 9.09, lowPrice = 7.69, highPrice = 9.09,
+                grids = 3, dpsPerShare = 0.5, targetYieldPercent = 6.5
+            )
+        )
+        val state = vm.uiState.value
+        assertThat(state.gridTypeInput).isEqualTo(com.stock.dividend.data.repository.GridType.YIELD)
+        assertThat(state.yieldStartInput).isEqualTo("5.50")   // 0.5/9.09×100
+        assertThat(state.yieldEndInput).isEqualTo("6.50")     // 0.5/7.69×100
+        assertThat(state.generatorDps).isEqualTo(0.5)
+        assertThat(state.targetYieldInput).isEqualTo("6.5")   // 既有缺口：targetYield 现已回填
+        // 编辑预览与存库档位一致（端点 7.69/9.09）
+        assertThat(state.preview?.levels?.first()?.price).isEqualTo(7.69)
+        assertThat(state.preview?.levels?.last()?.price).isEqualTo(9.09)
+    }
+
+    /** YIELD 计划一键重锚定：不拉 BOLL，用最新 DPS 沿原股息率区间重算三价（分红增长 → 网格整体上移）。 */
+    @Test
+    fun `reanchorPlan for yield grid refreshes prices with latest dps`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        val notifier = mockk<DividendAlertNotifier>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { txRepo.observeAll() } returns flowOf(emptyList())
+        // 最新年度分红涨到 0.6（原快照 0.5）
+        coEvery { plane.getDps(any()) } returns 0.6
+
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
+        // 原计划：yield 5.5%→6.5%（dps 0.5 → base 9.09 / low 7.69）
+        vm.reanchorPlan(
+            plan("1").copy(
+                gridType = "YIELD", basePrice = 9.09, lowPrice = 7.69, highPrice = 9.09,
+                dpsPerShare = 0.5, targetYieldPercent = 6.5
+            )
+        )
+        advanceUntilIdle()
+
+        val diff = vm.uiState.value.reanchorDiff
+        assertThat(diff).isNotNull()
+        // 新三价 = 0.6 ÷ 原股息率区间：base=0.6/5.5%=10.91、low=0.6/6.5%=9.23
+        assertThat(diff!!.newBasePrice).isEqualTo(10.91)
+        assertThat(diff.newLowPrice).isEqualTo(9.23)
+        assertThat(diff.newHighPrice).isEqualTo(10.91)
+        assertThat(diff.targetYieldUsed).isEqualTo(6.5)
+        assertThat(diff.newDpsPerShare).isEqualTo(0.6)
+
+        vm.confirmReanchor()
+        advanceUntilIdle()
+        coVerify {
+            gridRepo.upsert(match {
+                it.basePrice == 10.91 && it.lowPrice == 9.23 && it.dpsPerShare == 0.6
+            })
+        }
     }
 }

@@ -668,6 +668,87 @@ class StockRepositoryTest {
         assertThat(summary.failed.map { it.rawCodeOrName }).containsExactly("查无此股")
     }
 
+    // ── importTransactions（交易记录截图导入）──
+
+    @Test
+    fun `importTransactions creates missing stock inserts in date order and recomputes`() = runTest {
+        coEvery { api.searchStocks(input = "600519") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("600519", "贵州茅台", "1"))
+            )
+        )
+        coEvery { dao.getByCode("sh.600519") } returns null
+        // getByStock 回放已插入的交易（供去重检查与 recomputeHolding 读取）
+        val insertedTxs = mutableListOf<TransactionEntity>()
+        coEvery { transactionDao.insert(capture(insertedTxs)) } returns 1L
+        coEvery { transactionDao.getByStock("sh.600519") } returns insertedTxs
+
+        val summary = repository.importTransactions(
+            listOf(
+                TransactionImportRow("600519", "BUY", 100, 1500.0, "2026-08-02"),
+                TransactionImportRow("600519", "BUY", 200, 1400.0, "2026-08-01")
+            )
+        )
+
+        assertThat(summary.insertedCount).isEqualTo(2)
+        assertThat(summary.duplicatesSkipped).isEqualTo(0)
+        assertThat(summary.failedRows).isEmpty()
+        // 股票不存在 → 先建自选（0 股，不产生初始 BUY 交易）
+        coVerify { dao.insert(any()) }
+        // 按日期升序插入（FIFO 口径与真实时间一致）
+        assertThat(insertedTxs.map { it.date }).containsExactly("2026-08-01", "2026-08-02").inOrder()
+        assertThat(insertedTxs.first().note).isEqualTo("截图导入")
+        coVerify { dao.updateShares("sh.600519", 300) }
+        coVerify { dao.updateCostPerShare("sh.600519", (200 * 1400.0 + 100 * 1500.0) / 300) }
+    }
+
+    @Test
+    fun `importTransactions skips exact duplicates`() = runTest {
+        coEvery { api.searchStocks(input = "600519") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("600519", "贵州茅台", "1"))
+            )
+        )
+        coEvery { dao.getByCode("sh.600519") } returns StockEntity(
+            code = "sh.600519", name = "贵州茅台", marketCode = "1", shares = 100
+        )
+        coEvery { transactionDao.getByStock("sh.600519") } returns listOf(
+            TransactionEntity(stockCode = "sh.600519", type = "BUY", shares = 100, price = 1500.0, date = "2026-08-01")
+        )
+
+        val summary = repository.importTransactions(
+            listOf(TransactionImportRow("600519", "BUY", 100, 1500.0, "2026-08-01"))
+        )
+
+        assertThat(summary.insertedCount).isEqualTo(0)
+        assertThat(summary.duplicatesSkipped).isEqualTo(1)
+        coVerify(exactly = 0) { transactionDao.insert(any()) }
+    }
+
+    @Test
+    fun `importTransactions records unresolved rows without blocking others`() = runTest {
+        coEvery { api.searchStocks(input = "查无此股") } returns StockSearchResponse(
+            quotationCodeTable = null
+        )
+        coEvery { api.searchStocks(input = "600519") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(stockItem("600519", "贵州茅台", "1"))
+            )
+        )
+        coEvery { dao.getByCode("sh.600519") } returns null
+        coEvery { transactionDao.getByStock("sh.600519") } returns emptyList()
+
+        val summary = repository.importTransactions(
+            listOf(
+                TransactionImportRow("查无此股", "BUY", 100, 10.0, "2026-08-01"),
+                TransactionImportRow("600519", "BUY", 100, 1500.0, "2026-08-02")
+            )
+        )
+
+        assertThat(summary.insertedCount).isEqualTo(1)
+        assertThat(summary.failedRows.map { it.rawCodeOrName }).containsExactly("查无此股")
+    }
+
     @Test
     fun `fetchAndCacheIndustry parses f127 and persists`() = runTest {
         coEvery { dao.getByCode("sh.600519") } returns StockEntity(

@@ -71,7 +71,8 @@ object GridNotifyEvaluator {
                     grids = plan.grids,
                     totalCapital = plan.totalCapital,
                     currentPrice = price,
-                    gridType = GridType.fromRaw(plan.gridType)
+                    gridType = GridType.fromRaw(plan.gridType),
+                    dps = plan.dpsPerShare
                 ),
                 transactions
             )

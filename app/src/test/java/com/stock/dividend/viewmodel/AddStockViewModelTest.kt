@@ -1,7 +1,7 @@
 package com.stock.dividend.viewmodel
 
 import com.google.common.truth.Truth.assertThat
-import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StockSearchResult
 import io.mockk.coEvery
@@ -20,15 +20,15 @@ import org.junit.Test
 class AddStockViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
+    private val marketDataPlane: MarketDataPlane = mockk()
     private val stockRepository: StockRepository = mockk()
-    private val dividendRepository: DividendRepository = mockk()
 
     private lateinit var viewModel: AddStockViewModel
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        viewModel = AddStockViewModel(stockRepository, dividendRepository)
+        viewModel = AddStockViewModel(marketDataPlane, stockRepository)
     }
 
     @After
@@ -40,7 +40,7 @@ class AddStockViewModelTest {
     fun `addStock shows error with canRetry when dividend fetch fails`() = runTest {
         val result = StockSearchResult("sz.000001", "平安银行", "0")
         coEvery { stockRepository.addStock(result) } returns Result.success(Unit)
-        coEvery { dividendRepository.fetchAndCacheDividends("sz.000001", "000001") } returns
+        coEvery { marketDataPlane.refreshDividends("sz.000001") } returns
             Result.failure(Exception("网络连接超时，请重试"))
 
         viewModel.addStock(result)
@@ -55,7 +55,7 @@ class AddStockViewModelTest {
     fun `addStock shows success on valid flow`() = runTest {
         val result = StockSearchResult("sz.000001", "平安银行", "0")
         coEvery { stockRepository.addStock(result) } returns Result.success(Unit)
-        coEvery { dividendRepository.fetchAndCacheDividends("sz.000001", "000001") } returns
+        coEvery { marketDataPlane.refreshDividends("sz.000001") } returns
             Result.success(Unit)
 
         viewModel.addStock(result)
@@ -82,11 +82,11 @@ class AddStockViewModelTest {
 
     @Test
     fun `retrySearch re-triggers last search`() = runTest {
-        coEvery { stockRepository.searchStocks("平安银行") } returns
+        coEvery { marketDataPlane.searchStocks("平安银行") } returns
             Result.success(listOf(StockSearchResult("sz.000001", "平安银行", "0")))
 
         // Simulate search failure first
-        coEvery { stockRepository.searchStocks("平安银行") } returns
+        coEvery { marketDataPlane.searchStocks("平安银行") } returns
             Result.failure(Exception("搜索失败"))
 
         viewModel.onSearchQueryChanged("平安银行")
@@ -96,7 +96,7 @@ class AddStockViewModelTest {
         assertThat(viewModel.uiState.value.canRetry).isTrue()
 
         // Now make search succeed for retry
-        coEvery { stockRepository.searchStocks("平安银行") } returns
+        coEvery { marketDataPlane.searchStocks("平安银行") } returns
             Result.success(listOf(StockSearchResult("sz.000001", "平安银行", "0")))
 
         viewModel.retrySearch()
@@ -121,7 +121,7 @@ class AddStockViewModelTest {
 
         // Retry succeeds
         coEvery { stockRepository.addStock(result) } returns Result.success(Unit)
-        coEvery { dividendRepository.fetchAndCacheDividends("sz.000001", "000001") } returns
+        coEvery { marketDataPlane.refreshDividends("sz.000001") } returns
             Result.success(Unit)
 
         viewModel.retryAddStock()
@@ -133,7 +133,7 @@ class AddStockViewModelTest {
 
     @Test
     fun `search error sets canRetry to true`() = runTest {
-        coEvery { stockRepository.searchStocks("测试") } returns
+        coEvery { marketDataPlane.searchStocks("测试") } returns
             Result.failure(Exception("搜索失败"))
 
         viewModel.onSearchQueryChanged("测试")
@@ -145,7 +145,7 @@ class AddStockViewModelTest {
 
     @Test
     fun `successful search clears canRetry`() = runTest {
-        coEvery { stockRepository.searchStocks("平安银行") } returns
+        coEvery { marketDataPlane.searchStocks("平安银行") } returns
             Result.success(listOf(StockSearchResult("sz.000001", "平安银行", "0")))
 
         viewModel.onSearchQueryChanged("平安银行")
@@ -158,7 +158,7 @@ class AddStockViewModelTest {
     @Test
     fun `onSearchQueryChanged resets canRetry`() = runTest {
         // Set up error state
-        coEvery { stockRepository.searchStocks("测试") } returns
+        coEvery { marketDataPlane.searchStocks("测试") } returns
             Result.failure(Exception("搜索失败"))
 
         viewModel.onSearchQueryChanged("测试")
@@ -167,7 +167,7 @@ class AddStockViewModelTest {
         assertThat(viewModel.uiState.value.canRetry).isTrue()
 
         // New query resets immediately (before debounce triggers search)
-        coEvery { stockRepository.searchStocks("新查询") } returns
+        coEvery { marketDataPlane.searchStocks("新查询") } returns
             Result.success(emptyList())
         viewModel.onSearchQueryChanged("新查询")
         assertThat(viewModel.uiState.value.canRetry).isFalse()
@@ -176,7 +176,7 @@ class AddStockViewModelTest {
     @Test
     fun `onSearchQueryChanged with blank query clears results`() = runTest {
         // First search with results
-        coEvery { stockRepository.searchStocks("平安银行") } returns
+        coEvery { marketDataPlane.searchStocks("平安银行") } returns
             Result.success(listOf(StockSearchResult("sz.000001", "平安银行", "0")))
 
         viewModel.onSearchQueryChanged("平安银行")

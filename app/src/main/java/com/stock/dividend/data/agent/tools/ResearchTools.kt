@@ -3,12 +3,10 @@ package com.stock.dividend.data.agent.tools
 import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
-import com.stock.dividend.data.repository.ResearchRepository
-import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 
 class GetResearchReportsTool(
-    private val stockRepository: StockRepository,
-    private val researchRepository: ResearchRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_research_reports",
     description = "查询单只股票的券商研报：标题、研究机构、发布日、评级、今明两年预测 EPS（元/股）/PE（倍）。limit 默认 10，范围 1-20。",
@@ -28,10 +26,10 @@ class GetResearchReportsTool(
         val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
         val limit = args.intArg("limit")?.coerceIn(1, 20) ?: 10
         return runCatching {
-            val stock = stockRepository.resolveStock(code)
+            val stock = marketDataPlane.resolveStock(code)
                 ?: return@runCatching mapOf("error" to "未找到股票：$code")
             val code6 = stock.code.substringAfter(".")
-            val reports = researchRepository.fetchReports(code6, limit)
+            val reports = marketDataPlane.getResearchReports(code6, limit)
             if (reports.isEmpty()) return@runCatching mapOf("error" to "暂无研报数据")
             mapOf(
                 "code" to stock.code,
@@ -54,8 +52,7 @@ class GetResearchReportsTool(
 }
 
 class GetStockNewsTool(
-    private val stockRepository: StockRepository,
-    private val researchRepository: ResearchRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_stock_news",
     description = "查询单只股票的公告/资讯：标题、发布日期。limit 默认 10，范围 1-20。code 参数格式见参数说明。",
@@ -75,10 +72,10 @@ class GetStockNewsTool(
         val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
         val limit = args.intArg("limit")?.coerceIn(1, 20) ?: 10
         return runCatching {
-            val stock = stockRepository.resolveStock(code)
+            val stock = marketDataPlane.resolveStock(code)
                 ?: return@runCatching mapOf("error" to "未找到股票：$code")
             val code6 = stock.code.substringAfter(".")
-            val anns = researchRepository.fetchAnnouncements(code6, limit)
+            val anns = marketDataPlane.getAnnouncements(code6, limit)
             if (anns.isEmpty()) return@runCatching mapOf("error" to "暂无公告数据")
             mapOf(
                 "code" to stock.code,

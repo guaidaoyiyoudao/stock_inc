@@ -6,7 +6,6 @@ import androidx.compose.runtime.Stable
 import com.stock.dividend.data.repository.EvaluatedStock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.EXPENSE_PERIOD_MONTHLY
 import com.stock.dividend.data.local.entity.StockEntity
@@ -16,7 +15,6 @@ import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendThresholds
 import com.stock.dividend.data.repository.ForecastCalculator
-import com.stock.dividend.data.repository.FundamentalsCacheRepository
 import com.stock.dividend.data.repository.HoldingAction
 import com.stock.dividend.data.repository.HoldingRecommendation
 import com.stock.dividend.data.repository.HoldingRecommender
@@ -36,6 +34,7 @@ import com.stock.dividend.data.repository.RealizedPnlCalculator
 import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.computeBuyThreshold
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -197,16 +196,16 @@ data class PortfolioUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class PortfolioViewModel @Inject constructor(
+    /** 读股市数据唯一入口：行情/股息/BOLL/基本面/国债。 */
+    private val marketDataPlane: MarketDataPlane,
+    /** 仅用于写操作与本地域数据（改持仓/行业目标/删股等）；读行情一律走数据平面。 */
     private val stockRepository: StockRepository,
-    private val dividendDao: DividendDao,
     private val livingExpenseRepository: LivingExpenseRepository,
     private val transactionDao: TransactionDao,
     private val notificationCheckCoordinator: NotificationCheckCoordinator,
     private val notificationRuleRepository: NotificationRuleRepository,
     private val llmAnalysisRepository: LlmAnalysisRepository,
     private val tradeStrategyRepository: TradeStrategyRepository,
-    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
-    private val bondYieldRepository: BondYieldRepository,
     @ApplicationContext context: Context
 ) : ViewModel() {
 
@@ -249,7 +248,7 @@ class PortfolioViewModel @Inject constructor(
     private var currentTotalAssets: Double = 0.0
 
     /** 全部股票（含 shares=0 的纯自选股），合并自选 tab 后两者共用同一数据源。 */
-    private val allStocksFlow = stockRepository.observeAllStocks()
+    private val allStocksFlow = marketDataPlane.observeAllStocks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val holdingsFlow = allStocksFlow
@@ -281,7 +280,7 @@ class PortfolioViewModel @Inject constructor(
             flowOf(emptyMap())
         } else {
             val forecastFlows = stocks.map { stock ->
-                dividendDao.observeByStock(stock.code).map { dividends ->
+                marketDataPlane.observeDividends(stock.code).map { dividends ->
                     val years = stock.yieldPeriod.toIntOrNull() ?: 3
                     val result = ForecastCalculator.calculateForecastIncome(
                         dividends, stock.shares, years
@@ -359,7 +358,7 @@ class PortfolioViewModel @Inject constructor(
                 // 冷启动 lastPricesSnapshot 为空时，先用 price_cache 兜底，避免 UI 一片"—"；
                 // 已有网络价时跳过（Collector 2 后台刷新会覆盖缓存）。
                 if (lastPricesSnapshot.isEmpty() && stocks.isNotEmpty()) {
-                    val cached = stockRepository.getCachedPrices(stocks.map { it.code })
+                    val cached = marketDataPlane.cachedPrices(stocks.map { it.code })
                     if (cached.isNotEmpty()) lastPricesSnapshot = cached
                 }
                 publish(recompute(stocks, lastPricesSnapshot))
@@ -382,7 +381,7 @@ class PortfolioViewModel @Inject constructor(
                                 try {
                                     // 一次请求拿全量行情（PE/PB/涨跌/市值等），从中提取 price 喂下游
                                     // recompute/通知链路，避免再发一次只取现价的 fetchQuotes 请求。
-                                    stockRepository.fetchQuoteSnapshots(stocks)
+                                    marketDataPlane.getQuoteSnapshots(stocks, force = true)
                                 } catch (_: Exception) {
                                     // fetchQuoteSnapshots 自身已吞异常返回空 map，这里兜底网络层之外的问题
                                     emptyMap()
@@ -468,7 +467,7 @@ class PortfolioViewModel @Inject constructor(
                 // 冷启动 stockForecasts 为空时，用 price_cache 兜底现价/市值，避免 UI 显示"—"
                 val cachedPrices = if (stocks.isNotEmpty()) {
                     val codes = stocks.map { it.code }
-                    if (codes.isNotEmpty()) stockRepository.getCachedPrices(codes) else emptyMap()
+                    if (codes.isNotEmpty()) marketDataPlane.cachedPrices(codes) else emptyMap()
                 } else emptyMap()
                 _uiState.update { state ->
                     val newWatchlist = stocks.filter { it.shares <= 0 }
@@ -583,11 +582,7 @@ class PortfolioViewModel @Inject constructor(
         // 先占位标记为「加载中」(临时 null 与「无数据 null 同值，但 contains 阻断并发重复请求)
         _stockBands.update { it + (stockCode to null) }
         viewModelScope.launch {
-            val band = try {
-                stockRepository.fetchBoll(stockCode)
-            } catch (_: Exception) {
-                null
-            }
+            val band = runCatching { marketDataPlane.getBoll(stockCode) }.getOrNull()
             _stockBands.update { it + (stockCode to band) }
         }
     }
@@ -713,7 +708,7 @@ class PortfolioViewModel @Inject constructor(
         forceRefresh: Boolean
     ): Map<String, PortfolioLlmStockDetail> {
         if (evaluation.isEmpty()) return emptyMap()
-        val bondYield = runCatching { bondYieldRepository.fetch10YBondYield(forceRefresh) }
+        val bondYield = runCatching { marketDataPlane.get10YBondYield(forceRefresh) }
             .getOrDefault(BondYieldRepository.DEFAULT_YIELD)
         val semaphore = Semaphore(3)
         val forecasts = _uiState.value.stockForecasts
@@ -723,7 +718,7 @@ class PortfolioViewModel @Inject constructor(
                 async {
                     semaphore.withPermit {
                         val fundamentals = runCatching {
-                            fundamentalsCacheRepository.getFundamentals(stock.code, forceRefresh)
+                            marketDataPlane.getFundamentals(stock.code, forceRefresh)
                         }.getOrNull()
                         val forecast = forecasts[stock.code]?.llmForecast
                         val multiplier = multipliers[stock.code] ?: StockEntity.DEFAULT_BUY_THRESHOLD_MULTIPLIER
@@ -755,9 +750,8 @@ class PortfolioViewModel @Inject constructor(
         _uiState.update { it.copy(llmAnalysis = LlmAnalysisState.Idle) }
     }
 
-    private suspend fun fetchBollForPeriod(code: String, period: KlinePeriod): BollBand? = try {
-        stockRepository.fetchBoll(code, period)
-    } catch (_: Exception) { null }
+    private suspend fun fetchBollForPeriod(code: String, period: KlinePeriod): BollBand? =
+        runCatching { marketDataPlane.getBoll(code, period) }.getOrNull()
 
     /**
      * 确保 [code] 的 boll 已加载（[_stockBands] 有 key 即返回，含 null）；
@@ -767,11 +761,7 @@ class PortfolioViewModel @Inject constructor(
         _stockBands.value[code]?.let { return it }
         // 占位防并发重复请求
         _stockBands.update { it + (code to null) }
-        val band = try {
-            stockRepository.fetchBoll(code)
-        } catch (_: Exception) {
-            null
-        }
+        val band = runCatching { marketDataPlane.getBoll(code) }.getOrNull()
         _stockBands.update { it + (code to band) }
         return band
     }
@@ -849,10 +839,10 @@ class PortfolioViewModel @Inject constructor(
             _uiState.update { it.copy(isRefreshingIndustry = true) }
             // 用全量快照（含自选股）：自选股的行业也要能被刷新，否则自选卡片行业永远是空。
             val stocks = lastAllStocksSnapshot.ifEmpty {
-                stockRepository.observeAllStocks().first()
+                marketDataPlane.observeAllStocks().first()
             }
             stocks.forEach { stock ->
-                try { stockRepository.fetchAndCacheIndustry(stock.code) } catch (_: Exception) { /* 单股失败跳过 */ }
+                runCatching { marketDataPlane.ensureIndustry(stock.code) }
             }
             _uiState.update { it.copy(isRefreshingIndustry = false) }
         }

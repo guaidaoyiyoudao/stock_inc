@@ -11,6 +11,9 @@ const val GRID_TYPE_ARITH = "ARITH"
 /** grid_plans.gridType 取值：等比网格（百分比步长，高价股适用）。 */
 const val GRID_TYPE_GEOM = "GEOM"
 
+/** grid_plans.gridType 取值：按股息率网格（股息率等差分档，如 5.5%/6.0%/6.5%）。 */
+const val GRID_TYPE_YIELD = "YIELD"
+
 /**
  * 网格交易计划：用户为某只股票设定的网格参数（买入起点/资金用完位/档数/总资金），
  * 用于生成**纯买入**网格档位表（越跌越买、持有收息，无卖出档）。**仅做计划与提示，不联网下单**。
@@ -20,10 +23,15 @@ const val GRID_TYPE_GEOM = "GEOM"
  * - [lowPrice] 资金用完位（最后一档/最便宜档，通常为目标股息率对应价）。
  * - [highPrice] 参考上界（超过不追买，仅展示，不参与分档）。
  * - [grids] 买入档数（[lowPrice, basePrice] 等分份数，≥ 2）。
- * - [gridType] 档位分布：ARITH 等差（绝对价差均分，默认）/ GEOM 等比（百分比步长，高价股适用）。
+ * - [gridType] 档位分布：ARITH 等差（绝对价差均分，默认）/ GEOM 等比（百分比步长，高价股适用）/
+ *   YIELD 按股息率（股息率等差分档，档位价 = [dpsPerShare] ÷ 股息率）。
  * - [totalCapital] 投入总资金（元），按 1/price 反比加权分配到各档（越便宜买越多）。
  * - [targetYieldPercent] 建计划时的目标股息率（%，「到达即资金用完位」的用户意图）；
  *   一键重锚定用；手填参数或旧数据可能为 null（此时由现 lowPrice 反推）。
+ *   YIELD 模式 = 结束股息率（资金用完位股息率）。
+ * - [dpsPerShare] 建计划时的年度每股现金分红快照（元）——**仅 YIELD 模式**的档位价
+ *   换算基准（P = dps ÷ yield）。存快照而非实时拉取：分红变化不使已建计划档位漂移，
+ *   需要跟进时走「一键重锚定」用最新 DPS 重算。
  * - [notifyEnabled] 到档提醒开关：价格到达下一买入档时推送本地通知。
  * - [lastNotifiedLevelPrice] 上次已提醒的档位价（去重用；现价回升超过该档后清空，
  *   再次跌破可重新提醒）。仅通知检查回写，**不随 updatedAt 变动**。
@@ -51,10 +59,12 @@ data class GridPlanEntity(
     val highPrice: Double,
     val grids: Int,
     val totalCapital: Double,
-    /** 档位分布：ARITH 等差 / GEOM 等比（见 GridCalculator.GridType）。 */
+    /** 档位分布：ARITH 等差 / GEOM 等比 / YIELD 按股息率（见 GridCalculator.GridType）。 */
     val gridType: String = GRID_TYPE_ARITH,
-    /** 建计划时的目标股息率（%）；重锚定用，旧数据/手填可能为 null。 */
+    /** 建计划时的目标股息率（%）；重锚定用，旧数据/手填可能为 null。YIELD 模式 = 结束股息率。 */
     val targetYieldPercent: Double? = null,
+    /** 建计划时的年度每股分红快照（元）；YIELD 模式的档位价换算基准，其余模式 null。 */
+    val dpsPerShare: Double? = null,
     /** 到档提醒开关（价格到达下一买入档时推送通知）。 */
     val notifyEnabled: Boolean = true,
     /** 上次已提醒的档位价（每档只提醒一次；现价回升超过该档后清空）。 */

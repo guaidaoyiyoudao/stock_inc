@@ -50,21 +50,15 @@ import com.stock.dividend.data.agent.tools.UpdateIndustryTargetTool
 import com.stock.dividend.data.agent.tools.UpdateLivingExpenseTool
 import com.stock.dividend.data.agent.tools.UpdateNotificationRuleTool
 import com.stock.dividend.data.agent.tools.UpdateStockSettingsTool
-import com.stock.dividend.data.repository.BondYieldRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.DividendIncomeRepository
-import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.FireGoalRepository
 import com.stock.dividend.data.repository.GridPlanRepository
-import com.stock.dividend.data.repository.FinancialStatementsRepository
-import com.stock.dividend.data.repository.FundamentalsCacheRepository
-import com.stock.dividend.data.repository.KlineRepository
 import com.stock.dividend.data.repository.LivingExpenseRepository
 import com.stock.dividend.data.repository.AiAgentConfigSource
 import com.stock.dividend.data.repository.LlmConfig
-import com.stock.dividend.data.repository.MarketDataRepository
 import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
 import com.stock.dividend.data.repository.NotificationRuleRepository
-import com.stock.dividend.data.repository.ResearchRepository
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TradeStrategyRepository
 import com.stock.dividend.data.repository.TransactionRepository
@@ -77,21 +71,17 @@ import javax.inject.Singleton
 /** 组装 AI Tab 的单 LlmAgent（47 个工具：34 只读 + 13 写，写操作全部带确认门）。 */
 @Singleton
 class AiAgentFactory @Inject constructor(
+    /** 读股市数据唯一入口（数据平面）；仓库仅剩写操作与本地域数据。 */
+    private val marketDataPlane: MarketDataPlane,
+    /** 仅写工具与本地域数据用（add_stock/update_holding/标签/交易等）。 */
     private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository,
     private val dividendIncomeRepository: DividendIncomeRepository,
-    private val bondYieldRepository: BondYieldRepository,
-    private val fundamentalsCacheRepository: FundamentalsCacheRepository,
-    private val financialStatementsRepository: FinancialStatementsRepository,
-    private val klineRepository: KlineRepository,
     private val fireGoalRepository: FireGoalRepository,
     private val livingExpenseRepository: LivingExpenseRepository,
     private val transactionRepository: TransactionRepository,
     private val gridPlanRepository: GridPlanRepository,
     private val notificationRuleRepository: NotificationRuleRepository,
     private val tradeStrategyRepository: TradeStrategyRepository,
-    private val marketDataRepository: MarketDataRepository,
-    private val researchRepository: ResearchRepository,
     private val diagnosisAssembler: PortfolioDiagnosisAssembler,
     private val agentConfigSource: AiAgentConfigSource,
     @LlmClient private val llmClient: OkHttpClient,
@@ -116,48 +106,48 @@ class AiAgentFactory @Inject constructor(
         )
         val marketTools = listOf(
             // ── 基础行情与估值 ──
-            GetStockInfoTool(stockRepository, dividendRepository),
-            SearchStockTool(stockRepository),
-            GetDividendHistoryTool(dividendRepository, stockRepository),
-            GetDividendForecastTool(dividendRepository, stockRepository),
-            GetBuyThresholdTool(stockRepository, dividendRepository, bondYieldRepository),
-            GetStockEvaluationTool(stockRepository, dividendRepository, notificationRuleRepository),
-            GetFundamentalsTool(stockRepository, dividendRepository, fundamentalsCacheRepository),
-            GetKlineTool(stockRepository, klineRepository),
+            GetStockInfoTool(marketDataPlane),
+            SearchStockTool(marketDataPlane),
+            GetDividendHistoryTool(marketDataPlane),
+            GetDividendForecastTool(marketDataPlane),
+            GetBuyThresholdTool(marketDataPlane),
+            GetStockEvaluationTool(marketDataPlane, notificationRuleRepository),
+            GetFundamentalsTool(marketDataPlane),
+            GetKlineTool(marketDataPlane),
             // ── 估值指标与资金面 ──
-            GetValuationMetricsTool(stockRepository),
-            GetCapitalFlowTool(stockRepository, marketDataRepository),
-            GetDragonTigerTool(marketDataRepository),
-            GetMarketSentimentTool(marketDataRepository),
+            GetValuationMetricsTool(marketDataPlane),
+            GetCapitalFlowTool(marketDataPlane),
+            GetDragonTigerTool(marketDataPlane),
+            GetMarketSentimentTool(marketDataPlane),
             // ── 财务报表与分红深度 ──
-            GetFinancialStatementsTool(stockRepository, financialStatementsRepository),
-            GetDividendMetricsTool(stockRepository, dividendRepository),
+            GetFinancialStatementsTool(marketDataPlane),
+            GetDividendMetricsTool(marketDataPlane),
             // ── 行业对比 ──
-            GetIndustryListTool(marketDataRepository),
-            GetIndustryPeersTool(stockRepository, marketDataRepository),
+            GetIndustryListTool(marketDataPlane),
+            GetIndustryPeersTool(marketDataPlane),
             // ── 资讯与研报 ──
-            GetResearchReportsTool(stockRepository, researchRepository),
-            GetStockNewsTool(stockRepository, researchRepository),
+            GetResearchReportsTool(marketDataPlane),
+            GetStockNewsTool(marketDataPlane),
             // ── 市场广度 ──
-            GetMarketIndexTool(marketDataRepository),
-            GetEtfInfoTool(marketDataRepository),
-            GetTreasuryYieldsTool(bondYieldRepository),
+            GetMarketIndexTool(marketDataPlane),
+            GetEtfInfoTool(marketDataPlane),
+            GetTreasuryYieldsTool(marketDataPlane),
             // ── 全市场榜单 ──
-            GetMarketRankingTool(marketDataRepository),
+            GetMarketRankingTool(marketDataPlane),
         )
         val portfolioTools = listOf(
-            GetHoldingsTool(stockRepository),
-            GetPortfolioSummaryTool(stockRepository, dividendIncomeRepository, fireGoalRepository, livingExpenseRepository),
-            GetIndustryAllocationTool(stockRepository),
-            GetTransactionsTool(stockRepository, transactionRepository),
-            GetNotificationRulesTool(stockRepository, notificationRuleRepository),
+            GetHoldingsTool(marketDataPlane, stockRepository),
+            GetPortfolioSummaryTool(marketDataPlane, dividendIncomeRepository, fireGoalRepository, livingExpenseRepository),
+            GetIndustryAllocationTool(marketDataPlane, stockRepository),
+            GetTransactionsTool(marketDataPlane, transactionRepository),
+            GetNotificationRulesTool(marketDataPlane, notificationRuleRepository),
             GetUserStrategiesTool(tradeStrategyRepository),
-            GetPortfolioSignalsTool(stockRepository, dividendRepository, notificationRuleRepository),
-            GetDividendIncomeTool(dividendIncomeRepository, stockRepository),
-            GetGridPlansTool(stockRepository, gridPlanRepository, transactionRepository),
+            GetPortfolioSignalsTool(marketDataPlane, notificationRuleRepository),
+            GetDividendIncomeTool(dividendIncomeRepository, marketDataPlane),
+            GetGridPlansTool(marketDataPlane, gridPlanRepository, transactionRepository),
             // ── 组合分析（2026-08-15 新增）──
-            GetCompareStocksTool(stockRepository, dividendRepository, notificationRuleRepository),
-            GetPortfolioDiagnosisTool(stockRepository, diagnosisAssembler, gridPlanRepository, transactionRepository),
+            GetCompareStocksTool(marketDataPlane, notificationRuleRepository),
+            GetPortfolioDiagnosisTool(marketDataPlane, diagnosisAssembler, gridPlanRepository, transactionRepository),
         )
         val actionTools = listOf(
             AddStockTool(stockRepository),

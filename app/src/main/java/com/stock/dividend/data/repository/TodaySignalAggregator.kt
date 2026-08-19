@@ -2,6 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.GridPlanEntity
+import com.stock.dividend.data.local.entity.TransactionEntity
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
@@ -47,6 +48,8 @@ data class TodaySignalInput(
     val dividends: List<DividendEntity>,
     val today: LocalDate,
     val dividendLookaheadDays: Long = 30,
+    /** 网格标的交易记录（按 stockCode 分组）：把已买入档从「下一档」提示中排除（每档只买一次）。 */
+    val gridTransactionsByStock: Map<String, List<TransactionEntity>> = emptyMap(),
 )
 
 /** 今日信号聚合（纯函数，无 Android 依赖）。复用 [HoldingRecommender] / [computeBuyThreshold] / [GridCalculator]。 */
@@ -133,14 +136,19 @@ object TodaySignalAggregator {
             val current = input.gridCurrentPrices[plan.stockCode]
                 ?: input.stocks.firstOrNull { it.code == plan.stockCode }?.price
                 ?: continue
-            val result = GridCalculator.generate(
-                basePrice = plan.basePrice,
-                lowPrice = plan.lowPrice,
-                highPrice = plan.highPrice,
-                grids = plan.grids,
-                totalCapital = plan.totalCapital,
-                currentPrice = current,
-                gridType = GridType.fromRaw(plan.gridType),
+            // 关联实际交易标记已买档：下一档提示须跳过已买档（每档只买一次）
+            val result = GridCalculator.markTriggeredLevels(
+                GridCalculator.generate(
+                    basePrice = plan.basePrice,
+                    lowPrice = plan.lowPrice,
+                    highPrice = plan.highPrice,
+                    grids = plan.grids,
+                    totalCapital = plan.totalCapital,
+                    currentPrice = current,
+                    gridType = GridType.fromRaw(plan.gridType),
+                    dps = plan.dpsPerShare
+                ),
+                input.gridTransactionsByStock[plan.stockCode].orEmpty()
             )
             val next = result.nextBuyHint
             if (next != null && result.validationError == null) {

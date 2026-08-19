@@ -7,7 +7,9 @@ data class ParsedHoldingRow(
     val rawText: String,
     val codeOrName: String,
     val shares: Int?,
-    val costPerShare: Double?
+    val costPerShare: Double?,
+    /** 视觉模型解析时附带识别出的股票名称（本地 OCR 路径恒为 null，仅作展示）。 */
+    val name: String? = null
 )
 
 /**

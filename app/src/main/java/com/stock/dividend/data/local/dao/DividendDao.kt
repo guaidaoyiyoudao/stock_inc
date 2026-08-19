@@ -38,4 +38,20 @@ interface DividendDao {
 
     @Query("SELECT * FROM dividends")
     suspend fun getAll(): List<DividendEntity>
+
+    /** 该股最新除权日（ISO 日期）。K 线缓存用它检测前复权漂移：出现更新除权日 → 全历史价格位移。 */
+    @Query("SELECT MAX(exDividendDate) FROM dividends WHERE stockCode = :stockCode")
+    suspend fun getLatestExDividendDate(stockCode: String): String?
+
+    /** 历史保留式写入：按 id 定点删除本次结果覆盖到的行（窗口外历史行不动）。 */
+    @Query("DELETE FROM dividends WHERE stockCode = :stockCode AND id IN (:ids)")
+    suspend fun deleteByIds(stockCode: String, ids: List<String>)
+
+    /** 历史保留式写入：按除权日定点删除——腾讯(id=code_exDate)与东财(id=code_reportDate)两种 id 方案跨源去重。 */
+    @Query("DELETE FROM dividends WHERE stockCode = :stockCode AND exDividendDate IN (:exDates)")
+    suspend fun deleteByStockAndExDates(stockCode: String, exDates: List<String>)
+
+    /** 清洗失效预案行（exDate=null 且不在本次结果中）。仅东财全量路径调用（腾讯不携带预案信息）。 */
+    @Query("DELETE FROM dividends WHERE stockCode = :stockCode AND exDividendDate IS NULL AND id NOT IN (:keepIds)")
+    suspend fun deleteStalePendingByStock(stockCode: String, keepIds: List<String>)
 }

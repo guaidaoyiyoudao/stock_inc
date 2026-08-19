@@ -1,7 +1,7 @@
 package com.stock.dividend.data.agent.tools
 
 import com.stock.dividend.data.local.entity.StockEntity
-import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.StockSearchResult
 
 /** 从工具参数 Map 取必填字符串，空白视为缺失。 */
@@ -40,18 +40,18 @@ internal fun Map<String, Any?>.stringListArg(key: String): List<String> =
         else -> emptyList()
     }
 
-/** 现价：先网络刷新，失败回退缓存（多个工具共用）。 */
-internal suspend fun StockRepository.refreshPrice(entity: StockEntity): Double? =
-    runCatching { fetchQuotes(listOf(entity))[entity.code] }.getOrNull()
-        ?: runCatching { getCachedPrices(listOf(entity.code))[entity.code] }.getOrNull()
+/** 现价：数据平面行情（任何获取都写透 price_cache），无有效价回退缓存价（多个工具共用）。 */
+internal suspend fun MarketDataPlane.refreshPrice(entity: StockEntity): Double? =
+    runCatching { getQuoteSnapshots(listOf(entity))[entity.code]?.price?.takeIf { it > 0.0 } }.getOrNull()
+        ?: runCatching { cachedPrices(listOf(entity.code))[entity.code] }.getOrNull()
 
 /**
- * 组合现价：先批量实时刷新（单次 ulist 请求），失败或为空回退缓存（多个组合工具共用）。
+ * 组合现价：批量平面行情（单次 ulist 请求 + 会话去重），失败或为空回退缓存（多个组合工具共用）。
  * 保证与 get_stock_info 等实时工具在同一会话内现价口径一致。
  */
-internal suspend fun StockRepository.fetchFreshPrices(stocks: List<StockEntity>): Map<String, Double> =
-    runCatching { fetchQuotes(stocks) }.getOrNull()?.takeIf { it.isNotEmpty() }
-        ?: runCatching { getCachedPrices(stocks.map { it.code }) }.getOrNull()
+internal suspend fun MarketDataPlane.fetchFreshPrices(stocks: List<StockEntity>): Map<String, Double> =
+    runCatching { getPrices(stocks) }.getOrNull()?.takeIf { it.isNotEmpty() }
+        ?: runCatching { cachedPrices(stocks.map { it.code }) }.getOrNull()
         ?: emptyMap()
 
 /** 搜索结果 → 轻量 StockEntity（仅 code/name/marketCode，供行情查询用，多个工具共用）。 */

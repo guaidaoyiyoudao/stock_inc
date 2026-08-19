@@ -4,8 +4,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * 从 content Uri 解码为 Bitmap，自动按目标尺寸下采样以防止 OOM。
@@ -35,4 +39,31 @@ private fun calcInSampleSize(width: Int, height: Int, targetMax: Int): Int {
         sample *= 2
     }
     return sample
+}
+
+/**
+ * Bitmap → JPEG data URL（base64），作为视觉模型 `image_url` 入参。
+ *
+ * [loadSampledBitmap] 是 2 的幂粗采样（最长边 ≤2048），这里再按 [maxEdge] 精确缩放，
+ * 配合 JPEG [quality] 压缩控制请求体大小（1600px/80% 单张约 150-400KB）。
+ */
+fun bitmapToJpegDataUrl(
+    bitmap: Bitmap,
+    maxEdge: Int = 1600,
+    quality: Int = 80
+): String {
+    val scaled = scaleToFit(bitmap, maxEdge)
+    val out = ByteArrayOutputStream()
+    scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+    val base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    return "data:image/jpeg;base64,$base64"
+}
+
+private fun scaleToFit(bitmap: Bitmap, maxEdge: Int): Bitmap {
+    val longest = max(bitmap.width, bitmap.height)
+    if (longest <= maxEdge) return bitmap
+    val scale = maxEdge.toFloat() / longest
+    val w = (bitmap.width * scale).roundToInt().coerceAtLeast(1)
+    val h = (bitmap.height * scale).roundToInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(bitmap, w, h, true)
 }

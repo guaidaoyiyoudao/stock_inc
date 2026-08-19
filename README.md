@@ -31,7 +31,7 @@ A股股息追踪 Android 应用，记录持仓、预测股息收入、规划 FIR
 | UI | Jetpack Compose + Material Design 3 |
 | 架构 | MVVM + Repository Pattern |
 | 依赖注入 | Hilt (2.53.1) |
-| 本地存储 | Room (2.8.4，DB version=20) |
+| 本地存储 | Room (2.8.4，DB version=24) |
 | AI Agent | Google ADK Kotlin (0.6.0) |
 | 网络 | Retrofit + OkHttp + Gson |
 | 异步 | Kotlin Coroutines + Flow |

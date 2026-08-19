@@ -1,9 +1,9 @@
 package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
-import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.LlmAnalysisCacheDao
 import com.stock.dividend.data.local.entity.LlmAnalysisCacheEntity
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.remote.LlmApi
 import com.stock.dividend.data.remote.dto.LlmChatResponse
 import com.stock.dividend.data.remote.dto.LlmMessage
@@ -17,11 +17,9 @@ import java.time.LocalDate
 
 class TodayBriefingCoordinatorTest {
 
-    private val stockRepository: StockRepository = mockk()
-    private val marketDataRepository: MarketDataRepository = mockk()
+    private val marketDataPlane: MarketDataPlane = mockk()
     private val gridPlanRepository: GridPlanRepository = mockk()
-    private val dividendDao: DividendDao = mockk()
-    private val bondYieldRepository: BondYieldRepository = mockk()
+    private val transactionRepository: TransactionRepository = mockk(relaxed = true)
     private val diagnosisAssembler: PortfolioDiagnosisAssembler = mockk()
     private val llmApi: LlmApi = mockk()
     private val llmConfigRepository: LlmConfigRepository = mockk()
@@ -30,18 +28,19 @@ class TodayBriefingCoordinatorTest {
     private val today = LocalDate.of(2026, 8, 12)
 
     private fun coordinator() = TodayBriefingCoordinator(
-        stockRepository, marketDataRepository, gridPlanRepository, dividendDao,
-        bondYieldRepository, diagnosisAssembler, llmApi, llmConfigRepository, cacheDao,
+        marketDataPlane, gridPlanRepository, transactionRepository,
+        diagnosisAssembler, llmApi, llmConfigRepository, cacheDao,
     )
 
     private fun stubEmptyData() {
-        coEvery { stockRepository.observeAllStocks() } returns flowOf(emptyList())
-        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns emptyMap()
-        coEvery { bondYieldRepository.fetch10YBondYield(any()) } returns 2.6
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { marketDataPlane.getQuoteSnapshots(any(), any()) } returns emptyMap()
+        coEvery { marketDataPlane.get10YBondYield(any()) } returns 2.6
+        coEvery { marketDataPlane.getDps(any()) } returns null
         coEvery { gridPlanRepository.observeAll() } returns flowOf(emptyList())
-        coEvery { dividendDao.getAllWithExDate() } returns emptyList()
-        coEvery { marketDataRepository.fetchIndexQuotes() } returns emptyList()
-        coEvery { marketDataRepository.fetchIndustryList(any<MarketDataRepository.SortBy>(), any()) } returns emptyList()
+        coEvery { marketDataPlane.getAllDividendsWithExDate() } returns emptyList()
+        coEvery { marketDataPlane.getIndexQuotes() } returns emptyList()
+        coEvery { marketDataPlane.getIndustryList(any<MarketDataRepository.SortBy>(), any()) } returns emptyList()
         coEvery { diagnosisAssembler.assemble(any(), any()) } returns null
     }
 
@@ -101,7 +100,7 @@ class TodayBriefingCoordinatorTest {
             leaderName = null, leaderCode = null, leaderChangePct = null,
         )
         coEvery {
-            marketDataRepository.fetchIndustryList(MarketDataRepository.SortBy.CHANGE, any())
+            marketDataPlane.getIndustryList(MarketDataRepository.SortBy.CHANGE, any())
         } returns listOf(industryItem("银行", 2.0), industryItem("煤炭", -1.0))
         coEvery { llmApi.chatCompletions(any(), any(), any()) } returns
             LlmChatResponse(listOf(LlmChatResponse.Choice(LlmMessage("assistant", "ok。"))))
@@ -111,7 +110,8 @@ class TodayBriefingCoordinatorTest {
         // 体检行与市场行均进入 prompt（LLM 据此解读估值锚与板块温度）
         coVerify {
             llmApi.chatCompletions(any(), any(), match { body ->
-                val prompt = body.messages.first().content
+                // content 为 Any（多模态扩展），文本路径恒为 String
+                val prompt = body.messages.first().content as? String ?: ""
                 prompt.contains("【组合体检】") && prompt.contains("利差+1.00pp") &&
                     prompt.contains("【市场】") && prompt.contains("领涨板块 银行")
             })

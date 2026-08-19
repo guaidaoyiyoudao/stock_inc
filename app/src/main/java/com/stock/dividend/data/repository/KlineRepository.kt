@@ -1,8 +1,15 @@
 package com.stock.dividend.data.repository
 
+import com.stock.dividend.data.local.dao.DividendDao
+import com.stock.dividend.data.local.dao.KlineCacheDao
+import com.stock.dividend.data.local.entity.KlineCacheEntity
+import com.stock.dividend.data.local.entity.KlineCacheMetaEntity
 import com.stock.dividend.data.remote.TencentDividendApi
 import com.stock.dividend.di.TencentDividendSource
+import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -68,55 +75,122 @@ fun parseKlineBars(rows: List<List<*>>): List<KlineBar> = rows.mapNotNull { row 
 private fun List<*>.parseDouble(index: Int): Double? =
     (getOrNull(index) as? String)?.toDoubleOrNull()?.takeIf { it.isFinite() }
 
+/**
+ * K 线仓库：腾讯 fqkline 网络源 + Room 本地缓存（**永久缓存**：历史不可变数据持久化）。
+ *
+ * 读取编排（[loadBars]）：
+ * 1. 缓存尾部已覆盖「本周期正在形成的最新一根」（日线=今天/周线=本周/月线=本月），或今日已同步过
+ *    → 直接返回缓存，零网络——历史永不因时间过期重拉；
+ * 2. 尾部落后且今日未同步 → **每日最多一次**小窗口增量补尾（从最后一根缓存日期含拉到今天，覆盖盘中变动的尾根）；
+ * 3. 无缓存 / [forceRefresh] / 出现新除权日（前复权全历史漂移，增量合并会算错 BOLL）→ 全量拉取并重建缓存；
+ * 4. 任一网络失败 → 回退缓存（红线 #2，断网 BOLL/回测仍可用）；无缓存返回空表（历史行为）。
+ *
+ * 前复权漂移检测：[KlineCacheMetaEntity.lastExDividendDate] 记录写入缓存时该股最新除权日，
+ * 与 dividends 表当前最新除权日比对——除权后所有历史价格整体位移，必须全量重建（约每股每年 1-2 次）。
+ */
 @Singleton
 class KlineRepository @Inject constructor(
-    @TencentDividendSource private val tencentApi: TencentDividendApi
+    @TencentDividendSource private val tencentApi: TencentDividendApi,
+    private val klineCacheDao: KlineCacheDao,
+    private val dividendDao: DividendDao
 ) {
     suspend fun fetchCloses(
         stockCode: String,
         period: KlinePeriod,
-        bars: Int = DEFAULT_BARS
+        bars: Int = DEFAULT_BARS,
+        forceRefresh: Boolean = false
     ): List<Double> {
-        val tencentCode = stockCode.toTencentCode() ?: return emptyList()
-        val param = buildParam(tencentCode, period, bars)
-        val response = try {
-            tencentApi.getKline(param)
-        } catch (_: Exception) {
-            return emptyList()
-        }
-        val klines = response.klineRows(period) ?: return emptyList()
-        // 仅取有效收盘价（>0），与历史行为一致
-        return klines.mapNotNull { row ->
-            (row.getOrNull(CLOSE_INDEX) as? String)?.toDoubleOrNull()
-                ?.takeIf { it.isFinite() && it > 0.0 }
-        }
+        return loadBars(stockCode, period, bars, forceRefresh).map { it.close }
     }
 
     /**
-     * 拉取 [stockCode] 指定 [period] 的完整 OHLCV K 线（前复权）。网络失败返回空表（红线 #2）。
+     * 拉取 [stockCode] 指定 [period] 的完整 OHLCV K 线（前复权）。网络失败回退缓存（红线 #2）。
      *
-     * 与 [fetchCloses] 共享同一次请求，只是解析时保留 open/high/low/volume——这些字段原本就被接口返回，
+     * 与 [fetchCloses] 共享同一次请求编排，只是保留 open/high/low/volume——这些字段原本就被接口返回，
      * 只是 [fetchCloses] 丢弃了。故不增加任何网络成本。
      */
     suspend fun fetchKlines(
         stockCode: String,
         period: KlinePeriod,
-        bars: Int = DEFAULT_BARS
+        bars: Int = DEFAULT_BARS,
+        forceRefresh: Boolean = false
     ): List<KlineBar> {
-        val tencentCode = stockCode.toTencentCode() ?: return emptyList()
-        val param = buildParam(tencentCode, period, bars)
-        val response = try {
-            tencentApi.getKline(param)
-        } catch (_: Exception) {
-            return emptyList()
-        }
-        val klines = response.klineRows(period) ?: return emptyList()
-        return parseKlineBars(klines)
+        return loadBars(stockCode, period, bars, forceRefresh)
     }
 
     /** 周线兼容封装（旧调用点不改）。 */
     suspend fun fetchWeeklyCloses(stockCode: String, weeks: Int = DEFAULT_BARS): List<Double> =
         fetchCloses(stockCode, KlinePeriod.WEEKLY, weeks)
+
+    private suspend fun loadBars(
+        stockCode: String,
+        period: KlinePeriod,
+        bars: Int,
+        forceRefresh: Boolean
+    ): List<KlineBar> {
+        val tencentCode = stockCode.toTencentCode() ?: return emptyList()
+        val periodKey = period.name
+        val cachedBars = runCatching { klineCacheDao.getBars(stockCode, periodKey) }
+            .getOrDefault(emptyList())
+            .map { it.toKlineBar() }
+        val meta = runCatching { klineCacheDao.getMeta(stockCode, periodKey) }.getOrNull()
+        val latestExDate = runCatching { dividendDao.getLatestExDividendDate(stockCode) }.getOrNull()
+
+        val qfqShifted = meta != null && latestExDate != meta.lastExDividendDate
+
+        // 永久缓存：尾部已是本周期最新 / 今日已同步过（含停牌/长假期空结果）→ 零网络直读
+        if (!forceRefresh && !qfqShifted && cachedBars.isNotEmpty()) {
+            val today = LocalDate.now()
+            val tailCurrent = klineTailIsCurrent(cachedBars.last().date, period, today)
+            val syncedToday = meta != null && sameDay(meta.fetchedAt, today)
+            if (tailCurrent || syncedToday) {
+                return cachedBars.takeLast(bars)
+            }
+        }
+
+        if (forceRefresh || qfqShifted || cachedBars.isEmpty()) {
+            // 全量路径：首拉 / 强刷 / 前复权漂移
+            val remote = fetchByParam(buildParam(tencentCode, period, bars), period)
+                ?: return cachedBars.takeLast(bars)      // 网络失败：回退缓存（无缓存时空表）
+            if (remote.isEmpty()) return cachedBars.takeLast(bars)  // 接口确无数据：不动缓存
+            runCatching {
+                klineCacheDao.replaceBars(stockCode, periodKey, remote.map { it.toEntity(stockCode, periodKey) })
+                klineCacheDao.upsertMeta(
+                    KlineCacheMetaEntity(stockCode, periodKey, System.currentTimeMillis(), latestExDate)
+                )
+            }
+            return remote.takeLast(bars)
+        }
+
+        // 增量补尾（每日最多一次）：从最后一根缓存日期（含）拉到今天，覆盖更新盘中变动的尾根
+        val tail = fetchByParam(
+            buildIncrementalParam(tencentCode, period, cachedBars.last().date),
+            period
+        ) ?: return cachedBars.takeLast(bars)
+        runCatching {
+            if (tail.isNotEmpty()) {
+                klineCacheDao.upsertBars(tail.map { it.toEntity(stockCode, periodKey) })
+                klineCacheDao.trimToRecent(stockCode, periodKey, MAX_CACHED_BARS)
+            }
+            klineCacheDao.upsertMeta(
+                KlineCacheMetaEntity(stockCode, periodKey, System.currentTimeMillis(), latestExDate)
+            )
+        }
+        val merged = (cachedBars.associateBy { it.date } + tail.associateBy { it.date })
+            .values.sortedBy { it.date }
+        return merged.takeLast(bars)
+    }
+
+    /** 网络请求并解析；异常或响应缺数据键返回 null（与「成功但空」区分，前者回退缓存）。 */
+    private suspend fun fetchByParam(param: String, period: KlinePeriod): List<KlineBar>? {
+        val response = try {
+            tencentApi.getKline(param)
+        } catch (_: Exception) {
+            return null
+        }
+        val rows = response.klineRows(period) ?: return null
+        return parseKlineBars(rows)
+    }
 
     internal fun buildParam(tencentCode: String, period: KlinePeriod, bars: Int): String {
         val today = LocalDate.now()
@@ -124,14 +198,37 @@ class KlineRepository @Inject constructor(
         return "$tencentCode,${period.paramType},${start.iso()},${today.iso()},$KLINE_COUNT,$ADJUST_QFQ"
     }
 
+    /** 增量窗口参数：从 [fromDate]（含，通常为最后一根缓存日期）到今天。 */
+    internal fun buildIncrementalParam(tencentCode: String, period: KlinePeriod, fromDate: String): String {
+        return "$tencentCode,${period.paramType},$fromDate,${LocalDate.now().iso()},$KLINE_COUNT,$ADJUST_QFQ"
+    }
+
     companion object {
         const val DEFAULT_BARS = 40
         const val KLINE_COUNT = 640
-        const val CLOSE_INDEX = 2
         const val BUFFER_FACTOR = 2
         const val ADJUST_QFQ = "qfq"
+        /** 每股每周期缓存上限，防增量写入无限增长。 */
+        const val MAX_CACHED_BARS = 800
     }
 }
+
+/**
+ * 缓存尾部是否已覆盖「本周期正在形成的最新一根」（纯函数）：
+ * DAILY=已含今天；WEEKLY=最后一根在本周（周一及以后）；MONTHLY=最后一根在本月。
+ * 满足即视为完整——历史永不再拉，当日重复读取零网络。日期解析失败视为完整（不阻塞读取）。
+ */
+internal fun klineTailIsCurrent(lastBarDate: String, period: KlinePeriod, today: LocalDate): Boolean {
+    val last = runCatching { LocalDate.parse(lastBarDate) }.getOrNull() ?: return true
+    return when (period) {
+        KlinePeriod.DAILY -> !last.isBefore(today)
+        KlinePeriod.WEEKLY -> !last.isBefore(today.with(DayOfWeek.MONDAY))
+        KlinePeriod.MONTHLY -> !last.isBefore(today.withDayOfMonth(1))
+    }
+}
+
+private fun sameDay(epochMs: Long, today: LocalDate): Boolean =
+    Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate() == today
 
 /** 按周期取对应键的 K 线数组；优先周期键，缺失时日线→周线降级，周线→日线降级。 */
 private fun com.stock.dividend.data.remote.dto.TencentKlineResponse.klineRows(
@@ -144,6 +241,21 @@ private fun com.stock.dividend.data.remote.dto.TencentKlineResponse.klineRows(
         KlinePeriod.MONTHLY -> stockData.qfqmonth ?: stockData.qfqweek
     }
 }
+
+private fun KlineCacheEntity.toKlineBar(): KlineBar =
+    KlineBar(date = date, open = open, close = close, high = high, low = low, volume = volume)
+
+private fun KlineBar.toEntity(stockCode: String, periodKey: String): KlineCacheEntity =
+    KlineCacheEntity(
+        stockCode = stockCode,
+        period = periodKey,
+        date = date,
+        open = open,
+        high = high,
+        low = low,
+        close = close,
+        volume = volume
+    )
 
 private fun String.toTencentCode(): String? = when {
     startsWith("sh.", ignoreCase = true) -> "sh" + substringAfter(".")

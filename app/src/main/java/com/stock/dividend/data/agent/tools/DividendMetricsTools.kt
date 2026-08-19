@@ -3,14 +3,10 @@ package com.stock.dividend.data.agent.tools
 import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
-import com.stock.dividend.data.repository.DividendMetricsCalculator
-import com.stock.dividend.data.repository.DividendRepository
-import com.stock.dividend.data.repository.StockRepository
-import kotlinx.coroutines.flow.first
+import com.stock.dividend.data.plane.MarketDataPlane
 
 class GetDividendMetricsTool(
-    private val stockRepository: StockRepository,
-    private val dividendRepository: DividendRepository,
+    private val marketDataPlane: MarketDataPlane,
 ) : ReadTool(
     name = "get_dividend_metrics",
     description = "查询单只股票的分红深度指标：分红总年数、截至最新年份的连续分红年数、近 3/5 年每股分红均值、近 3 年每股分红复合年增长率（CAGR%）、近 5 年标准差与变异系数（衡量分红稳定性，越小越稳）。code 参数格式见参数说明。",
@@ -28,10 +24,10 @@ class GetDividendMetricsTool(
     override suspend fun run(context: ToolContext, args: Map<String, Any>): Any {
         val code = args.stringArg("code") ?: return mapOf("error" to "缺少 code 参数")
         return runCatching {
-            val stock = stockRepository.resolveStock(code)
+            val stock = marketDataPlane.resolveStock(code)
                 ?: return@runCatching mapOf("error" to "未找到股票：$code")
-            val dividends = dividendRepository.observeDividends(stock.code).first()
-            val metrics = DividendMetricsCalculator.calculate(dividends)
+            // 分红深度纯本地计算（dividends 表），经平面读取
+            val metrics = marketDataPlane.getDividendMetrics(marketDataPlane.getDividends(stock.code))
                 ?: return@runCatching mapOf("error" to "分红数据不足，无法计算深度指标")
             buildMap<String, Any?> {
                 put("code", stock.code)

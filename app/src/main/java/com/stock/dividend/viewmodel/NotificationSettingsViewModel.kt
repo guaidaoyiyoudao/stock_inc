@@ -47,6 +47,12 @@ class NotificationSettingsViewModel @Inject constructor(
             viewModelScope, SharingStarted.WhileSubscribed(5000), LlmConfig("", "", "")
         )
 
+    /** 视觉识别模型配置（截图导入用；含全局智谱 key 自动回退）。 */
+    val visionConfigState: StateFlow<LlmConfig> =
+        llmConfigRepository.observeVisionConfig().stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5000), LlmConfig("", "", "")
+        )
+
     /** AI Agent 配置（含联网搜索开关；供设置页编辑）。 */
     val agentConfigState: StateFlow<AiAgentConfig> =
         agentConfigRepository.observe().stateIn(
@@ -65,6 +71,13 @@ class NotificationSettingsViewModel @Inject constructor(
             llmConfigRepository.saveConfig(
                 LlmProviderPreset.apply(preset, llmConfigRepository.snapshot())
             )
+        }
+    }
+
+    /** 保存视觉识别模型配置（截图导入用；key 留空时回退全局智谱 key）。 */
+    fun saveVisionConfig(apiKey: String, model: String) {
+        viewModelScope.launch {
+            llmConfigRepository.saveVisionConfig(apiKey, model)
         }
     }
 

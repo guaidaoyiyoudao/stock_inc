@@ -46,6 +46,22 @@ data class ImportSummary(
     val failed: List<ImportRow>    // 解析/匹配失败的原始行
 )
 
+/** 一条待导入的交易记录（截图/AI 视觉解析的行）。 */
+data class TransactionImportRow(
+    val rawCodeOrName: String,
+    val type: String,       // "BUY" / "SELL"
+    val shares: Int,
+    val price: Double,
+    val date: String        // yyyy-MM-dd
+)
+
+/** 交易记录批量导入结果。 */
+data class TransactionImportSummary(
+    val insertedCount: Int,     // 成功插入的笔数
+    val duplicatesSkipped: Int, // 去重跳过的笔数（同股同日同向同价同股数）
+    val failedRows: List<TransactionImportRow> // 解析/匹配失败的原始行
+)
+
 @Singleton
 class StockRepository @Inject constructor(
     private val api: SearchApi,
@@ -182,6 +198,15 @@ class StockRepository @Inject constructor(
         return stockDao.observeAll().first()
     }
 
+    /** 按代码读自选股实体（数据平面按代码取行情时解析用；不存在返回 null）。 */
+    suspend fun getStock(code: String): StockEntity? {
+        return try {
+            stockDao.getByCode(code)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun observeStock(code: String): Flow<StockEntity?> {
         return stockDao.observeByCode(code)
     }
@@ -222,27 +247,10 @@ class StockRepository @Inject constructor(
         transactionDao.getFirstBuyDate(code)
 
     suspend fun fetchQuotes(stocks: List<StockEntity>): Map<String, Double> {
-        if (stocks.isEmpty()) return emptyMap()
-        return try {
-            val secids = stocks.joinToString(",") { stock ->
-                "${stock.marketCode}.${stock.code.substringAfter(".")}"
-            }
-            val response = quoteApi.getQuotes(secids = secids)
-            val priceMap = mutableMapOf<String, Double>()
-            response.data?.diff?.forEach { item ->
-                val price = item.price
-                if (price != null && price > 0) {
-                    val prefix = if (item.market == 1) "sh" else "sz"
-                    val appCode = "$prefix.${item.code}"
-                    priceMap[appCode] = price / 100.0
-                }
-            }
-            // 拉到新价后写入 price_cache（后台刷新覆盖，缓存作冷启动兜底）
-            cachePrices(priceMap)
-            priceMap
-        } catch (e: Exception) {
-            emptyMap()
-        }
+        // 数据平面收敛：与 fetchQuoteSnapshots 共用同一次请求（含写透 price_cache），只取现价
+        return fetchQuoteSnapshots(stocks).mapNotNull { (code, snap) ->
+            snap.price?.takeIf { it > 0.0 }?.let { code to it }
+        }.toMap()
     }
 
     /**
@@ -250,6 +258,9 @@ class StockRepository @Inject constructor(
      *
      * 与 [fetchQuotes] 共用同一次请求（成本不变），只是把原本丢弃的 f3-f23 字段一并解析出来，
      * 供持仓评估、LLM 解读、卡片展示等场景使用（见 [QuoteSnapshot]）。网络失败返回空 map（红线 #2）。
+     *
+     * **写透缓存**（数据平面语义）：拉到的现价同步写入 price_cache——任何行情获取路径都更新缓存，
+     * 保证 Widget/通知/Agent 回退路径读到的冷启动兜底价与主 UI 一致。
      *
      * @return key 为 App 内 `sh.XXXXXX`/`sz.XXXXXX` 格式，value 为 [QuoteSnapshot]；
      *         现价无效（null/≤0）的条目仍保留（price=null），调用方按可空处理。
@@ -261,13 +272,16 @@ class StockRepository @Inject constructor(
                 "${stock.marketCode}.${stock.code.substringAfter(".")}"
             }
             val response = quoteApi.getQuotes(secids = secids)
-            response.data?.diff?.associateBy(
+            val snapshots = response.data?.diff?.associateBy(
                 keySelector = { item ->
                     val prefix = if (item.market == 1) "sh" else "sz"
                     "$prefix.${item.code}"
                 },
                 valueTransform = { toQuoteSnapshot(it) }
             ).orEmpty()
+            // 拉到新价后写入 price_cache（后台刷新覆盖，缓存作冷启动兜底）
+            cachePrices(snapshots.mapValues { it.value.price })
+            snapshots
         } catch (e: Exception) {
             emptyMap()
         }
@@ -484,5 +498,68 @@ class StockRepository @Inject constructor(
             try { fetchAndCacheIndustry(code) } catch (_: Exception) { /* 行业缺失不影响导入 */ }
         }
         return ImportSummary(succeeded = succeeded, failed = failed)
+    }
+
+    /**
+     * 批量导入交易记录（截图/AI 视觉解析的行）。与 [importHoldings] 同风格：
+     * 单 Room 事务内按日期升序逐行 [resolveStock] → 股票不存在则建自选（0 股，不产生初始交易）
+     * → **五元组去重**（同股同日同向同价同股数已存在则跳过）→ 插入交易；涉及的股票最后
+     * 统一 [recomputeHolding]。失败行不阻塞其他行。
+     *
+     * 按日期升序插入保证 FIFO 已实现盈亏与「同日按插入顺序」的口径和真实时间一致。
+     */
+    suspend fun importTransactions(rows: List<TransactionImportRow>): TransactionImportSummary {
+        val inserted = mutableListOf<String>()          // 成功插入的股票 code（去重前口径，仅计数用）
+        var duplicatesSkipped = 0
+        val failedRows = mutableListOf<TransactionImportRow>()
+        val touchedStocks = mutableSetOf<String>()
+        appDatabase.withTransaction {
+            rows.sortedBy { it.date }.forEach { row ->
+                val resolved = try {
+                    resolveStock(row.rawCodeOrName)
+                } catch (_: Exception) {
+                    null
+                }
+                if (resolved == null) {
+                    failedRows.add(row)
+                    return@forEach
+                }
+                try {
+                    // FK 要求股票先存在：建自选（0 股、不插初始 BUY 交易），持仓完全由交易记录表达
+                    if (stockDao.getByCode(resolved.code) == null) {
+                        addStock(resolved, shares = 0, costPerShare = 0.0)
+                    }
+                    val existing = transactionDao.getByStock(resolved.code)
+                    val isDuplicate = existing.any {
+                        it.date == row.date && it.type == row.type &&
+                            it.shares == row.shares && it.price == row.price
+                    }
+                    if (isDuplicate) {
+                        duplicatesSkipped++
+                    } else {
+                        transactionDao.insert(
+                            TransactionEntity(
+                                stockCode = resolved.code,
+                                type = row.type,
+                                shares = row.shares,
+                                price = row.price,
+                                date = row.date,
+                                note = "截图导入"
+                            )
+                        )
+                        inserted.add(resolved.code)
+                        touchedStocks.add(resolved.code)
+                    }
+                } catch (_: Exception) {
+                    failedRows.add(row)
+                }
+            }
+            touchedStocks.forEach { code -> recomputeHolding(code) }
+        }
+        return TransactionImportSummary(
+            insertedCount = inserted.size,
+            duplicatesSkipped = duplicatesSkipped,
+            failedRows = failedRows
+        )
     }
 }

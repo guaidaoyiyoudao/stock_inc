@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CompactTopAppBar
+import com.stock.dividend.viewmodel.ImportEngine
 import com.stock.dividend.viewmodel.ImportPhase
 import com.stock.dividend.viewmodel.ImportReviewRow
 import com.stock.dividend.viewmodel.PortfolioImportViewModel
@@ -92,18 +94,21 @@ fun PortfolioImportScreen(
             ImportPhase.Error -> ErrorContent(
                 message = uiState.errorMessage ?: "发生未知错误",
                 rawText = uiState.ocrRawText,
+                engine = uiState.engine,
+                onEngineChanged = viewModel::onEngineChanged,
                 onRetry = ::launchPicker,
                 onBack = onBack,
                 modifier = Modifier.fillMaxSize().padding(padding)
             )
 
             ImportPhase.LoadingImage, ImportPhase.OcrRunning, ImportPhase.Importing -> LoadingContent(
-                message = when (uiState.phase) {
-                    ImportPhase.LoadingImage -> "正在读取图片…"
-                    ImportPhase.OcrRunning -> "正在识别文本…"
-                    ImportPhase.Importing -> "正在导入持仓…"
-                    else -> "处理中…"
+                message = when {
+                    uiState.phase == ImportPhase.LoadingImage -> "正在读取图片…"
+                    uiState.phase == ImportPhase.Importing -> "正在导入持仓…"
+                    uiState.engine == ImportEngine.AI_VISION -> "AI 视觉识别中…"
+                    else -> "正在识别文本…"
                 },
+                retryStatus = uiState.visionRetryStatus,
                 modifier = Modifier.fillMaxSize().padding(padding)
             )
 
@@ -120,6 +125,8 @@ fun PortfolioImportScreen(
             )
 
             ImportPhase.Idle -> IdleContent(
+                engine = uiState.engine,
+                onEngineChanged = viewModel::onEngineChanged,
                 onPick = ::launchPicker,
                 modifier = Modifier.fillMaxSize().padding(padding)
             )
@@ -127,8 +134,39 @@ fun PortfolioImportScreen(
     }
 }
 
+/** 识别引擎选择：本地 OCR（不上传）/ AI 视觉（上传智谱）。 */
 @Composable
-private fun IdleContent(onPick: () -> Unit, modifier: Modifier = Modifier) {
+private fun EngineSelectorRow(
+    engine: ImportEngine,
+    onEngineChanged: (ImportEngine) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilterChip(
+            selected = engine == ImportEngine.LOCAL_OCR,
+            onClick = { onEngineChanged(ImportEngine.LOCAL_OCR) },
+            label = { Text("本地识别（不上传）") },
+            modifier = Modifier.weight(1f)
+        )
+        FilterChip(
+            selected = engine == ImportEngine.AI_VISION,
+            onClick = { onEngineChanged(ImportEngine.AI_VISION) },
+            label = { Text("AI 智能识别") },
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun IdleContent(
+    engine: ImportEngine,
+    onEngineChanged: (ImportEngine) -> Unit,
+    onPick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -141,8 +179,21 @@ private fun IdleContent(onPick: () -> Unit, modifier: Modifier = Modifier) {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "在 同花顺 → 我的 → 持仓 页截图，选择图片后本应用会自动识别股票、股数与成本价，并可批量导入。\n识别完全在本地完成，图片不会上传。",
+                text = "在 同花顺 → 我的 → 持仓 页截图，选择图片后本应用会自动识别股票、股数与成本价，并可批量导入。",
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            EngineSelectorRow(engine = engine, onEngineChanged = onEngineChanged)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (engine == ImportEngine.AI_VISION) {
+                    "AI 模式：图片压缩后上传至智谱 BigModel（GLM-4.6V-Flash）识别，复杂表格更准；识别失败自动重试。"
+                } else {
+                    "本地模式：识别完全在本地完成，图片不会上传。"
+                },
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
@@ -156,12 +207,20 @@ private fun IdleContent(onPick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun LoadingContent(message: String, modifier: Modifier = Modifier) {
+private fun LoadingContent(message: String, retryStatus: String? = null, modifier: Modifier = Modifier) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(16.dp))
             Text(message, style = MaterialTheme.typography.bodyMedium)
+            if (retryStatus != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = retryStatus,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -170,6 +229,8 @@ private fun LoadingContent(message: String, modifier: Modifier = Modifier) {
 private fun ErrorContent(
     message: String,
     rawText: String?,
+    engine: ImportEngine,
+    onEngineChanged: (ImportEngine) -> Unit,
     onRetry: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
@@ -193,6 +254,8 @@ private fun ErrorContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
+            Spacer(modifier = Modifier.height(12.dp))
+            EngineSelectorRow(engine = engine, onEngineChanged = onEngineChanged)
             if (rawText != null) {
                 Spacer(modifier = Modifier.height(12.dp))
                 AppTextButton(
