@@ -82,7 +82,8 @@ private fun List<*>.parseDouble(index: Int): Double? =
  * 1. 缓存尾部已覆盖「本周期正在形成的最新一根」（日线=今天/周线=本周/月线=本月），或今日已同步过
  *    → 直接返回缓存，零网络——历史永不因时间过期重拉；
  * 2. 尾部落后且今日未同步 → **每日最多一次**小窗口增量补尾（从最后一根缓存日期含拉到今天，覆盖盘中变动的尾根）；
- * 3. 无缓存 / [forceRefresh] / 出现新除权日（前复权全历史漂移，增量合并会算错 BOLL）→ 全量拉取并重建缓存；
+ * 3. 无缓存 / [forceRefresh] / 出现新除权日（前复权全历史漂移，增量合并会算错 BOLL）→ 全量拉取并重建缓存
+ *    （固定按 [FULL_FETCH_BARS] 深窗口拉取，与调用方请求条数解耦——浅窗口调用者不得截断缓存深度）；
  * 4. 任一网络失败 → 回退缓存（红线 #2，断网 BOLL/回测仍可用）；无缓存返回空表（历史行为）。
  *
  * 前复权漂移检测：[KlineCacheMetaEntity.lastExDividendDate] 记录写入缓存时该股最新除权日，
@@ -149,8 +150,11 @@ class KlineRepository @Inject constructor(
         }
 
         if (forceRefresh || qfqShifted || cachedBars.isEmpty()) {
-            // 全量路径：首拉 / 强刷 / 前复权漂移
-            val remote = fetchByParam(buildParam(tencentCode, period, bars), period)
+            // 全量路径：首拉 / 强刷 / 前复权漂移。窗口固定按 [FULL_FETCH_BARS]（最深消费方网格回测
+            // 的需求）拉取，与调用方 bars 解耦——否则图表等小窗口调用者触发的重建只会落浅历史，
+            // replaceBars 覆盖掉已有深缓存且不会自愈（增量只向前追加），违背「历史不可变数据永久缓存」。
+            // 窗口折算 ≈ 543 交易日（周线 500 根/月线全量），均在腾讯单次上限 640 内，无截尾歧义。
+            val remote = fetchByParam(buildParam(tencentCode, period, FULL_FETCH_BARS), period)
                 ?: return cachedBars.takeLast(bars)      // 网络失败：回退缓存（无缓存时空表）
             if (remote.isEmpty()) return cachedBars.takeLast(bars)  // 接口确无数据：不动缓存
             runCatching {
@@ -210,6 +214,13 @@ class KlineRepository @Inject constructor(
         const val ADJUST_QFQ = "qfq"
         /** 每股每周期缓存上限，防增量写入无限增长。 */
         const val MAX_CACHED_BARS = 800
+
+        /**
+         * 全量拉取（首拉/强刷/除权重建）的固定回看条数，与调用方请求条数解耦：
+         * 覆盖最深消费方（网格回测 250 根），折算日期窗口 ≈ 543 交易日，仍在腾讯单次
+         * 上限 640 内（窗口超出上限时尾部是否被截无文档保证，不赌）。
+         */
+        const val FULL_FETCH_BARS = 250
     }
 }
 

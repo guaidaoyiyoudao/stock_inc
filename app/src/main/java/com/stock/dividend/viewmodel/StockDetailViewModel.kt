@@ -67,6 +67,8 @@ data class StockDetailUiState(
     val quote: QuoteSnapshot? = null,
     /** 近 N 日 K 线（OHLCV，前复权）；供走势/成交量图，空表表示未加载/失败。 */
     val klines: List<KlineBar> = emptyList(),
+    /** 年度每股现金分红（最新年度累计，与 plane.getDps 同源）；供 K 线股息率网格线，无分红为 null。 */
+    val dps: Double? = null,
     val llmAnalysis: StockLlmAnalysisState = StockLlmAnalysisState.Idle
 )
 
@@ -100,6 +102,8 @@ class StockDetailViewModel @Inject constructor(
                 Pair(stock, dividends)
             }.collect { (stock, dividends) ->
                 val dividendRatePoints = deriveDividendRatePoints(dividends)
+                // K 线股息率网格线用 DPS（最新年度累计），分红刷新后反应式重算
+                val dps = ForecastCalculator.latestYearlyCashPerShare(dividends)
                 if (stock != null) {
                     val allForecasts = mutableMapOf<String, ForecastDetail>()
                     for (period in listOf("1", "3", "5")) {
@@ -123,6 +127,7 @@ class StockDetailViewModel @Inject constructor(
                         stock = stock,
                         dividends = dividends,
                         dividendRatePoints = dividendRatePoints,
+                        dps = dps,
                         isLoading = false,
                         visibleCount = 5,
                         allForecasts = allForecasts,
@@ -137,6 +142,7 @@ class StockDetailViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         dividends = dividends,
                         dividendRatePoints = dividendRatePoints,
+                        dps = dps,
                         isLoading = false,
                         visibleCount = 5
                     )
@@ -149,6 +155,8 @@ class StockDetailViewModel @Inject constructor(
         // 独立加载实时行情 + K线（与分红 collector 解耦；行情/K线失败降级为 null/空，不崩 UI）
         loadQuote()
         loadKlines()
+        // 确保分红新鲜（空表/超 7 天自动拉网，平面统一语义）；结果经 dividendsFlow 反应式派生 dps
+        viewModelScope.launch { runCatching { marketDataPlane.ensureDividendsFresh(stockCode) } }
     }
 
     /**

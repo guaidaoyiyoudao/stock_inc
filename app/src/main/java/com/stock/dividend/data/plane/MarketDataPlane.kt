@@ -419,6 +419,17 @@ class MarketDataPlane @Inject constructor(
 
     // ── 内部工具 ──────────────────────────────────────────
 
+    /**
+     * 清空全部内存会话缓存（行情/BOLL/市场）。缓存管理清理持久缓存后由
+     * [com.stock.dividend.viewmodel.CacheManagementViewModel] 联动调用——
+     * 否则 10s/60s 窗口内仍会读到已清库前的旧内存值。网络源与持久缓存不受影响。
+     */
+    fun clearSessionCaches() {
+        quoteSession.clear()
+        bollSession.clear()
+        marketSession.clear()
+    }
+
     /** 市场类数据的短 TTL 内存缓存 + 并发合并（key 含全部参数保证不同参数互不串）。 */
     @Suppress("UNCHECKED_CAST")
     private suspend fun <T> cachedMarket(key: String, fetch: suspend () -> T): T {

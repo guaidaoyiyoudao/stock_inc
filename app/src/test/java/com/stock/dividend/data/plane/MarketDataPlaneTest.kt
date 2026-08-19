@@ -130,6 +130,19 @@ class MarketDataPlaneTest {
         coVerify(exactly = 1) { stockRepository.fetchQuoteSnapshots(any()) }
     }
 
+    @Test
+    fun `clearSessionCaches drops memory so fresh window refetches`() = runTest {
+        coEvery { stockRepository.fetchQuoteSnapshots(listOf(stock)) } returns
+            mapOf("sh.600036" to snapshot)
+
+        plane.getQuoteSnapshots(listOf(stock))
+        plane.clearSessionCaches()
+        // 仍在 10s 新鲜窗口内，但内存缓存已被清空 → 必须重新发网
+        plane.getQuoteSnapshots(listOf(stock))
+
+        coVerify(exactly = 2) { stockRepository.fetchQuoteSnapshots(any()) }
+    }
+
     // ── 分红新鲜度（网格页股息率痛点根因） ─────────────────
 
     @Test
@@ -322,5 +335,6 @@ class MarketDataPlaneTest {
         override fun lastAttemptAt(stockCode: String): Long = attempt[stockCode] ?: 0L
         override fun markSuccess(stockCode: String, at: Long) { success[stockCode] = at }
         override fun markAttempt(stockCode: String, at: Long) { attempt[stockCode] = at }
+        override fun clear() { success.clear(); attempt.clear() }
     }
 }

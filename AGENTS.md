@@ -158,6 +158,7 @@ stock_inc/
         │   │   │   │   ├── LivingExpenseRepository.kt
         │   │   │   │   ├── AchievementRepository.kt
         │   │   │   │   ├── BackupRepository.kt             # 备份/恢复（事务式批量）
+│   │   │   │   ├── CacheManagementRepository.kt    # 缓存管理：7 类持久缓存条目统计 + 按种类清理（CacheKind 含 permanent 永久缓存标记与中文说明，2026-08-19 新增）
         │   │   │   │   ├── WidgetDataRepository.kt         # 桌面小组件数据
         │   │   │   │   ├── ScreenshotStrategyRepository.kt # 截图策略持久化
         │   │   │   │   ├── VisionImportRepository.kt      # 视觉导入编排（图片→GLM-4.6V→结构化行，自动重试 5 次，2026-08-16 新增）
@@ -193,6 +194,7 @@ stock_inc/
         │   │   │   │   ├── GridAnchorCalculator.kt       # 网格智能锚定（BOLL中轨=基准/上轨=上界/目标股息率=下界，2026-08-04 新增）
         │   │   │   │   ├── GridExecutionCalculator.kt    # 网格资金执行跟踪（已投入/剩余/已买股数/加权均价/浮盈/执行偏差/逐档成交明细/弹药库汇总）
         │   │   │   │   ├── GridBacktestCalculator.kt     # 网格历史回测（日收盘价回放，对照首日一次性买入，2026-08-16 新增）
+        │   │   │   │   ├── DividendYieldGridCalculator.kt # 股息率网格线（价=DPS÷股息率，0.5% 整档取区间内，2026-08-19 新增）
         │   │   │   │   ├── MarketMoodCalculator.kt      # 市场情绪分组：板块列表 → 领涨/领跌 TopN 两端（2026-08-15 新增）
         │   │   │   │   ├── HoldingRecommender.kt         # 单股评估：BOLL+股息率门槛 → BUY/HOLD/SELL
         │   │   │   │   ├── PortfolioAdvisor.kt           # 组合层仓位控制 + 三周期共振买点
@@ -278,7 +280,8 @@ stock_inc/
         │   │   │   │   ├── DesignSystemPreview.kt
         │   │   │   │   ├── StockCard.kt / DividendSummaryCard.kt / IncomeSummaryCard.kt  # 摘要卡片
         │   │   │   │   ├── IncomeBreakdownChart.kt / IncomeTimelineCard.kt / IncomeTrendChart.kt  # 收入图表
-        │   │   │   │   ├── DividendRateChart.kt / PriceVolumeChart.kt  # 价量/股息率图（Vico）
+        │   │   │   │   ├── DividendRateChart.kt          # 股息率历史图（MPAndroidChart）
+        │   │   │   │   ├── KlineYieldChart.kt            # 30日K线蜡烛 + 股息率网格水平线（纯 Canvas 自绘 + 底部成交量条，2026-08-19 新增，替代 PriceVolumeChart）
         │   │   │   │   ├── BollPriceScale.kt / DividendPriceScale.kt    # BOLL/股息率刻度尺
         │   │   │   │   ├── IndustryAllocationPieChart.kt # 行业配比饼图
         │   │   │   │   ├── FireProgressCard.kt / ForecastComparisonCard.kt
@@ -305,7 +308,8 @@ stock_inc/
         │   │   │       ├── AlertEvalSettingsScreen.kt / LlmStrategySettingsScreen.kt / DataSettingsScreen.kt  # 设置 3 个二级详情页（2026-08-02 重构）
         │   │   │       ├── AiSettingsScreen.kt   # AI 助手设置（系统提示词/温度/输出长度，会话旁入口，2026-08-02 新增）
         │   │   │       ├── NotificationSettingsScreen.kt / StockNotificationSettingsScreen.kt / NotificationReliabilityScreen.kt
-        │   │   │       ├── BackupRestoreScreen.kt / FireGoalSetupScreen.kt / OcrDebugScreen.kt
+        │   │   │       ├── CacheManagementScreen.kt   # 缓存管理（7 类缓存条目数 + 永久/短期标记 + 单类/全部清理确认，2026-08-19 新增）
+│   │   │       ├── BackupRestoreScreen.kt / FireGoalSetupScreen.kt / OcrDebugScreen.kt
         │   │   │       └── TabRefreshLocal.kt    # 本地刷新辅助
         │   │   │
         │   │   └── viewmodel/                    # @HiltViewModel + UiState（参考 PortfolioViewModel，见 §4.2）
@@ -314,6 +318,7 @@ stock_inc/
         │   │       ├── StockDetailViewModel.kt   # 个股详情 VM
         │   │       ├── AiChatViewModel.kt        # AI 会话 VM
         │   │       ├── AiSettingsViewModel.kt   # AI 助手设置 VM（系统提示词/温度/输出长度，2026-08-02 新增）
+│   │       ├── CacheManagementViewModel.kt  # 缓存管理 VM（条目加载/确认清理/联动清平面内存缓存，2026-08-19 新增）
         │   │       ├── AddStockViewModel.kt / EditHoldingViewModel.kt
         │   │       ├── DividendCalendarViewModel.kt
         │   │       ├── DripSimulationViewModel.kt       # 分红再投模拟（参数可调，纯函数重算，2026-08-04 新增）
@@ -332,13 +337,13 @@ stock_inc/
         │
         └── test/java/com/stock/dividend/         # 单元测试（包结构与 main 对齐，见 §6）
             ├── data/agent/        # 10 个：AgentInstructionBuilderTest / AiChatRepositoryTest / StockAgentToolsTest（46 工具）/ PortfolioAnalysisToolsTest（3 新工具）/ ToolDisplayNameTest 等
-            ├── data/repository/   # 45 个：纯函数（BollCalculatorTest/BuyThresholdCalculatorTest/DividendMetricsCalculatorTest/PortfolioRiskDiagnoserTest）
+            ├── data/repository/   # 58 个：纯函数（BollCalculatorTest/BuyThresholdCalculatorTest/CacheManagementRepositoryTest/PortfolioRiskDiagnoserTest）
             │                       #    + DTO 解析（QuoteSnapshotTest/MarketDtoParseTest/FinancialStatementDtoParseTest/BondYieldResponseParseTest）
             │                       #    + Repository（StockRepositoryTest/DividendRepositoryTest/Robolectric）
-            └── viewmodel/         # 22 个：PortfolioViewModelTest 等（Robolectric + MockK + Turbine）
+            └── viewmodel/         # 24 个：PortfolioViewModelTest / CacheManagementViewModelTest 等（Robolectric + MockK + Turbine）
 ```
 
-**文件规模速览**（2026-08-17）：main 源集约 271 个 .kt，测试约 106 个 .kt；DB 19 张表/23 个 Migration（version=24）；AI Agent 47 个工具（34 读 + 13 写）。
+**文件规模速览**（2026-08-19）：main 源集约 280 个 .kt，测试约 111 个 .kt；DB 19 张表/23 个 Migration（version=24）；AI Agent 47 个工具（34 读 + 13 写）。
 
 ---
 
@@ -594,6 +599,10 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 ---
 
 ## 10. 变更记录
+- 2026-08-19：**新增「缓存管理」页（设置 → 数据 → 缓存管理）——缓存可见、可清，永久缓存策略明示**。① 新仓库 `CacheManagementRepository`（+`CacheKind` 枚举：PRICE/SEARCH/KLINE/FUNDAMENTALS/STATEMENTS/DIVIDENDS/LLM_ANALYSIS 七类，含 `permanent` 永久缓存标记与中文 label/description——K线/财务指标/三表/分红四类为历史不可变数据即永久缓存，price/search/LLM 为可随时重建的短期缓存）：`loadStats` 逐类 COUNT 统计（单 DAO 失败记 0 不拖累其余，吞异常红线 #2）+ `clear(kind)`/`clearAll` 全表清理；**清理 dividends 联动清 `DividendFreshnessStore` 记账**（接口/实现新增 `clear()`——否则退避时间戳残留，清库后 5 分钟内 getDps 吃闭门羹不重新拉网）。② `MarketDataPlane` 新增 `clearSessionCaches()`（清行情 10s/BOLL·市场 60s 内存会话缓存——堵「持久缓存清了但内存窗口还剩旧值」的死角）。③ 7 个缓存 DAO 补 `count()`（KlineCacheDao 另补 `clearAll()`=bars+meta 事务删除）——纯 @Query 增量，**不改 schema、无迁移**。④ 新 `CacheManagementViewModel`（条目加载/确认弹窗状态/单类清理/全部清理/一次性 message，`isLoading`/`isClearing` 显式复位红线 #3）+ `CacheManagementScreen`（说明卡明示永久缓存策略 + 每类条目数与「永久缓存/短期缓存」徽标 + 清理确认弹窗防误触 + 全部清理 + Snackbar 反馈；条目数千分位走 `formatEntryCount`）+ `DataSettingsScreen` 入口行 + MainScaffold `cacheManagement` 路由。清理范围只含可再生缓存，自选股/持仓/交易等用户数据不涉及。测试 +18（仓库 10：统计/逐类清理/dividends 联动/permanent 策略锁定/标签非空；VM 6：Robolectric；平面 1：清内存后同窗口重新发网；页面纯函数 1），全量 1184 过。
+
+- 2026-08-19：**个股详情页「近期走势」升级为 30 日 K 线蜡烛图 + 股息率网格水平线**（替代原 Vico 成交量柱图）。① 新纯函数 `DividendYieldGridCalculator`（§4.4 惯例，+7 单测）：档位价 `P = 年度每股分红(DPS) ÷ 股息率`（与 GridAnchorCalculator 股息底/DividendPriceScale 同公式），围绕现价隐含股息率对齐 0.5% 步长网格、仅保留 30 日价格区间内整档（典型 3~7 条），边界等值保留（EPS 容差防浮点误伤），现价缺失退区间中点锚定。② 新组件 `KlineYieldChart`（纯 Compose Canvas 自绘——Vico 开源版无蜡烛图层、MPAndroidChart 不适配双主题；+4 internal 纯函数单测）：蜡烛主图（影线+实体、十字星实体最矮 1dp、涨绿跌红随 ExtendedColors）+ 金色（tertiary）虚线股息率线带右侧自适应 gutter 标签「6.5% ¥9.23」（PercentFormatter/MoneyFormatter）+ 底部成交量迷你柱（涨跌着色减淡，保留旧图信息）+ 首末 MM-dd 日期 + 价格摘要行；DPS 缺失时图例降级「暂无分红数据，未画股息率线」，蜡烛照常渲染。③ `StockDetailViewModel`：UiState 加 `dps`（分红 collector 内经 `ForecastCalculator.latestYearlyCashPerShare` 反应式派生，手动刷新分红后自动更新），init 追加 `plane.ensureDividendsFresh`（空表/超 7 天自动拉网，§4.2A）；现价档位锚定取 `quote?.price ?: klines.last().close`（+3 VM 单测）。④ 删除 `PriceVolumeChart.kt` 及其测试（仅详情页一处使用，信息已并入新图）。⑤ **永久缓存加固**（应「这些数据需要永久缓存」核查发现的缺口）：`KlineRepository` 全量拉取（首拉/强刷/除权重建）的回看窗口此前跟随调用方 bars——小窗口调用者（详情页 30 根）触发的重建只落 ~98 根浅历史，`replaceBars` 覆盖已有深缓存且不自愈（增量只向前追加），网格回测（250 根）被静默截短；修复为固定 `FULL_FETCH_BARS=250` 深窗口（折算 ≈543 交易日 < 腾讯单次上限 640，不赌超窗截尾行为），与调用方请求条数解耦（+2 回归单测）。**不改 schema、无新网络请求**（K 线/DPS 全走平面既有链路）。
+
 - 2026-08-18：**新增数据平面（MarketDataPlane）并全量迁移消费方——股市数据获取唯一入口**。背景：网格页拿不到股息率暴露「数据获取路径不统一」（详情页手动拉分红 vs 网格只读本地；主 UI 走 fetchQuoteSnapshots 不写 price_cache vs Widget 只读缓存；股息率 4 种口径；enrichPayoutRatio 3 处重复；Semaphore(3) 5 处手写；4 VM + 3 仓库直注 Dao）。落地：① 新包 `data/plane/`（门面 + 策略 + 分红新鲜度 prefs 记账 + 并发去重），统一语义——行情写透 price_cache、getDps 自动 ensureDividendsFresh（空/超 7 天拉网、失败 5 分钟退避）、getCurrentDividendYield 唯一股息率口径、getBoll 内置限流+缓存、getFundamentals 返回已补派息率产物、市场数据 60s 内存缓存；`StockRepository.fetchQuoteSnapshots` 补写透缓存、`fetchQuotes` 降级为其薄封装，`DividendRepository` 增 getDividends/getAllWithExDate/observeAllDividends，`StockRepository` 增 getStock。② **全量迁移消费方**：9 个 VM（Portfolio/Today/StockDetail/GridPlan/Drip/AddStock/DividendCalendar/PortfolioImport 等，写操作留原仓库）、协调器（TodayBriefingCoordinator 补齐自认缺位的 latestYearlyDividend 口径、PortfolioDiagnosisAssembler 删自建 enrich/限流）、通知（NotificationCheckCoordinator）、Widget（refreshPrices 走平面）、Agent 全部 34 个读工具 + AiAgentFactory（GetValuationMetricsTool 双请求合并、GetPortfolioSignalsTool 逐股单请求改批量、GetKlineTool BOLL 并入平面路径）。③ 测试：新增 MarketDataPlaneTest 16 用例，迁移 14 个测试文件到 plane mock；全量 1154 过。**不改 schema**（分红新鲜度用 SharedPreferences）。
 
 

@@ -46,7 +46,7 @@ internal val settingsGroupTitles = listOf(
  * 每个分组一个跳转入口，点进去是对应的二级详情页（表单/子入口）：
  * - [AlertEvalSettingsScreen]：股息率阈值 + 评估门槛 + 通知可靠性
  * - [LlmStrategySettingsScreen]：LLM 配置 + 策略库
- * - [DataSettingsScreen]：数据管理 + OCR 调试
+ * - [DataSettingsScreen]：数据管理 + 缓存管理 + OCR 调试
  */
 @Composable
 fun SettingsScreen(
@@ -78,7 +78,7 @@ fun SettingsScreen(
         )
         SettingsNavRow(
             title = settingsGroupTitles[2],
-            description = "备份/恢复、OCR 调试",
+            description = "备份/恢复、缓存管理、OCR 调试",
             icon = Icons.Filled.CloudSync,
             onClick = onOpenDataSettings
         )

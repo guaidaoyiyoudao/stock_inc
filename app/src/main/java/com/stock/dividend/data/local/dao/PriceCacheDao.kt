@@ -23,4 +23,8 @@ interface PriceCacheDao {
 
     @Query("DELETE FROM price_cache")
     suspend fun deleteAll()
+
+    /** 缓存管理：当前条目数。 */
+    @Query("SELECT COUNT(*) FROM price_cache")
+    suspend fun count(): Long
 }

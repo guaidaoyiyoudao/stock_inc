@@ -40,4 +40,21 @@ interface KlineCacheDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertMeta(meta: KlineCacheMetaEntity)
+
+    /** 缓存管理：当前 K 线条数（meta 行数远小于 bars，不计入展示）。 */
+    @Query("SELECT COUNT(*) FROM kline_cache")
+    suspend fun count(): Long
+
+    /** 缓存管理：清空全部 K 线缓存（bars + meta 一并删）。 */
+    @Transaction
+    suspend fun clearAll() {
+        deleteAllBars()
+        deleteAllMeta()
+    }
+
+    @Query("DELETE FROM kline_cache")
+    suspend fun deleteAllBars()
+
+    @Query("DELETE FROM kline_cache_meta")
+    suspend fun deleteAllMeta()
 }

@@ -16,4 +16,8 @@ interface LlmAnalysisCacheDao {
 
     @Query("DELETE FROM llm_analysis_cache")
     suspend fun clear()
+
+    /** 缓存管理：当前条目数。 */
+    @Query("SELECT COUNT(*) FROM llm_analysis_cache")
+    suspend fun count(): Long
 }

@@ -467,6 +467,47 @@ class KlineRepositoryTest {
     }
 
     @Test
+    fun `first fetch uses fixed deep window regardless of requested bars`() = runTest {
+        // 小窗口调用者（详情页 30 根 K 线图）首拉：全量窗口固定按 FULL_FETCH_BARS=250，
+        // 不随调用方 bars 缩水——否则缓存只落浅历史，深消费者（回测 250 根）拿不到深度
+        val paramSlot = slot<String>()
+        coEvery { tencentApi.getKline(capture(paramSlot)) } returns klineResponseDaily(
+            listOf(listOf("2026-08-14", "9.5", "9.8", "10.0", "9.4", "800"))
+        )
+
+        repository.fetchKlines("sh.600036", KlinePeriod.DAILY, bars = 30)
+
+        val expectedStart = repository.buildParam("sh600036", KlinePeriod.DAILY, KlineRepository.FULL_FETCH_BARS)
+            .split(",")[2]
+        val shallowStart = repository.buildParam("sh600036", KlinePeriod.DAILY, 30).split(",")[2]
+        assertThat(paramSlot.captured.split(",")[2]).isEqualTo(expectedStart)
+        assertThat(paramSlot.captured.split(",")[2]).isNotEqualTo(shallowStart)
+    }
+
+    @Test
+    fun `ex-dividend rebuild triggered by small bars request keeps deep window`() = runTest {
+        // 已有缓存 + 出现新除权日 → 全量重建：即使由 30 根的小请求触发，也必须拉深窗口，
+        // 防止 replaceBars 用浅历史覆盖深缓存（永久缓存语义：历史深度只增不减）
+        coEvery { klineCacheDao.getBars("sh.600036", "DAILY") } returns listOf(
+            cacheBar(today.minusDays(3).toString(), 10.0, "DAILY")
+        )
+        coEvery { klineCacheDao.getMeta("sh.600036", "DAILY") } returns
+            KlineCacheMetaEntity("sh.600036", "DAILY", System.currentTimeMillis() - 86_400_000L, "2025-06-12")
+        coEvery { dividendDao.getLatestExDividendDate("sh.600036") } returns "2026-05-11"
+        val paramSlot = slot<String>()
+        coEvery { tencentApi.getKline(capture(paramSlot)) } returns klineResponseDaily(
+            listOf(listOf(today.toString(), "9.5", "9.8", "10.0", "9.4", "800"))
+        )
+
+        repository.fetchKlines("sh.600036", KlinePeriod.DAILY, bars = 30)
+
+        coVerify(exactly = 1) { klineCacheDao.replaceBars("sh.600036", "DAILY", any()) }
+        val expectedStart = repository.buildParam("sh600036", KlinePeriod.DAILY, KlineRepository.FULL_FETCH_BARS)
+            .split(",")[2]
+        assertThat(paramSlot.captured.split(",")[2]).isEqualTo(expectedStart)
+    }
+
+    @Test
     fun `empty incremental response keeps cache and refreshes meta`() = runTest {
         coEvery { klineCacheDao.getBars("sh.600036", "DAILY") } returns listOf(
             cacheBar(today.minusDays(3).toString(), 10.0, "DAILY")

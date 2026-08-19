@@ -14,9 +14,11 @@ import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.enrichPayoutRatio
 import com.stock.dividend.data.repository.TradeStrategyRepository
+import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +69,8 @@ class StockDetailViewModelTest {
         coEvery { plane.getKlines(any(), any(), any(), any()) } returns emptyList()
         coEvery { plane.getFundamentals(any(), any()) } returns null
         coEvery { plane.refreshDividends(any()) } returns Result.success(Unit)
+        // init 触发的分红新鲜度检查（K 线股息率网格线语义，§4.2A）
+        coEvery { plane.ensureDividendsFresh(any()) } just Runs
         // enrichFundamentals 按平面真实口径用测试 dividendsFlow 补派息率（纯函数）
         coEvery { plane.enrichFundamentals(any(), any()) } coAnswers {
             val f: Fundamentals = firstArg()
@@ -573,6 +577,51 @@ class StockDetailViewModelTest {
 
         // 喂给仓库的输入快照应为当年累计 5.0%，而非单笔 2.0% 或 3.0%
         assertThat(inputSlot.captured.latestDividendYield).isEqualTo(5.0)
+    }
+
+    // endregion
+
+    // region K 线股息率网格（dps 派生 + 新鲜度触发）
+
+    @Test
+    fun `dps derives from latest yearly dividends with same-year sum`() = runTest {
+        // 2023 年 0.10；2024 年两笔 0.10 + 0.15 = 0.25 → dps 取最新年度（2024）累计 0.25
+        val dividends = listOf(
+            DividendEntity(
+                id = "sz.000001_2023-12-31", stockCode = "sz.000001",
+                reportDate = "2023-12-31", cashPerShare = 0.10, dividendYield = 2.0
+            ),
+            DividendEntity(
+                id = "sz.000001_2024-06-30", stockCode = "sz.000001",
+                reportDate = "2024-06-30", cashPerShare = 0.10, dividendYield = 2.0
+            ),
+            DividendEntity(
+                id = "sz.000001_2024-12-31", stockCode = "sz.000001",
+                reportDate = "2024-12-31", cashPerShare = 0.15, dividendYield = 3.0
+            )
+        )
+
+        val viewModel = createViewModel(dividends = dividends)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.dps).isWithin(1e-9).of(0.25)
+    }
+
+    @Test
+    fun `dps is null when no dividends`() = runTest {
+        val viewModel = createViewModel(dividends = emptyList())
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertThat(viewModel.uiState.value.dps).isNull()
+    }
+
+    @Test
+    fun `init triggers dividend freshness check through plane`() = runTest {
+        val viewModel = createViewModel()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        // K 线股息率网格线的 DPS 口径依赖分红新鲜（空表/超 7 天自动拉网）
+        coVerify(exactly = 1) { plane.ensureDividendsFresh("sz.000001") }
     }
 
     // endregion

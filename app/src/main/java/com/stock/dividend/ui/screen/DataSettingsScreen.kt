@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -23,13 +24,14 @@ import androidx.compose.ui.unit.dp
 /**
  * 「数据」设置页（设置主页的二级页面）。
  *
- * 含数据管理（备份/恢复）与 OCR 调试（临时）两个跳转入口。
+ * 含数据管理（备份/恢复）、缓存管理与 OCR 调试（临时）三个跳转入口。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DataSettingsScreen(
     onBack: () -> Unit,
     onOpenDataManagement: () -> Unit,
+    onOpenCacheManagement: () -> Unit,
     onOpenOcrDebug: () -> Unit,
 ) {
     Scaffold(
@@ -57,6 +59,12 @@ fun DataSettingsScreen(
                 description = "导入或导出本地备份文件",
                 icon = Icons.Filled.CloudSync,
                 onClick = onOpenDataManagement
+            )
+            SettingsNavRow(
+                title = "缓存管理",
+                description = "查看各类缓存条目数，按需清理；历史不可变数据永久缓存",
+                icon = Icons.Filled.CleaningServices,
+                onClick = onOpenCacheManagement
             )
             // 临时调试入口，定位 OCR 识别问题后删除
             SettingsNavRow(

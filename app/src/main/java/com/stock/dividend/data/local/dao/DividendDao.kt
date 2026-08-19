@@ -27,6 +27,10 @@ interface DividendDao {
     @Query("DELETE FROM dividends")
     suspend fun deleteAll()
 
+    /** 缓存管理：当前条目数。 */
+    @Query("SELECT COUNT(*) FROM dividends")
+    suspend fun count(): Long
+
     @Query("SELECT COALESCE(SUM(cashPerShare), 0.0) FROM dividends")
     fun observeTotalCashPerShare(): Flow<Double>
 

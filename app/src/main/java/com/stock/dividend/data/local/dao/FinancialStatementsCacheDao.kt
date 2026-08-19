@@ -16,4 +16,8 @@ interface FinancialStatementsCacheDao {
 
     @Query("DELETE FROM financial_statements_cache")
     suspend fun clear()
+
+    /** 缓存管理：当前条目数。 */
+    @Query("SELECT COUNT(*) FROM financial_statements_cache")
+    suspend fun count(): Long
 }

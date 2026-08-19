@@ -228,8 +228,12 @@ fun MainScaffold(
                 DataSettingsScreen(
                     onBack = { tabNavController.popBackStack() },
                     onOpenDataManagement = { rootNavController.navigate(Routes.BACKUP_RESTORE) },
+                    onOpenCacheManagement = { tabNavController.navigate("cacheManagement") },
                     onOpenOcrDebug = { tabNavController.navigate("ocrDebug") }
                 )
+            }
+            composable("cacheManagement") {
+                CacheManagementScreen(onBack = { tabNavController.popBackStack() })
             }
             composable("addStock") {
                 AddStockScreen(onBack = { tabNavController.popBackStack() })

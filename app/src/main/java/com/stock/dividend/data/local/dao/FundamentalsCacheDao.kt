@@ -16,4 +16,8 @@ interface FundamentalsCacheDao {
 
     @Query("DELETE FROM fundamentals_cache")
     suspend fun clear()
+
+    /** 缓存管理：当前条目数。 */
+    @Query("SELECT COUNT(*) FROM fundamentals_cache")
+    suspend fun count(): Long
 }

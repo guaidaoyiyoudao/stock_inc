@@ -23,6 +23,9 @@ interface DividendFreshnessStore {
     fun markSuccess(stockCode: String, at: Long)
 
     fun markAttempt(stockCode: String, at: Long)
+
+    /** 清空全部记账（缓存管理清理 dividends 表时联动调用：让下次访问立即重新拉网，不吃退避闭门羹）。 */
+    fun clear()
 }
 
 /** SharedPreferences 实现。单文件、每股票 2 个 long 键，量级（自选股数百只）下无性能问题。 */
@@ -42,6 +45,10 @@ class PrefsDividendFreshnessStore @Inject constructor(
 
     override fun markAttempt(stockCode: String, at: Long) {
         prefs.edit().putLong(KEY_ATTEMPT + stockCode, at).apply()
+    }
+
+    override fun clear() {
+        prefs.edit().clear().apply()
     }
 
     private companion object {

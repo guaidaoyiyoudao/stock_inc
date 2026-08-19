@@ -79,7 +79,7 @@ import com.stock.dividend.ui.component.DividendRateFallbackCard
 import com.stock.dividend.ui.component.FinanceMetric
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.ForecastComparisonCard
-import com.stock.dividend.ui.component.PriceVolumeChart
+import com.stock.dividend.ui.component.KlineYieldChart
 import com.stock.dividend.ui.component.SectionHeader
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.viewmodel.ForecastDetail
@@ -283,14 +283,18 @@ fun StockDetailScreen(
                         }
                     }
 
-                    // 近期走势（收盘价摘要 + 成交量柱），仅 klines 非空时展示
+                    // 近期走势：30 日 K 线蜡烛 + 股息率网格水平线（档位价 = 年分红 ÷ 股息率）
                     if (uiState.klines.isNotEmpty()) {
                         item {
                             Spacer(modifier = Modifier.height(8.dp))
                             SectionHeader(title = "近期走势（${uiState.klines.size} 日）")
                         }
                         item {
-                            PriceVolumeChart(bars = uiState.klines)
+                            KlineYieldChart(
+                                bars = uiState.klines,
+                                dps = uiState.dps,
+                                currentPrice = uiState.quote?.price ?: uiState.klines.lastOrNull()?.close
+                            )
                         }
                     }
 
