@@ -1,5 +1,6 @@
 package com.stock.dividend.data.repository
 
+import com.stock.dividend.data.local.entity.GridLevelWeights
 import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.entity.PriceCacheEntity
@@ -87,7 +88,8 @@ class WidgetDataRepository @Inject constructor(
                     totalCapital = plan.totalCapital,
                     currentPrice = price,
                     gridType = GridType.fromRaw(plan.gridType),
-                    dps = plan.dpsPerShare
+                    dps = plan.dpsPerShare,
+                    levelWeights = GridLevelWeights.parse(plan.levelWeights)
                 ),
                 txsByStock[plan.stockCode].orEmpty()
             )

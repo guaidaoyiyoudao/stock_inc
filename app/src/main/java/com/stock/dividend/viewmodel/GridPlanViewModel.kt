@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.local.entity.GridLevelWeights
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
@@ -94,6 +95,10 @@ data class GridPlanUiState(
     val yieldStartInput: String = "5.5",
     /** 按股息率模式：结束股息率（%，最便宜最后一档=资金用完位）。 */
     val yieldEndInput: String = "6.5",
+    /** 资金分配是否自定义逐档比例（false = 默认 1/price 反比，越便宜买越多）。 */
+    val customWeights: Boolean = false,
+    /** 自定义逐档资金比例输入（与档位同序、从最便宜档起；相对值，无需合计 100）。 */
+    val levelWeightInputs: List<String> = emptyList(),
     /** 当前选中标的的年度每股分红（元，Room 本地缓存）；按股息率模式的档位价换算基准。
      *  null = 未选标的或该股无分红数据（UI 提示无法按股息率分档）。 */
     val generatorDps: Double? = null,
@@ -164,6 +169,7 @@ class GridPlanViewModel @Inject constructor(
                     val price = prices[plan.stockCode]
                     val planTxs = transactionsByStock[plan.stockCode].orEmpty()
                     // 关联该股实际交易记录，标记各档位是否已触发（实际买入）
+                    // （自定义档位资金比例从存档 JSON 还原，null = 反比默认）
                     val result = GridCalculator.markTriggeredLevels(
                         GridCalculator.generate(
                             basePrice = plan.basePrice,
@@ -173,7 +179,8 @@ class GridPlanViewModel @Inject constructor(
                             totalCapital = plan.totalCapital,
                             currentPrice = price,
                             gridType = GridType.fromRaw(plan.gridType),
-                            dps = plan.dpsPerShare
+                            dps = plan.dpsPerShare,
+                            levelWeights = GridLevelWeights.parse(plan.levelWeights)
                         ),
                         planTxs
                     )
@@ -290,6 +297,8 @@ class GridPlanViewModel @Inject constructor(
             targetYieldInput = "6",
             yieldStartInput = "5.5",
             yieldEndInput = "6.5",
+            customWeights = false,
+            levelWeightInputs = emptyList(),
             generatorDps = null,
             anchorInfo = null,
             isAnchoring = false,
@@ -336,12 +345,67 @@ class GridPlanViewModel @Inject constructor(
     fun onBasePriceChanged(v: String) = update { copy(basePriceInput = v) }
     fun onLowPriceChanged(v: String) = update { copy(lowPriceInput = v) }
     fun onHighPriceChanged(v: String) = update { copy(highPriceInput = v) }
-    fun onGridsChanged(v: String) = update { copy(gridsInput = v) }
+
+    /** 改档数：自定义比例输入随档数伸缩（截断/按均分补位），保持与档位一一对应。 */
+    fun onGridsChanged(v: String) {
+        val s = _uiState.value
+        val grids = v.toIntOrNull()
+        val resized = if (s.customWeights && grids != null && grids >= 2) {
+            resizeWeightInputs(s.levelWeightInputs, grids)
+        } else s.levelWeightInputs
+        _uiState.value = s.copy(gridsInput = v, levelWeightInputs = resized, saveError = null)
+        recalculatePreview()
+    }
+
     fun onTotalCapitalChanged(v: String) = update { copy(totalCapitalInput = v) }
     fun onTargetYieldChanged(v: String) = update { copy(targetYieldInput = v) }
     fun onYieldStartChanged(v: String) = update { copy(yieldStartInput = v) }
     fun onYieldEndChanged(v: String) = update { copy(yieldEndInput = v) }
     fun onGridTypeChanged(v: GridType) = update { copy(gridTypeInput = v) }
+
+    /**
+     * 切换资金分配模式。切到自定义时以**当前预览的反比权重百分比**预填——
+     * 用户从合理基线微调，而不是从零手填；预览缺失（参数不全）时按均分 100/n。
+     */
+    fun onCustomWeightsChanged(enabled: Boolean) {
+        if (!enabled) {
+            update { copy(customWeights = false, levelWeightInputs = emptyList()) }
+            return
+        }
+        val s = _uiState.value
+        val grids = s.gridsInput.toIntOrNull()
+        val baseline: List<String> = when {
+            grids == null || grids < 2 -> emptyList()
+            // 预览档位可用：反比权重 = (1/价格)/Σ(1/价格)，格式化为百分比
+            s.preview?.levels?.size == grids -> {
+                val levels = s.preview!!.levels
+                val sum = levels.sumOf { 1.0 / it.price }
+                levels.map {
+                    String.format(java.util.Locale.US, "%.1f", (1.0 / it.price) / sum * 100.0)
+                }
+            }
+            else -> List(grids) { String.format(java.util.Locale.US, "%.1f", 100.0 / grids) }
+        }
+        _uiState.value = s.copy(customWeights = true, levelWeightInputs = baseline, saveError = null)
+        recalculatePreview()
+    }
+
+    /** 修改某档资金比例输入（index 与档位同序，从最便宜档起）。 */
+    fun onLevelWeightChanged(index: Int, value: String) {
+        val inputs = _uiState.value.levelWeightInputs.toMutableList()
+        if (index !in inputs.indices) return
+        inputs[index] = value
+        _uiState.value = _uiState.value.copy(levelWeightInputs = inputs, saveError = null)
+        recalculatePreview()
+    }
+
+    /** 档数变化时把比例输入伸缩到新档数：截断多余、按均分 100/n 补位新增。 */
+    private fun resizeWeightInputs(current: List<String>, grids: Int): List<String> {
+        if (current.size == grids) return current
+        val even = String.format(java.util.Locale.US, "%.1f", 100.0 / grids)
+        return if (current.size > grids) current.take(grids)
+        else current + List(grids - current.size) { even }
+    }
 
     /**
      * 智能锚定：拉取选定标的的周线 BOLL + 历史分红，结合用户目标股息率
@@ -401,6 +465,11 @@ class GridPlanViewModel @Inject constructor(
         val grids = s.gridsInput.toIntOrNull()
         val capital = s.totalCapitalInput.toDoubleOrNull()
         val price = pricesByCode.value[s.selectedStockCode]
+        // 自定义比例：非法输入（空/非数字）折算为 0 → generate 报「须为正数」参数错误，
+        // 预览可见报错且保存被阻（与参数不完整的处理口径一致）
+        val weights = if (s.customWeights && s.levelWeightInputs.isNotEmpty()) {
+            s.levelWeightInputs.map { it.toDoubleOrNull() ?: 0.0 }
+        } else null
 
         // 按股息率模式：三价由「DPS ÷ 股息率区间」换算（买入起点=DPS÷起始%，资金用完位=DPS÷结束%，
         // 参考上界=买入起点——股息率低于起始%即不追买），区间非法（结束≤起始）由 generate 报校验错。
@@ -418,7 +487,7 @@ class GridPlanViewModel @Inject constructor(
             val low = dps / (end / 100.0)
             _uiState.value = _uiState.value.copy(
                 preview = GridCalculator.generate(
-                    base, low, base, grids, capital, price, GridType.YIELD, dps
+                    base, low, base, grids, capital, price, GridType.YIELD, dps, weights
                 )
             )
             return
@@ -433,7 +502,7 @@ class GridPlanViewModel @Inject constructor(
         }
         _uiState.value = _uiState.value.copy(
             preview = GridCalculator.generate(
-                base, low, high, grids, capital, price, s.gridTypeInput
+                base, low, high, grids, capital, price, s.gridTypeInput, null, weights
             )
         )
     }
@@ -482,6 +551,13 @@ class GridPlanViewModel @Inject constructor(
             return setSaveError("参数无效：${s.preview!!.validationError}")
         }
 
+        // 自定义档位资金比例：序列化 JSON 入库（相对权重原样保存，计算时归一化）；
+        // 反比模式存 null。此处权重必有效——上方 preview 校验已拦截非法输入。
+        val levelWeightsJson = if (s.customWeights && s.levelWeightInputs.isNotEmpty()) {
+            val parsed = s.levelWeightInputs.mapNotNull { it.toDoubleOrNull()?.takeIf { w -> w > 0.0 } }
+            if (parsed.size == s.levelWeightInputs.size) GridLevelWeights.toJson(parsed) else null
+        } else null
+
         val stockName = s.stocks.firstOrNull { it.code == s.selectedStockCode }?.name
             ?: s.selectedStockCode
         val now = System.currentTimeMillis()
@@ -499,6 +575,7 @@ class GridPlanViewModel @Inject constructor(
             targetYieldPercent = endYield
                 ?: s.targetYieldInput.toDoubleOrNull()?.takeIf { it > 0.0 },
             dpsPerShare = dps,
+            levelWeights = levelWeightsJson,
             // 编辑时保留原创建时间；档位参数可能已变，旧的到档提醒状态作废
             createdAt = s.editingCreatedAt ?: now,
             lastNotifiedLevelPrice = null,
@@ -531,6 +608,9 @@ class GridPlanViewModel @Inject constructor(
         val yieldEnd = if (type == GridType.YIELD && dps != null && plan.lowPrice > 0.0) {
             String.format(java.util.Locale.US, "%.2f", dps / plan.lowPrice * 100.0)
         } else "6.5"
+        // 自定义档位资金比例回填：存档 JSON 反解（档数一致才用），编辑预览与存库分配一致
+        val storedWeights = GridLevelWeights.parse(plan.levelWeights)
+        val custom = storedWeights != null && storedWeights.size == plan.grids
         _uiState.value = _uiState.value.copy(
             showGenerator = true,
             editingId = plan.id,
@@ -547,6 +627,10 @@ class GridPlanViewModel @Inject constructor(
                 ?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "6",
             yieldStartInput = yieldStart,
             yieldEndInput = yieldEnd,
+            customWeights = custom,
+            levelWeightInputs = if (custom) {
+                storedWeights!!.map { String.format(java.util.Locale.US, "%.1f", it) }
+            } else emptyList(),
             // 编辑 YIELD 计划沿用存档 DPS（不重拉），档位不漂移；切换标的时会重拉
             generatorDps = dps,
             anchorInfo = null,
@@ -696,7 +780,8 @@ class GridPlanViewModel @Inject constructor(
                 grids = plan.grids,
                 totalCapital = plan.totalCapital,
                 gridType = GridType.fromRaw(plan.gridType),
-                dps = plan.dpsPerShare
+                dps = plan.dpsPerShare,
+                levelWeights = GridLevelWeights.parse(plan.levelWeights)
             )
             _uiState.value = _uiState.value.copy(
                 backtestingIds = _uiState.value.backtestingIds - plan.id,

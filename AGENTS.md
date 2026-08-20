@@ -26,7 +26,7 @@
 | 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.1.20-1.0.32 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 24** |
+| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 25** |
 | AI Agent | Google ADK Kotlin（AI Tab，OpenAI 兼容协议适配） | 0.6.0 |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
@@ -69,7 +69,7 @@ stock_inc/
         │   │   │
         │   │   ├── data/
         │   │   │   ├── local/
-        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=24）+ 全部 Migration（红线 #1）
+        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=25）+ 全部 Migration（红线 #1）
         │   │   │   │   ├── backup/BackupData.kt # 备份/恢复的数据载体（JSON 序列化；除 Room 表外，2026-08-03 起额外覆盖 LLM 与 AI 助手的 SharedPreferences 配置）
         │   │   │   │   ├── dao/                 # Room DAO 接口（@Dao）
         │   │   │   │   │   ├── StockDao.kt                  # 自选股（含 observeAll/observeByCode/getByCode）
@@ -107,7 +107,7 @@ stock_inc/
         │   │   │   │       ├── FireGoalEntity.kt
         │   │   │   │       ├── LivingExpenseItemEntity.kt      # 含 EXPENSE_PERIOD_MONTHLY 常量
         │   │   │   │       ├── AchievementEntity.kt
-        │   │   │   │       ├── GridPlanEntity.kt               # 网格交易计划（仅计划/提示，不下单，2026-08-04 新增）
+        │   │   │   │       ├── GridPlanEntity.kt               # 网格交易计划（仅计划/提示，不下单；含 levelWeights 自定义档位资金比例 JSON 列 + GridLevelWeights 编解码，2026-08-19 扩展）
         │   │   │   │       └── KlineCacheEntity.kt             # kline_cache + kline_cache_meta（K线永久缓存 + 除权漂移检测状态，2026-08-17 新增）
         │   │   │   │
         │   │   │   ├── remote/                  # Retrofit 接口（DI 在 NetworkModule 装配，见 §4.7/§4.9）
@@ -343,7 +343,7 @@ stock_inc/
             └── viewmodel/         # 24 个：PortfolioViewModelTest / CacheManagementViewModelTest 等（Robolectric + MockK + Turbine）
 ```
 
-**文件规模速览**（2026-08-19）：main 源集约 280 个 .kt，测试约 111 个 .kt；DB 19 张表/23 个 Migration（version=24）；AI Agent 47 个工具（34 读 + 13 写）。
+**文件规模速览**（2026-08-19）：main 源集约 280 个 .kt，测试约 112 个 .kt；DB 19 张表/24 个 Migration（version=25）；AI Agent 47 个工具（34 读 + 13 写）。
 
 ---
 
@@ -413,7 +413,7 @@ MarketDataPlane（data/plane/）
 | `HoldingCalculator` | 摊薄成本法持仓成本（卖出盈亏藏入成本，不独立展示） |
 | `RealizedPnlCalculator` | FIFO 已实现盈亏（A 股法定口径，独立于摊薄成本法） |
 | `DividendMetricsCalculator` | 分红深度（连续年数/CAGR/稳定性，2026-08-02 新增） |
-| `GridCalculator` | 网格（纯买入）档位表：等差/等比分档或**按股息率分档**（档位价=DPS÷股息率，YIELD）、1/price 反比分配资金、**无卖出档**、「下一档买」提示 |
+| `GridCalculator` | 网格（纯买入）档位表：等差/等比分档或**按股息率分档**（档位价=DPS÷股息率，YIELD）、资金默认 1/price 反比分配、**可传 levelWeights 逐档自定义资金比例**（相对权重归一化，2026-08-19 新增）、**无卖出档**、「下一档买」提示 |
 | `GridAnchorCalculator` | 网格智能锚定：买入起点=min(日/周 BOLL 下轨, 月 BOLL 中轨)、资金用完位=min(三周期下轨最低, 目标股息率底)、参考上界=月 BOLL 上轨 |
 | `GridExecutionCalculator` | 网格资金执行跟踪：已投入金额/剩余可投/已买股数/加权均价/浮盈浮盈率/进度（与 markTriggeredLevels 同口径命中，2026-08-05 新增） |
 | `LlmPromptBuilder` | 评估数据 → LLM prompt（纯函数 + 降级兜底） |
@@ -441,7 +441,7 @@ MarketDataPlane（data/plane/）
 
 ### 4.6 数据库（Room）纪律 —— 关键
 
-- **DB version 当前 = 24**，`exportSchema = false`（共 19 张表 / 23 个迁移步 `MIGRATION_1_2` … `MIGRATION_23_24`）。
+- **DB version 当前 = 25**，`exportSchema = false`（共 19 张表 / 24 个迁移步 `MIGRATION_1_2` … `MIGRATION_24_25`）。
 - 改 schema（加表/加列/改类型）**必须**：① 在 `AppDatabase` 的 `entities`/`version` 同步；② 新增 `MIGRATION_N_(N+1)` 并在 `DatabaseModule` 注册；③ `version` +1。
 - 历史迁移全部手写 `ALTER`/`CREATE`，保持这个风格。
 - 表名/列名用下划线（`dividend_income_records`、`stockCode`），实体字段用驼峰，靠 Room 注解映射。
@@ -599,6 +599,7 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 ---
 
 ## 10. 变更记录
+- 2026-08-19：**网格交易系统支持逐档自定义资金比例**（此前固定 1/price 反比分配，越便宜买越多——现可对单个档位单独配置比例，如底部档加大弹药/首档轻仓试探）。① **计算层**：`GridCalculator.generate` 新增尾参 `levelWeights: List<Double>?`（与档位同序、从最便宜档起的**相对权重**，无需合计 100，计算时归一化）；null = 反比默认（全链路旧数据/旧调用零影响）；长度≠grids 或含非正 → 参数错误「各档资金比例须为正数且与档数一致」（档位价/下一档提示不受权重影响，只改资金分配）。② **持久层**：DB v24→25（grid_plans 加可空列 `levelWeights`（JSON 数组字符串如 "[20.0,30.0,50.0]"），`MIGRATION_24_25`）；实体文件内新增 `GridLevelWeights` 编解码纯函数（toJson/parse：格式损坏/含 0 负数/空数组 → null 回退反比，绝不让脏数据炸档位计算；+5 单测）。③ **生成器 UI**：`GridPlanScreen` 新增「资金分配」区——「反比（默认）/自定义比例」FilterChip，切自定义时**以当前预览的反比权重百分比预填**（用户从合理基线微调而非从零手填，参数不全时按均分 100/n）；逐档输入行（档位价 + 比例输入框，YIELD 计划附股息率）+ 合计提示（相对比例语义，不强制 100）；预览区自定义模式下逐档展示股数/金额；改档数时权重输入随档数伸缩（截断/均分补位）。④ **VM**：UiState 加 `customWeights`/`levelWeightInputs`；非法输入（空/非数字）折算 0 → generate 报参数错误 → 预览可见报错 + 保存被阻（沿用「参数无效：…」口径，不静默）；savePlan 序列化 JSON 入库、editPlan 由存档反解回填（编辑预览与存库分配一致）；重锚定确认经 plan.copy 保留权重（资金意图不随价格重算）。⑤ **全链路透传**（否则通知/信号/小组件/Agent/回测的股数与执行进度与网格页不一致）：GridNotifyEvaluator/TodaySignalAggregator/WidgetDataRepository/GridTools（get_grid_plans 补 allocation 口径字段）/PortfolioAnalysisTools/GridBacktestCalculator/列表装配/回测入口全部传 `GridLevelWeights.parse(plan.levelWeights)`。⑥ **备份防御**：normalizeGridPlans 对损坏 JSON/档数不匹配的 levelWeights 置 null（回退反比），脏数据不让整个计划不可用；可空列无 Gson NOT NULL 撞库风险，旧备份恢复零修补。⑦ 计划卡档位表标题对自定义计划加「· 自定义比例」标记。测试净增 +20（GridCalculator 6：金标准/相对归一化/价格与下一档不变/档数不匹配/非正报错/等比与 YIELD 兼容；编解码 5；VM 7：预填/预览重算/序列化保存/非法保存阻断/编辑回填/档数伸缩/列表渲染/重锚定保留；回测 1；备份 1），全量单测过。**网格仍仅计划与提示，不自动下单**。
 - 2026-08-19：**新增「缓存管理」页（设置 → 数据 → 缓存管理）——缓存可见、可清，永久缓存策略明示**。① 新仓库 `CacheManagementRepository`（+`CacheKind` 枚举：PRICE/SEARCH/KLINE/FUNDAMENTALS/STATEMENTS/DIVIDENDS/LLM_ANALYSIS 七类，含 `permanent` 永久缓存标记与中文 label/description——K线/财务指标/三表/分红四类为历史不可变数据即永久缓存，price/search/LLM 为可随时重建的短期缓存）：`loadStats` 逐类 COUNT 统计（单 DAO 失败记 0 不拖累其余，吞异常红线 #2）+ `clear(kind)`/`clearAll` 全表清理；**清理 dividends 联动清 `DividendFreshnessStore` 记账**（接口/实现新增 `clear()`——否则退避时间戳残留，清库后 5 分钟内 getDps 吃闭门羹不重新拉网）。② `MarketDataPlane` 新增 `clearSessionCaches()`（清行情 10s/BOLL·市场 60s 内存会话缓存——堵「持久缓存清了但内存窗口还剩旧值」的死角）。③ 7 个缓存 DAO 补 `count()`（KlineCacheDao 另补 `clearAll()`=bars+meta 事务删除）——纯 @Query 增量，**不改 schema、无迁移**。④ 新 `CacheManagementViewModel`（条目加载/确认弹窗状态/单类清理/全部清理/一次性 message，`isLoading`/`isClearing` 显式复位红线 #3）+ `CacheManagementScreen`（说明卡明示永久缓存策略 + 每类条目数与「永久缓存/短期缓存」徽标 + 清理确认弹窗防误触 + 全部清理 + Snackbar 反馈；条目数千分位走 `formatEntryCount`）+ `DataSettingsScreen` 入口行 + MainScaffold `cacheManagement` 路由。清理范围只含可再生缓存，自选股/持仓/交易等用户数据不涉及。测试 +18（仓库 10：统计/逐类清理/dividends 联动/permanent 策略锁定/标签非空；VM 6：Robolectric；平面 1：清内存后同窗口重新发网；页面纯函数 1），全量 1184 过。
 
 - 2026-08-19：**个股详情页「近期走势」升级为 30 日 K 线蜡烛图 + 股息率网格水平线**（替代原 Vico 成交量柱图）。① 新纯函数 `DividendYieldGridCalculator`（§4.4 惯例，+7 单测）：档位价 `P = 年度每股分红(DPS) ÷ 股息率`（与 GridAnchorCalculator 股息底/DividendPriceScale 同公式），围绕现价隐含股息率对齐 0.5% 步长网格、仅保留 30 日价格区间内整档（典型 3~7 条），边界等值保留（EPS 容差防浮点误伤），现价缺失退区间中点锚定。② 新组件 `KlineYieldChart`（纯 Compose Canvas 自绘——Vico 开源版无蜡烛图层、MPAndroidChart 不适配双主题；+4 internal 纯函数单测）：蜡烛主图（影线+实体、十字星实体最矮 1dp、涨绿跌红随 ExtendedColors）+ 金色（tertiary）虚线股息率线带右侧自适应 gutter 标签「6.5% ¥9.23」（PercentFormatter/MoneyFormatter）+ 底部成交量迷你柱（涨跌着色减淡，保留旧图信息）+ 首末 MM-dd 日期 + 价格摘要行；DPS 缺失时图例降级「暂无分红数据，未画股息率线」，蜡烛照常渲染。③ `StockDetailViewModel`：UiState 加 `dps`（分红 collector 内经 `ForecastCalculator.latestYearlyCashPerShare` 反应式派生，手动刷新分红后自动更新），init 追加 `plane.ensureDividendsFresh`（空表/超 7 天自动拉网，§4.2A）；现价档位锚定取 `quote?.price ?: klines.last().close`（+3 VM 单测）。④ 删除 `PriceVolumeChart.kt` 及其测试（仅详情页一处使用，信息已并入新图）。⑤ **永久缓存加固**（应「这些数据需要永久缓存」核查发现的缺口）：`KlineRepository` 全量拉取（首拉/强刷/除权重建）的回看窗口此前跟随调用方 bars——小窗口调用者（详情页 30 根）触发的重建只落 ~98 根浅历史，`replaceBars` 覆盖已有深缓存且不自愈（增量只向前追加），网格回测（250 根）被静默截短；修复为固定 `FULL_FETCH_BARS=250` 深窗口（折算 ≈543 交易日 < 腾讯单次上限 640，不赌超窗截尾行为），与调用方请求条数解耦（+2 回归单测）。**不改 schema、无新网络请求**（K 线/DPS 全走平面既有链路）。

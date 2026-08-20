@@ -723,4 +723,203 @@ class GridPlanViewModelTest {
             })
         }
     }
+
+    // ── 自定义档位资金比例 ─────────────────────────────
+
+    /** 基础 mock：空计划 + 一只自选股（生成器可选）。 */
+    private fun vmWith(
+        gridRepo: GridPlanRepository = mockk(relaxed = true),
+        plane: MarketDataPlane = mockk(relaxed = true),
+        stocks: List<StockEntity> = listOf(stock())
+    ): GridPlanViewModel {
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.observeAllStocks() } returns flowOf(stocks)
+        coEvery { txRepoMock.observeAll() } returns flowOf(emptyList())
+        return GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepoMock, notifierMock)
+    }
+
+    private val txRepoMock = mockk<TransactionRepository>(relaxed = true)
+    private val notifierMock = mockk<DividendAlertNotifier>(relaxed = true)
+
+    /** 切到自定义比例：以当前预览的反比权重百分比预填（有基线可改，不是从零开始）。 */
+    @Test
+    fun `enabling custom weights prefills from inverse preview`() = runTest {
+        val vm = vmWith()
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        vm.onBasePriceChanged("10")
+        vm.onLowPriceChanged("8")
+        vm.onHighPriceChanged("12")
+        vm.onGridsChanged("4")
+        vm.onTotalCapitalChanged("100000")
+        assertThat(vm.uiState.value.preview).isNotNull()
+
+        vm.onCustomWeightsChanged(true)
+        val state = vm.uiState.value
+        assertThat(state.customWeights).isTrue()
+        assertThat(state.levelWeightInputs).hasSize(4)
+        // 预填 = 反比权重百分比：均为正、合计 ≈100、最便宜档（8 元）占比最大
+        val weights = state.levelWeightInputs.mapNotNull { it.toDoubleOrNull() }
+        assertThat(weights).hasSize(4)
+        assertThat(weights.sum()).isWithin(0.5).of(100.0)
+        assertThat(weights[0]).isGreaterThan(weights.last())
+    }
+
+    /** 修改某档比例 → 预览资金分配即时重算（档位价不变，股数/金额变）。 */
+    @Test
+    fun `editing weight input recalculates preview allocation`() = runTest {
+        val vm = vmWith()
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        vm.onBasePriceChanged("10")
+        vm.onLowPriceChanged("8")
+        vm.onHighPriceChanged("12")
+        vm.onGridsChanged("4")
+        vm.onTotalCapitalChanged("100000")
+        vm.onCustomWeightsChanged(true)
+        // 覆写为 1:1:1:3（相对权重，合计 6）→ 8 元档 1/6、10 元档 3/6=50%
+        vm.onLevelWeightChanged(0, "1")
+        vm.onLevelWeightChanged(1, "1")
+        vm.onLevelWeightChanged(2, "1")
+        vm.onLevelWeightChanged(3, "3")
+
+        val preview = vm.uiState.value.preview
+        assertThat(preview).isNotNull()
+        assertThat(preview!!.validationError).isNull()
+        assertThat(preview.levels).hasSize(4)
+        // 16666.67/8 = 2083 → 2000 股；50000/10 = 5000 股
+        assertThat(preview.levels[0].shares).isEqualTo(2000)
+        assertThat(preview.levels[3].shares).isEqualTo(5000)
+        assertThat(preview.levels[3].amount).isEqualTo(50000.0)
+    }
+
+    /** 保存自定义比例计划：权重序列化为 JSON 入库；反比计划 levelWeights = null。 */
+    @Test
+    fun `savePlan persists custom weights json`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val vm = vmWith(gridRepo)
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        vm.onBasePriceChanged("10")
+        vm.onLowPriceChanged("8")
+        vm.onHighPriceChanged("12")
+        vm.onGridsChanged("3")
+        vm.onTotalCapitalChanged("100000")
+        vm.onCustomWeightsChanged(true)
+        vm.onLevelWeightChanged(0, "20")
+        vm.onLevelWeightChanged(1, "30")
+        vm.onLevelWeightChanged(2, "50")
+        vm.savePlan()
+        advanceUntilIdle()
+
+        coVerify {
+            gridRepo.upsert(match { it.levelWeights == "[20.0,30.0,50.0]" })
+        }
+    }
+
+    /** 比例填错（留空/非正）→ 预览报参数错误，保存给出可见错误且不落库。 */
+    @Test
+    fun `invalid weight input blocks save with visible error`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val vm = vmWith(gridRepo)
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        vm.onBasePriceChanged("10")
+        vm.onLowPriceChanged("8")
+        vm.onHighPriceChanged("12")
+        vm.onGridsChanged("3")
+        vm.onTotalCapitalChanged("100000")
+        vm.onCustomWeightsChanged(true)
+        vm.onLevelWeightChanged(0, "20")
+        vm.onLevelWeightChanged(1, "")      // 留空
+        vm.onLevelWeightChanged(2, "50")
+
+        assertThat(vm.uiState.value.preview?.validationError).isNotNull()
+        vm.savePlan()
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.saveError).isNotNull()
+        coVerify(exactly = 0) { gridRepo.upsert(any()) }
+    }
+
+    /** 编辑带自定义比例的计划：权重回填输入框、预览与存库分配一致。 */
+    @Test
+    fun `editPlan backfills custom weight inputs`() = runTest {
+        val vm = vmWith()
+        vm.editPlan(plan("1").copy(grids = 3, levelWeights = "[20.0,30.0,50.0]"))
+
+        val state = vm.uiState.value
+        assertThat(state.customWeights).isTrue()
+        assertThat(state.levelWeightInputs).containsExactly("20.0", "30.0", "50.0").inOrder()
+        // 预览分配与存库权重一致：20%×10 万 = 20000 → 8 元档 2500 股；50% → 10 元档 5000 股
+        assertThat(state.preview?.levels?.get(0)?.shares).isEqualTo(2500)
+        assertThat(state.preview?.levels?.get(2)?.shares).isEqualTo(5000)
+    }
+
+    /** 改档数 → 权重输入随档数伸缩（截断/按均分补位），预览保持有效。 */
+    @Test
+    fun `changing grids resizes weight inputs`() = runTest {
+        val vm = vmWith()
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        vm.onBasePriceChanged("10")
+        vm.onLowPriceChanged("8")
+        vm.onHighPriceChanged("12")
+        vm.onGridsChanged("4")
+        vm.onTotalCapitalChanged("100000")
+        vm.onCustomWeightsChanged(true)
+
+        vm.onGridsChanged("3")   // 4 → 3：截断
+        var state = vm.uiState.value
+        assertThat(state.levelWeightInputs).hasSize(3)
+        assertThat(state.preview?.validationError).isNull()
+
+        vm.onGridsChanged("5")   // 3 → 5：按均分 100/5 补位
+        state = vm.uiState.value
+        assertThat(state.levelWeightInputs).hasSize(5)
+        assertThat(state.levelWeightInputs[4].toDoubleOrNull()).isWithin(0.05).of(20.0)
+        assertThat(state.preview?.validationError).isNull()
+    }
+
+    /** 列表渲染：带自定义比例的计划按权重分配股数（非反比默认）。 */
+    @Test
+    fun `saved plan with custom weights renders weighted allocation`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>()
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(
+            listOf(plan("1").copy(grids = 3, levelWeights = "[1.0,1.0,2.0]"))
+        )
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
+        coEvery { plane.getPricesForCodes(any()) } returns emptyMap()
+        coEvery { txRepoMock.observeAll() } returns flowOf(emptyList())
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepoMock, notifierMock)
+        advanceUntilIdle()
+
+        val result = vm.uiState.value.items.first().result
+        assertThat(result.validationError).isNull()
+        // 1:1:2 → 8 元档 25000 → 3100 股；10 元档 50000 → 5000 股（反比默认应为 2200）
+        assertThat(result.levels[0].shares).isEqualTo(3100)
+        assertThat(result.levels[2].shares).isEqualTo(5000)
+    }
+
+    /** 一键重锚定确认后：自定义比例随计划其余字段保留（比例是资金意图，不随价格重算）。 */
+    @Test
+    fun `reanchor keeps custom weights`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        coEvery { plane.getDps(any()) } returns 0.6
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.DAILY) } returns
+            com.stock.dividend.data.repository.BollBand(11.0, 12.0, 10.0)
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.WEEKLY) } returns null
+        coEvery { plane.getBoll(any(), com.stock.dividend.data.repository.KlinePeriod.MONTHLY) } returns null
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepoMock, notifierMock)
+
+        vm.reanchorPlan(plan("1").copy(levelWeights = "[20.0,30.0,50.0]", targetYieldPercent = 8.0))
+        advanceUntilIdle()
+        vm.confirmReanchor()
+        advanceUntilIdle()
+
+        coVerify {
+            gridRepo.upsert(match { it.levelWeights == "[20.0,30.0,50.0]" })
+        }
+    }
 }

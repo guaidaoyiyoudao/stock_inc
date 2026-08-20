@@ -1,5 +1,6 @@
 package com.stock.dividend.data.notification
 
+import com.stock.dividend.data.local.entity.GridLevelWeights
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.repository.GridCalculator
@@ -72,7 +73,8 @@ object GridNotifyEvaluator {
                     totalCapital = plan.totalCapital,
                     currentPrice = price,
                     gridType = GridType.fromRaw(plan.gridType),
-                    dps = plan.dpsPerShare
+                    dps = plan.dpsPerShare,
+                    levelWeights = GridLevelWeights.parse(plan.levelWeights)
                 ),
                 transactions
             )

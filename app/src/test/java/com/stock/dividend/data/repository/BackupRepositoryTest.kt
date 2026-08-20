@@ -429,4 +429,25 @@ class BackupRepositoryTest {
         val plans = normalizeGridPlans(listOf(plan), dbVersion = 22)
         assertThat(plans[0]).isEqualTo(plan)
     }
+
+    /** 自定义资金比例：合法原样透传；损坏 JSON / 档数不匹配（手改备份或旧档数残留）→ 置空回退反比默认。 */
+    @Test
+    fun `normalizeGridPlans keeps valid levelWeights and nulls corrupt or mismatched ones`() {
+        fun plan(id: String, grids: Int, levelWeights: String?) = GridPlanEntity(
+            id = id, stockCode = "sh.600036", stockName = "招商银行",
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0, grids = grids, totalCapital = 100000.0,
+            levelWeights = levelWeights
+        )
+        val plans = normalizeGridPlans(
+            listOf(
+                plan("p1", 3, "[1.0,1.0,2.0]"),   // 合法
+                plan("p2", 3, "[1.0,"),            // 损坏 JSON
+                plan("p3", 4, "[1.0,1.0]")         // 档数不匹配
+            ),
+            dbVersion = 25
+        )
+        assertThat(plans[0].levelWeights).isEqualTo("[1.0,1.0,2.0]")
+        assertThat(plans[1].levelWeights).isNull()
+        assertThat(plans[2].levelWeights).isNull()
+    }
 }

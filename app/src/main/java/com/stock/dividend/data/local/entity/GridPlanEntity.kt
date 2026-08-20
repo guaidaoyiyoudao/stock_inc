@@ -32,6 +32,9 @@ const val GRID_TYPE_YIELD = "YIELD"
  * - [dpsPerShare] 建计划时的年度每股现金分红快照（元）——**仅 YIELD 模式**的档位价
  *   换算基准（P = dps ÷ yield）。存快照而非实时拉取：分红变化不使已建计划档位漂移，
  *   需要跟进时走「一键重锚定」用最新 DPS 重算。
+ * - [levelWeights] 自定义档位资金比例（JSON 数组字符串，如 "[20.0,30.0,50.0]"，
+ *   与档位同序、从最便宜档起，**相对权重**无需合计 100）；null = 默认 1/price 反比分配
+ *   （越便宜买越多）。编解码与合法性校验见 [GridLevelWeights]。
  * - [notifyEnabled] 到档提醒开关：价格到达下一买入档时推送本地通知。
  * - [lastNotifiedLevelPrice] 上次已提醒的档位价（去重用；现价回升超过该档后清空，
  *   再次跌破可重新提醒）。仅通知检查回写，**不随 updatedAt 变动**。
@@ -65,6 +68,8 @@ data class GridPlanEntity(
     val targetYieldPercent: Double? = null,
     /** 建计划时的年度每股分红快照（元）；YIELD 模式的档位价换算基准，其余模式 null。 */
     val dpsPerShare: Double? = null,
+    /** 自定义档位资金比例（JSON 数组字符串，见 GridLevelWeights）；null = 反比默认分配。 */
+    val levelWeights: String? = null,
     /** 到档提醒开关（价格到达下一买入档时推送通知）。 */
     val notifyEnabled: Boolean = true,
     /** 上次已提醒的档位价（每档只提醒一次；现价回升超过该档后清空）。 */
@@ -72,3 +77,34 @@ data class GridPlanEntity(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
+
+/**
+ * [GridPlanEntity.levelWeights] 列的编解码（纯函数，无 Android 依赖）。
+ *
+ * 语义：各档**相对资金权重**（无需合计 100，计算时归一化），与档位列表同序
+ * （从最便宜档起）。null = 反比默认（1/price，越便宜买越多）。
+ *
+ * 解析容错：格式损坏 / 含 0、负数 / 空数组一律返回 null（回退反比默认），
+ * 绝不让脏数据炸档位计算；档数一致性由 [com.stock.dividend.data.repository.GridCalculator]
+ * 校验（权重档数 ≠ grids → 参数错误）。
+ */
+object GridLevelWeights {
+    /** 序列化为 JSON 数组字符串（如 "[20.0,30.0,50.0]"）。 */
+    fun toJson(weights: List<Double>): String = weights.joinToString(",", "[", "]")
+
+    /**
+     * 解析 levelWeights 列；null/空白/格式非法/含非正数/空数组 → null（反比默认）。
+     */
+    fun parse(raw: String?): List<Double>? {
+        val trimmed = raw?.trim()
+            ?.takeIf { it.length >= 2 && it.startsWith("[") && it.endsWith("]") }
+            ?: return null
+        val inner = trimmed.substring(1, trimmed.length - 1)
+        if (inner.isBlank()) return null  // "[]" 空数组
+        val weights = mutableListOf<Double>()
+        for (part in inner.split(",")) {
+            weights += part.trim().toDoubleOrNull() ?: return null
+        }
+        return weights.takeIf { it.all { w -> w > 0.0 } }
+    }
+}

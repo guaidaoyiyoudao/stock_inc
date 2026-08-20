@@ -1,6 +1,7 @@
 package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.entity.DividendEntity
+import com.stock.dividend.data.local.entity.GridLevelWeights
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import java.time.LocalDate
@@ -146,7 +147,8 @@ object TodaySignalAggregator {
                     totalCapital = plan.totalCapital,
                     currentPrice = current,
                     gridType = GridType.fromRaw(plan.gridType),
-                    dps = plan.dpsPerShare
+                    dps = plan.dpsPerShare,
+                    levelWeights = GridLevelWeights.parse(plan.levelWeights)
                 ),
                 input.gridTransactionsByStock[plan.stockCode].orEmpty()
             )

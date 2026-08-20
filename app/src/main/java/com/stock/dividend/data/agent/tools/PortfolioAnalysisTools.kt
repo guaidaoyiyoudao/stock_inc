@@ -3,6 +3,7 @@ package com.stock.dividend.data.agent.tools
 import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
+import com.stock.dividend.data.local.entity.GridLevelWeights
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.DividendMetricsCalculator
@@ -279,7 +280,8 @@ class GetPortfolioDiagnosisTool(
                             plan.basePrice, plan.lowPrice, plan.highPrice,
                             plan.grids, plan.totalCapital,
                             gridType = GridType.fromRaw(plan.gridType),
-                            dps = plan.dpsPerShare
+                            dps = plan.dpsPerShare,
+                        levelWeights = GridLevelWeights.parse(plan.levelWeights)
                         ),
                         planTxs
                     )

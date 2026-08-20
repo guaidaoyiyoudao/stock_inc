@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -495,15 +496,17 @@ private fun GridPlanCard(
                     // 触发进度：已触发档 / 总档（关联实际交易记录）
                     val triggeredCount = result.levels.count { it.triggered }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        // 按股息率计划：标题展示股息率区间与每档步长；价格步长模式展示步长幅度
+                        // 按股息率计划：标题展示股息率区间与每档步长；价格步长模式展示步长幅度；
+                        // 自定义资金比例计划加显式标记（股数分布与反比默认不同）
                         val firstYield = result.levels.firstOrNull()?.yieldPercent
                         val lastYield = result.levels.lastOrNull()?.yieldPercent
+                        val allocMark = if (plan.levelWeights != null) " · 自定义比例" else ""
                         Text(
                             text = if (firstYield != null && lastYield != null && result.yieldStepPercent != null) {
                                 "档位表（股息率 ${"%.1f".format(lastYield)}%→${"%.1f".format(firstYield)}%" +
-                                    "，每档 +${"%.2f".format(result.yieldStepPercent)}）"
+                                    "，每档 +${"%.2f".format(result.yieldStepPercent)}）$allocMark"
                             } else {
-                                "档位表（步长 ${"%.1f".format(result.stepPercent)}%）"
+                                "档位表（步长 ${"%.1f".format(result.stepPercent)}%）$allocMark"
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -918,10 +921,14 @@ private fun GridGeneratorSheet(
             Spacer(modifier = Modifier.height(10.dp))
             ParamField("投入总资金", state.totalCapitalInput, viewModel::onTotalCapitalChanged, "元")
 
+            // ── 资金分配：反比默认（越便宜买越多）/ 逐档自定义比例 ──
+            Spacer(modifier = Modifier.height(14.dp))
+            AllocationSection(state, viewModel)
+
             // 预览
             state.preview?.let { preview ->
                 Spacer(modifier = Modifier.height(16.dp))
-                PreviewBlock(preview)
+                PreviewBlock(preview, customWeights = state.customWeights)
             }
 
             // 保存失败提示（参数不完整/无效时可见，不再静默无反应）
@@ -948,6 +955,99 @@ private fun GridGeneratorSheet(
                 )
             }
         }
+    }
+}
+
+/** 资金分配区：反比默认（越便宜买越多）/ 逐档自定义比例（相对值，归一化分配）。 */
+@Composable
+private fun AllocationSection(state: GridPlanUiState, viewModel: GridPlanViewModel) {
+    Column {
+        Text(
+            text = "资金分配",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = !state.customWeights,
+                onClick = { viewModel.onCustomWeightsChanged(false) },
+                label = { Text("反比（默认）") }
+            )
+            FilterChip(
+                selected = state.customWeights,
+                onClick = { viewModel.onCustomWeightsChanged(true) },
+                label = { Text("自定义比例") }
+            )
+        }
+        Text(
+            text = if (state.customWeights) {
+                "逐档指定资金比例（相对值，无需合计 100）；档位从便宜到贵排列，改档数自动增减"
+            } else {
+                "默认按 1/价格 反比分配——越便宜的档买越多（低吸）"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp)
+        )
+        if (state.customWeights) {
+            val levels = state.preview?.levels.orEmpty()
+            if (levels.isNotEmpty() && levels.size == state.levelWeightInputs.size) {
+                Spacer(modifier = Modifier.height(6.dp))
+                levels.forEachIndexed { index, level ->
+                    LevelWeightRow(
+                        level = level,
+                        value = state.levelWeightInputs[index],
+                        onChange = { viewModel.onLevelWeightChanged(index, it) }
+                    )
+                }
+                // 当前输入合计（相对比例语义下仅供参考，不强制 100）
+                val sum = state.levelWeightInputs.mapNotNull { it.toDoubleOrNull() }.sum()
+                if (sum > 0.0) {
+                    Text(
+                        text = "合计 ${"%.1f".format(sum)}（按相对比例分配，无需恰好 100）",
+                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            } else {
+                Text(
+                    text = "填写上方档数与价格后，逐档比例输入随档位出现",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 单档比例输入行：左侧档位价（YIELD 计划附股息率），右侧该档资金比例输入框。 */
+@Composable
+private fun LevelWeightRow(level: GridLevel, value: String, onChange: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = MoneyFormatter.withSymbol(level.price) +
+                (level.yieldPercent?.let { " · 息 ${"%.2f".format(it)}%" } ?: ""),
+            style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        AppTextField(
+            value = value,
+            onValueChange = onChange,
+            modifier = Modifier.width(120.dp),
+            singleLine = true,
+            suffix = { Text("%") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+        )
     }
 }
 
@@ -1127,7 +1227,7 @@ private fun ParamField(
 }
 
 @Composable
-private fun PreviewBlock(result: GridResult) {
+private fun PreviewBlock(result: GridResult, customWeights: Boolean = false) {
     AppCard(elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             result.validationError?.let { err ->
@@ -1157,6 +1257,35 @@ private fun PreviewBlock(result: GridResult) {
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.End
                 )
+            }
+            // 自定义比例：逐档金额/股数实时可见（保存后在计划卡档位表可见）
+            if (customWeights) {
+                Spacer(modifier = Modifier.height(8.dp))
+                result.levels.forEach { level ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = MoneyFormatter.withSymbol(level.price),
+                            style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "${level.shares} 股",
+                            style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = MoneyFormatter.withSymbol(level.amount),
+                            style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.End
+                        )
+                    }
+                }
             }
         }
     }

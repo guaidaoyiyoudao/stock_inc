@@ -64,7 +64,7 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         KlineCacheEntity::class,
         KlineCacheMetaEntity::class
     ],
-    version = 24,
+    version = 25,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -413,6 +413,13 @@ abstract class AppDatabase : RoomDatabase() {
                         "`fetchedAt` INTEGER NOT NULL, `lastExDividendDate` TEXT, " +
                         "PRIMARY KEY(`stockCode`, `period`))"
                 )
+            }
+        }
+
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 网格自定义档位资金比例（JSON 数组字符串；null = 默认 1/price 反比分配）
+                db.execSQL("ALTER TABLE grid_plans ADD COLUMN levelWeights TEXT")
             }
         }
     }

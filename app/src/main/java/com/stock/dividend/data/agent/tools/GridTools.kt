@@ -3,6 +3,7 @@ package com.stock.dividend.data.agent.tools
 import com.google.adk.kt.tools.ToolContext
 import com.google.adk.kt.types.Schema
 import com.google.adk.kt.types.Type
+import com.stock.dividend.data.local.entity.GridLevelWeights
 import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.GridCalculator
 import com.stock.dividend.data.repository.GridType
@@ -64,7 +65,8 @@ class GetGridPlansTool(
                         totalCapital = plan.totalCapital,
                         currentPrice = price,
                         gridType = GridType.fromRaw(plan.gridType),
-                        dps = plan.dpsPerShare
+                        dps = plan.dpsPerShare,
+                        levelWeights = GridLevelWeights.parse(plan.levelWeights)
                     ),
                     planTxs
                 )
@@ -86,6 +88,10 @@ class GetGridPlansTool(
                                 "（档位价 = 每股年分红 ${plan.dpsPerShare} ÷ 股息率）")
                     }
                     put("notifyEnabled", plan.notifyEnabled)
+                    // 资金分配口径：自定义逐档比例（相对权重）或默认反比（1/price，越便宜买越多）
+                    put("allocation", GridLevelWeights.parse(plan.levelWeights)
+                        ?.joinToString("/", prefix = "自定义逐档资金比例 ", postfix = "（相对权重，归一化分配）")
+                        ?: "反比（1/价格，越便宜买越多）")
                     put("currentPrice", price)
                     result.validationError?.let { put("validationError", it) }
                     // 现价高于起点、跌破资金用完位或下方档全部已买时为 null（已买档不重复提示）

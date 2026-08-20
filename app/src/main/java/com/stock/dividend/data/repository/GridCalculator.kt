@@ -41,8 +41,9 @@ enum class GridType(val raw: String) {
  * - **资金用完位 [lowPrice]**：最后一档（最便宜）。通常由目标股息率对应价锚定
  *   （跌到此价股息率达到目标，资金全部打完）。
  * - **参考上界 [highPrice]**：仅展示「超过此价不追买」（BOLL 上轨），不参与分档。
- * - 档位在 `[lowPrice, basePrice]` 等分 [grids] 档（含两端），资金按 `1/price`
- *   反比分配——越便宜的档位买越多（低吸）。
+ * - 档位在 `[lowPrice, basePrice]` 等分 [grids] 档（含两端），资金默认按 `1/price`
+ *   反比分配——越便宜的档位买越多（低吸）；可传 [generate] 的 `levelWeights`
+ *   改为逐档自定义比例（相对权重，归一化后分配）。
  * - **下一档提示**：现价下方最近的**未触发**档（已买入的档不再提示，每档只买一次）；
  *   现价 ≤ 资金用完位或下方档全部已买时无下一档。
  *
@@ -148,6 +149,9 @@ object GridCalculator {
      * @param dps           年度每股现金分红（元）；**仅 [GridType.YIELD] 模式必填**——
      *   股息率档位价 = dps ÷ 股息率（首档 yield = dps/basePrice、末档 yield = dps/lowPrice
      *   由两端价格反推，中间档股息率等差）。缺失/非正时 YIELD 模式返回参数错误。
+     * @param levelWeights  自定义档位资金比例（**相对权重**，与档位同序、从最便宜档起，
+     *   无需合计 100，计算时归一化）；null = 默认 1/price 反比分配（越便宜买越多）。
+     *   长度 ≠ [grids] 或含非正数时返回参数错误（档位价不受影响，只改资金分配）。
      */
     fun generate(
         basePrice: Double,
@@ -157,7 +161,8 @@ object GridCalculator {
         totalCapital: Double,
         currentPrice: Double? = null,
         gridType: GridType = GridType.ARITHMETIC,
-        dps: Double? = null
+        dps: Double? = null,
+        levelWeights: List<Double>? = null
     ): GridResult {
         // 参数校验
         if (basePrice <= 0.0 || lowPrice <= 0.0 || highPrice <= 0.0) {
@@ -171,6 +176,11 @@ object GridCalculator {
         }
         if (totalCapital <= 0.0) {
             return empty("投入资金必须为正数", highPrice)
+        }
+        if (levelWeights != null &&
+            (levelWeights.size != grids || levelWeights.any { it <= 0.0 })
+        ) {
+            return empty("各档资金比例须为正数且与档数一致", highPrice)
         }
         if (gridType == GridType.YIELD && (dps == null || dps <= 0.0)) {
             return empty("按股息率网格需要分红数据（每股年分红）", highPrice)
@@ -213,10 +223,11 @@ object GridCalculator {
             round2((dpsValue / lowPrice - dpsValue / basePrice) * 100.0 / (grids - 1))
         } else null
 
-        // 资金 1/price 反比加权：越便宜买越多
-        val weightSum = prices.sumOf { 1.0 / it }
-        val levels = prices.map { price ->
-            val weight = (1.0 / price) / weightSum
+        // 资金分配：默认 1/price 反比加权（越便宜买越多）；自定义权重时按相对比例归一化
+        val weights = levelWeights ?: prices.map { 1.0 / it }
+        val weightSum = weights.sum()
+        val levels = prices.mapIndexed { index, price ->
+            val weight = weights[index] / weightSum
             val amount = totalCapital * weight
             // A 股 100 股整手向下取整
             val shares = if (amount > 0.0 && price > 0.0) {

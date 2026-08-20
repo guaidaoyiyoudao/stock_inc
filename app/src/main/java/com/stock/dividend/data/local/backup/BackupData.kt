@@ -5,6 +5,7 @@ import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.GRID_TYPE_ARITH
+import com.stock.dividend.data.local.entity.GridLevelWeights
 import com.stock.dividend.data.local.entity.GridPlanEntity
 import com.stock.dividend.data.local.entity.IndustryTargetEntity
 import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
@@ -29,6 +30,8 @@ data class BackupMetadata(
  * - `dbVersion < 21`（v20 备份）：notifyEnabled 缺失被置 false → 恢复为 true（当时无此开关，默认开）；
  * - `dbVersion < 22`：gridType 缺失为 null → 恢复为 ARITH（当时只有等差网格）。
  * gridType 的 null 兜底对任何版本都生效（防御损坏数据）。
+ * - 自定义档位资金比例（v25 起可空列）：损坏 JSON / 档数与 grids 不匹配 → 置 null
+ *   （回退反比默认），避免脏数据让档位计算报「须与档数一致」导致整个计划不可用。
  */
 fun normalizeGridPlans(plans: List<GridPlanEntity>?, dbVersion: Int): List<GridPlanEntity> {
     val list = plans.orEmpty()
@@ -37,8 +40,12 @@ fun normalizeGridPlans(plans: List<GridPlanEntity>?, dbVersion: Int): List<GridP
         // gridType 非空列：Gson 缺字段 → null。必须显式传入 copy——
         // 未指定的参数会读原对象的 null 值，触发 copy 的非空参数检查直接 NPE。
         val type = plan.gridType ?: GRID_TYPE_ARITH
-        if (dbVersion < 21) plan.copy(notifyEnabled = true, gridType = type)
-        else plan.copy(gridType = type)
+        // 资金比例合法性：解析成功且档数一致才保留
+        val weights = plan.levelWeights?.takeIf { raw ->
+            GridLevelWeights.parse(raw)?.size == plan.grids
+        }
+        val fixed = plan.copy(gridType = type, levelWeights = weights)
+        if (dbVersion < 21) fixed.copy(notifyEnabled = true) else fixed
     }
 }
 

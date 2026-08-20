@@ -44,8 +44,9 @@ data class GridBacktestResult(
  * 网格历史回测（纯函数，无 Android 依赖，便于单测）。
  *
  * 逐日推进收盘价：某档位首次出现「收盘 ≤ 档位价」即视为触发（按档位价成交，
- * 档位股数沿用 [GridCalculator.generate] 的反比分配），对照基准为窗口首日收盘
- * 一次性买入（同样总资金、A 股整手取整）。回答「过去这段行情里，这套网格值不值」。
+ * 档位股数沿用 [GridCalculator.generate] 的分配——默认反比，传 levelWeights 时按自定义比例），
+ * 对照基准为窗口首日收盘一次性买入（同样总资金、A 股整手取整）。
+ * 回答「过去这段行情里，这套网格值不值」。
  */
 object GridBacktestCalculator {
 
@@ -57,7 +58,8 @@ object GridBacktestCalculator {
         grids: Int,
         totalCapital: Double,
         gridType: GridType = GridType.ARITHMETIC,
-        dps: Double? = null
+        dps: Double? = null,
+        levelWeights: List<Double>? = null
     ): GridBacktestResult? {
         val usable = klines.filter { it.close > 0.0 }
         if (usable.size < 2) return null
@@ -69,7 +71,8 @@ object GridBacktestCalculator {
             grids = grids,
             totalCapital = totalCapital,
             gridType = gridType,
-            dps = dps
+            dps = dps,
+            levelWeights = levelWeights
         )
         if (result.validationError != null || result.levels.isEmpty()) return null
 

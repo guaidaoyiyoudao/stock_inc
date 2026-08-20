@@ -409,6 +409,112 @@ class GridCalculatorTest {
         assertThat(geom.yieldStepPercent).isNull()
     }
 
+    // ── 自定义档位资金比例（levelWeights）──────────────
+
+    /**
+     * 金标准用例：2 档（8/10 元），权重 [1, 3]（下标与档位一致，从最便宜档起）→
+     * 归一化 25%/75% → 金额 25000/75000，股数按整手 3100/7500，amount = 股数×档位价。
+     */
+    @Test
+    fun `custom weights allocate capital by given ratio`() {
+        val r = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0,
+            grids = 2, totalCapital = 100000.0,
+            levelWeights = listOf(1.0, 3.0)
+        )
+        assertThat(r.validationError).isNull()
+        assertThat(r.levels).hasSize(2)
+        val cheap = r.levels[0]   // 8 元档，权重 1 → 25%
+        val dear = r.levels[1]    // 10 元档，权重 3 → 75%
+        assertThat(cheap.price).isEqualTo(8.0)
+        assertThat(dear.price).isEqualTo(10.0)
+        // 25000/8 = 3125 → 整手 3100 股，金额 3100×8 = 24800
+        assertThat(cheap.shares).isEqualTo(3100)
+        assertThat(cheap.amount).isEqualTo(24800.0)
+        // 75000/10 = 7500 股整，金额 75000
+        assertThat(dear.shares).isEqualTo(7500)
+        assertThat(dear.amount).isEqualTo(75000.0)
+    }
+
+    /** 权重无需恰好合计 100：按相对比例归一化（[1,1,2] → 25%/25%/50%）。 */
+    @Test
+    fun `custom weights are normalized as relative ratio`() {
+        val r = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0,
+            grids = 3, totalCapital = 60000.0,
+            levelWeights = listOf(1.0, 1.0, 2.0)
+        )
+        assertThat(r.validationError).isNull()
+        // 8 元档 15000 → 1800 股（14400）；9 元档 15000 → 1600 股（14400）；10 元档 30000 → 3000 股
+        assertThat(r.levels[0].shares).isEqualTo(1800)
+        assertThat(r.levels[1].shares).isEqualTo(1600)
+        assertThat(r.levels[2].shares).isEqualTo(3000)
+        assertThat(r.levels[2].amount).isEqualTo(30000.0)
+    }
+
+    /** 自定义权重只改资金分配，不改档位价格与下一档提示。 */
+    @Test
+    fun `custom weights keep prices and next buy hint unchanged`() {
+        val inverse = GridCalculator.generate(10.0, 8.0, 12.0, 4, 100000.0, currentPrice = 9.5)
+        val custom = GridCalculator.generate(
+            10.0, 8.0, 12.0, 4, 100000.0,
+            currentPrice = 9.5, levelWeights = listOf(4.0, 3.0, 2.0, 1.0)
+        )
+        assertThat(custom.levels.map { it.price })
+            .containsExactlyElementsIn(inverse.levels.map { it.price }).inOrder()
+        assertThat(custom.nextBuyHint).isEqualTo(inverse.nextBuyHint)
+        // 权重生效证明：贵档（10 元）金额较反比默认（≈22000）下降、便宜档（8 元，≈27200）上升
+        assertThat(custom.levels.last().amount).isLessThan(inverse.levels.last().amount)
+        assertThat(custom.levels.first().amount).isGreaterThan(inverse.levels.first().amount)
+    }
+
+    /** 权重档数与 grids 不一致 → 参数错误（防编辑档数后残留旧权重）。 */
+    @Test
+    fun `custom weights size mismatch returns error`() {
+        val r = GridCalculator.generate(
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0,
+            grids = 4, totalCapital = 100000.0,
+            levelWeights = listOf(1.0, 2.0, 3.0)
+        )
+        assertThat(r.validationError).isNotNull()
+        assertThat(r.levels).isEmpty()
+    }
+
+    /** 权重含 0/负数（对应 UI 上未填/填错）→ 参数错误。 */
+    @Test
+    fun `custom weights must be all positive`() {
+        val zero = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, levelWeights = listOf(1.0, 0.0)
+        )
+        assertThat(zero.validationError).isNotNull()
+        val negative = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, levelWeights = listOf(-1.0, 2.0)
+        )
+        assertThat(negative.validationError).isNotNull()
+    }
+
+    /** 等比/按股息率模式下自定义权重同样生效（贵档可多配，覆盖反比默认）。 */
+    @Test
+    fun `custom weights work with geometric and yield grids`() {
+        val geom = GridCalculator.generate(
+            basePrice = 16.0, lowPrice = 4.0, highPrice = 20.0,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.GEOMETRIC, levelWeights = listOf(1.0, 1.0, 5.0)
+        )
+        assertThat(geom.validationError).isNull()
+        // 最贵档（16 元）拿 5/7 资金 ≈71428 → 4400 股；最便宜档（4 元）1/7 ≈14285 → 3500 股
+        assertThat(geom.levels.last().amount).isGreaterThan(geom.levels.first().amount)
+
+        val yieldGrid = GridCalculator.generate(
+            basePrice = 9.0909, lowPrice = 7.6923, highPrice = 9.0909,
+            grids = 3, totalCapital = 100000.0,
+            gridType = GridType.YIELD, dps = 0.5, levelWeights = listOf(1.0, 1.0, 1.0)
+        )
+        assertThat(yieldGrid.validationError).isNull()
+        // 等权 1/3 ≈33333：7.69 档 4300 股、8.33 档 4000 股、9.09 档 3600 股（金额基本一致）
+        assertThat(yieldGrid.levels.map { it.shares }).containsExactly(4300, 4000, 3600).inOrder()
+    }
+
     // ── 股息展望（dividendOutlook）──────────────────
 
     /** 展望 = Σ档位股数 × 每股年分红；收益率 = 年股息/总资金。 */

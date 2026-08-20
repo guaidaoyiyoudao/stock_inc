@@ -95,4 +95,18 @@ class GridBacktestCalculatorTest {
         val klines = listOf(bar("2026-01-02", 9.0), bar("2026-01-05", 8.5))
         assertThat(GridBacktestCalculator.backtest(klines, 10.0, 8.0, 12.0, 1, 100000.0)).isNull()
     }
+
+    /** 自定义比例回测：贵档多配（[1,3]）抬高网格均价，与反比默认（越便宜越多）方向相反。 */
+    @Test
+    fun `custom weights backtest allocates by given ratio`() {
+        val klines = listOf(bar("2026-01-02", 9.5), bar("2026-01-05", 7.9))
+        val inverse = GridBacktestCalculator.backtest(klines, 10.0, 8.0, 12.0, 2, 100000.0)!!
+        val custom = GridBacktestCalculator.backtest(
+            klines, 10.0, 8.0, 12.0, 2, 100000.0, levelWeights = listOf(1.0, 3.0)
+        )!!
+        assertThat(custom.triggeredCount).isEqualTo(2)
+        // 反比：@8 档 6900 股 + @10 档 4400 股，均价 ≈8.78；自定义 [1,3]：3100 + 7500 股，均价 ≈9.42
+        assertThat(custom.avgBuyPrice!!).isGreaterThan(inverse.avgBuyPrice!!)
+        assertThat(custom.avgBuyPrice).isWithin(0.01).of(9.42)
+    }
 }
