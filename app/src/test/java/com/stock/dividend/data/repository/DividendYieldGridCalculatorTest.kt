@@ -6,7 +6,8 @@ import org.junit.Test
 /**
  * 股息率网格线计算器单测（纯函数，无 Android 依赖）。
  *
- * 金标准口径：价格 P = DPS ÷ (股息率/100)；档位对齐 0.5% 步长，仅保留区间内档位。
+ * 金标准口径：价格 P = DPS ÷ (股息率/100)；档位对齐 0.5% 步长；区间内档位全保留，
+ * 且最低保证 3 档（离现价最近档 + 上下各一档，可落在区间外）。
  */
 class DividendYieldGridCalculatorTest {
 
@@ -41,13 +42,50 @@ class DividendYieldGridCalculatorTest {
     }
 
     @Test
-    fun `empty when no grid line falls in range for very low yield stock`() {
-        // DPS=0.05、现价 50（隐含 0.1%）：最低档 0.5% 对应价 10.0，远低于区间 [49, 51] → 空表
+    fun `narrow range guarantees nearest level plus one step each side`() {
+        // 现价恰在整档（隐含 6.0%）、区间极窄 [9.9,10.1]：区间内仅 6.0% 一档，
+        // 最低 3 档保证补齐上下邻档 5.5%/6.5%（价格可落在区间外，由图表扩轴）
+        val lines = DividendYieldGridCalculator.computeLines(
+            dps = 0.6, lowPrice = 9.9, highPrice = 10.1, currentPrice = 10.0
+        )
+
+        assertThat(lines.map { it.yieldPercent }).containsExactly(5.5, 6.0, 6.5).inOrder()
+        assertThat(lines.map { it.price }).containsExactly(10.91, 10.0, 9.23).inOrder()
+        assertThat(lines.map { it.belowCurrent }).containsExactly(false, false, true).inOrder()
+    }
+
+    @Test
+    fun `guarantee fills missing upper side beyond range`() {
+        // 区间 [9.0,10.5]：区内 6.0%/6.5% 两档，上邻 5.5%（10.91）在区间外但被保证保留
+        val lines = DividendYieldGridCalculator.computeLines(
+            dps = 0.6, lowPrice = 9.0, highPrice = 10.5, currentPrice = 10.0
+        )
+
+        assertThat(lines.map { it.yieldPercent }).containsExactly(5.5, 6.0, 6.5).inOrder()
+    }
+
+    @Test
+    fun `very low yield stock still guarantees three levels beyond range`() {
+        // DPS=0.05、现价 50（隐含 0.1%）：最低有效档 0.5%→10.0 远在区间 [49,51] 外，
+        // 仍保证 3 档；最近档 0.5% 的下邻越股息率下限 → 向上补足（0.5/1.0/1.5%）
         val lines = DividendYieldGridCalculator.computeLines(
             dps = 0.05, lowPrice = 49.0, highPrice = 51.0, currentPrice = 50.0
         )
 
-        assertThat(lines).isEmpty()
+        assertThat(lines.map { it.yieldPercent }).containsExactly(0.5, 1.0, 1.5).inOrder()
+        assertThat(lines.map { it.price }).containsExactly(10.0, 5.0, 3.33).inOrder()
+        assertThat(lines.all { it.belowCurrent == true }).isTrue()
+    }
+
+    @Test
+    fun `missing current price with narrow range guarantees around midpoint`() {
+        // 现价缺失：中点 10 → 隐含 6.0% → 同样保证 5.5/6.0/6.5；belowCurrent 全 null
+        val lines = DividendYieldGridCalculator.computeLines(
+            dps = 0.6, lowPrice = 9.9, highPrice = 10.1, currentPrice = null
+        )
+
+        assertThat(lines.map { it.yieldPercent }).containsExactly(5.5, 6.0, 6.5).inOrder()
+        assertThat(lines.all { it.belowCurrent == null }).isTrue()
     }
 
     @Test

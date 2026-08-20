@@ -38,7 +38,8 @@ import com.stock.dividend.ui.theme.tabularNumberStyle
  *   与全 App 财务色约定一致；十字星实体最矮 1dp 防消失。
  * - **股息率网格**：金色（tertiary，财富/分红语义色）虚线横贯，右侧标签同时标注股息率与对应价
  *   （`6.5% ¥9.23`）。档位由 [DividendYieldGridCalculator] 计算：价 = 年度每股分红 ÷ 股息率，
- *   围绕现价隐含股息率按 0.5% 步长取整档，仅保留区间内档位。[dps] 缺失时不画线（图例降级说明）。
+ *   围绕现价隐含股息率按 0.5% 步长取整档，区间内全保留且**最低保证 3 档**（最近档 + 上下各一档，
+ *   可落在蜡烛区间外，Y 轴自动扩展容纳）。[dps] 缺失时不画线（图例降级说明）。
  * - **成交量面条**：底部迷你柱按当日涨跌着色（减淡），保留旧价量图的成交量信息。
  * - **日期**：首/末两根 MM-dd，中间不标避免拥挤。
  *
@@ -93,9 +94,9 @@ fun KlineYieldChart(
         .merge(tabularNumberStyle)
         .copy(fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+    // 图例：dps 有效时计算器保证 ≥3 档（窄区间也不缩水），无需「无档位」降级文案
     val legendText = when {
         dps == null || dps <= 0.0 -> "暂无分红数据，未画股息率线 · 底部柱为成交量（手）"
-        yieldLines.isEmpty() -> "区间内无整档股息率价位（股息率过低） · 底部柱为成交量（手）"
         else -> "虚线 = 股息率价位（年分红 ${MoneyFormatter.withSymbol(dps, decimals = 4)} ÷ 股息率） · 底部柱为成交量（手）"
     }
 
@@ -149,11 +150,16 @@ fun KlineYieldChart(
                 val volH = VOLUME_PANEL_HEIGHT.toPx()
                 val dateY = volTop + volH + 2.dp.toPx()
 
-                // Y 轴范围：区间高低各留 6% 余量，蜡烛不满贴边；一字区间给 2% 防退化
-                var range = high - low
-                if (range <= 0.0) range = high.coerceAtLeast(1.0) * 0.02
-                val yMax = high + range * 0.06
-                val yMin = low - range * 0.06
+                // Y 轴范围：蜡烛区间 ∪ 股息线价（最低 3 档保证可能落在蜡烛区间外，扩轴容纳），
+                // 各留 6% 余量防贴边；退化区间给 2% 防除零
+                val lineLowest = yieldLines.minOfOrNull { it.price }
+                val lineHighest = yieldLines.maxOfOrNull { it.price }
+                val rangeLow = minOf(low, lineLowest ?: low)
+                val rangeHigh = maxOf(high, lineHighest ?: high)
+                var range = rangeHigh - rangeLow
+                if (range <= 0.0) range = rangeHigh.coerceAtLeast(1.0) * 0.02
+                val yMax = rangeHigh + range * 0.06
+                val yMin = rangeLow - range * 0.06
 
                 fun yFor(price: Double): Float = ((yMax - price) / (yMax - yMin) * priceH).toFloat()
 
