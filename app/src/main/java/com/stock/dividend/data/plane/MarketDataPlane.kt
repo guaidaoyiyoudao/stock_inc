@@ -221,8 +221,9 @@ class MarketDataPlane @Inject constructor(
         dividendRepository.getAllWithExDate()
 
     /**
-     * 最新年度每股现金分红（DPS）：先确保分红数据新鲜（空/过期自动拉网），再按
-     * [ForecastCalculator.latestYearlyCashPerShare] 计算。无分红数据返回 null。
+     * 最近一年每股现金分红（DPS，TTM 口径：最近 12 个月已除权分红合计，无近期除权时回退最新报告年
+     * 合计——修复半年派息股中期/末期跨日历年被劈半的问题）：先确保分红数据新鲜（空/过期自动拉网），
+     * 再按 [ForecastCalculator.latestYearlyCashPerShare] 计算。无分红数据返回 null。
      */
     suspend fun getDps(stockCode: String): Double? {
         runCatching { ensureDividendsFresh(stockCode) }
