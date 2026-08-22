@@ -137,7 +137,7 @@ class FundamentalsTest {
         // 财务接口若带时间后缀则 enrichPayoutRatio 查不到 → payoutRatio 永远 null（修复前 bug）
         val f = FundamentalsBuilder.build(listOf(item("2024-12-31 00:00:00", eps = 2.07)))!!
         assertThat(f.periods[0].reportDate).isEqualTo("2024-12-31")
-        val enriched = enrichPayoutRatio(f, mapOf("2024-12-31" to 0.36))
+        val enriched = enrichPayoutRatio(f, mapOf(2024 to 0.36))
         // 0.36 / 2.07 * 100 ≈ 17.39；修复 reportDate 归一化后才能匹配上
         assertThat(enriched.periods[0].payoutRatio).isNotNull()
         assertThat(enriched.periods[0].payoutRatio).isWithin(0.01).of(17.39)
@@ -177,7 +177,7 @@ class FundamentalsTest {
         val f = Fundamentals(
             periods = listOf(Fundamentals.Period("2024-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = 1.20, payoutRatio = null))
         )
-        val enriched = enrichPayoutRatio(f, mapOf("2024-12-31" to 0.30))
+        val enriched = enrichPayoutRatio(f, mapOf(2024 to 0.30))
         // 0.30 / 1.20 * 100 = 25
         assertThat(enriched.periods[0].payoutRatio).isEqualTo(25.0)
     }
@@ -187,13 +187,13 @@ class FundamentalsTest {
         val f = Fundamentals(
             periods = listOf(Fundamentals.Period("2024-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = null, payoutRatio = null))
         )
-        val enriched = enrichPayoutRatio(f, mapOf("2024-12-31" to 0.30))
+        val enriched = enrichPayoutRatio(f, mapOf(2024 to 0.30))
         assertThat(enriched.periods[0].payoutRatio).isNull()
     }
 
     @Test
     fun `enrichPayoutRatio returns null when eps is zero or negative`() {
-        val cash = mapOf("2024-12-31" to 0.30)
+        val cash = mapOf(2024 to 0.30)
         assertThat(
             Fundamentals(listOf(Fundamentals.Period("2024-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = 0.0, payoutRatio = null)))
                 .let { enrichPayoutRatio(it, cash) }.periods[0].payoutRatio
@@ -218,7 +218,7 @@ class FundamentalsTest {
         val f = Fundamentals(
             periods = listOf(Fundamentals.Period("2024-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = 1.20, payoutRatio = null))
         )
-        val enriched = enrichPayoutRatio(f, mapOf("2024-12-31" to 0.30))
+        val enriched = enrichPayoutRatio(f, mapOf(2024 to 0.30))
         assertThat(enriched.periods[0].roe).isEqualTo(10.0)
         assertThat(enriched.periods[0].debtToAssetRatio).isEqualTo(60.0)
         assertThat(enriched.periods[0].basicEps).isEqualTo(1.20)
@@ -288,5 +288,43 @@ class FundamentalsTest {
         ))
         // 前两期有有效 ROE：10.0 -> 16.0，明显上升
         assertThat(fundamentalsTrend(f) { it.roe }).isEqualTo(FundamentalsTrend.Up)
+    }
+
+    // ---------- enrichPayoutRatio：年度合计口径（2026-08-20 审计 M2 修复） ----------
+
+    @Test
+    fun `enrichPayoutRatio sums semi-annual dividends for annual report period`() {
+        // 双派息股金标准（中国移动型）：2024 年中期 2.50 + 末期 2.20 = 4.70，年报 EPS 4.80
+        // 修复前（按报告期单笔 last-wins）：年报期只匹配到一笔 → 派息率约低估一半
+        val f = Fundamentals(
+            periods = listOf(Fundamentals.Period("2024-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = 4.80, payoutRatio = null))
+        )
+        val enriched = enrichPayoutRatio(f, mapOf(2024 to 4.70))
+        assertThat(enriched.periods[0].payoutRatio).isWithin(0.01).of(4.70 / 4.80 * 100.0) // ≈ 97.92
+    }
+
+    @Test
+    fun `enrichPayoutRatio does not attach to interim report periods`() {
+        // 中期报告期（06-30）不挂年度派息率——半年 EPS 对年度分红会得约两倍错误值
+        val f = Fundamentals(
+            periods = listOf(Fundamentals.Period("2024-06-30", 10.0, 60.0, 8.0, 5.0, basicEps = 2.40, payoutRatio = null))
+        )
+        val enriched = enrichPayoutRatio(f, mapOf(2024 to 4.70))
+        assertThat(enriched.periods[0].payoutRatio).isNull()
+    }
+
+    @Test
+    fun `enrichPayoutRatio matches by dividend year across source reportDate conventions`() {
+        // 腾讯源 reportDate 恒为 nd 年份补 12-31、东财源为真实报告期——按「前 4 位年份」归一后都能匹配年报期。
+        // 这里直接锁定 plane 层 cashPerShareByDividendYear 的年合计产物：2025 年两笔 2.50+2.20 → 4.70
+        val f = Fundamentals(
+            periods = listOf(
+                Fundamentals.Period("2025-06-30", 10.0, 60.0, 8.0, 5.0, basicEps = 2.50, payoutRatio = null),
+                Fundamentals.Period("2025-12-31", 10.0, 60.0, 8.0, 5.0, basicEps = 5.00, payoutRatio = null)
+            )
+        )
+        val enriched = enrichPayoutRatio(f, mapOf(2025 to 4.70))
+        assertThat(enriched.periods[0].payoutRatio).isNull()          // 中期不挂
+        assertThat(enriched.periods[1].payoutRatio).isWithin(0.01).of(94.0) // 4.70/5.00
     }
 }

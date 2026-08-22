@@ -135,7 +135,10 @@ class KlineRepository @Inject constructor(
             .getOrDefault(emptyList())
             .map { it.toKlineBar() }
         val meta = runCatching { klineCacheDao.getMeta(stockCode, periodKey) }.getOrNull()
+        // 未来除权日（日历倒计时的已排期除权）不参与漂移检测——否则每次都会误触发一次多余的
+        // 全量重建（meta 写入后即稳定，仅浪费；ISO 日期字符串字典序即时间序）
         val latestExDate = runCatching { dividendDao.getLatestExDividendDate(stockCode) }.getOrNull()
+            ?.takeIf { it <= LocalDate.now().toString() }
 
         val qfqShifted = meta != null && latestExDate != meta.lastExDividendDate
 

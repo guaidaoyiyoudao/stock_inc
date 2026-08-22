@@ -43,12 +43,12 @@ interface MarketApi {
     /**
      * 指数现价（上证 1.000001 / 深证 0.399001 / 沪深300 1.000300 等）。
      * 复用 stock/get；f43 现价、f44 高、f45 低、f60 昨收、f170 涨跌幅 均为 ×100 整数需 ÷100；
-     * f47 成交量（手）、f48 成交额（元）原值不除。
+     * f48 成交额（元）原值不除。
      */
     @GET("api/qt/stock/get")
     suspend fun getIndexQuote(
         @Query("secid") secid: String,
-        @Query("fields") fields: String = "f43,f44,f45,f46,f47,f48,f57,f58,f60,f170",
+        @Query("fields") fields: String = "f43,f44,f45,f46,f48,f57,f58,f60,f170",
         @Query("ut") ut: String = "fa5fd1943c7b386f172d6893dbfba10b"
     ): IndexQuoteResponse
 }

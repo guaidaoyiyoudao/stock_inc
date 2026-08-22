@@ -87,6 +87,7 @@ class MarketDataRepository @Inject constructor(
     private val stockRepository: StockRepository,
     @com.stock.dividend.di.EastMoneyFundamentalApi
     private val fundamentalApi: com.stock.dividend.data.remote.FundamentalApi,
+    private val errorLogRepository: ErrorLogRepository,
 ) {
 
     /**
@@ -96,15 +97,23 @@ class MarketDataRepository @Inject constructor(
      * 实测 stock/get 对资金流字段（f66/f69/f72/f75 等）返回不完整，clist 才有全套。
      * clist 单位：净额（元）原值不除；占比（%）真实值不除（如 6.04 表示 6.04%）。
      *
-     * @param stockCode `sh.600036` / `sz.000001`。失败返回 null。
+     * ⚠️ **行归属校验（2026-08-20 审计实测）**：clist 的 `s:` 单股筛选**实际不生效**
+     * （`fs=m:1+t:2+s:600941` 返回 total=1628 全沪市列表按 fid 排序），必须请求 f12
+     * 并按代码精确匹配，否则拿到的是「当日涨幅第一名」的资金流（张冠李戴，比崩溃更隐蔽）。
+     *
+     * @param stockCode `sh.600036` / `sz.000001`。失败或响应不含该股返回 null。
      */
     suspend fun fetchCapitalFlow(stockCode: String): CapitalFlow? {
         val fs = toClistFs(stockCode) ?: return null
+        val code6 = stockCode.substringAfter(".")
         return runCatching {
             val item = marketApi.getClist(
-                pz = "1", fid = "f3", fs = fs,
-                fields = "f62,f184,f66,f69,f72,f75,f78,f81,f84,f87"
-            ).data?.diff?.firstOrNull() ?: return@runCatching null
+                pz = "5", fid = "f3", fs = fs,
+                fields = "f12,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87"
+            ).data?.diff
+                // 行归属校验：只认 f12 与请求代码一致的记录（s: 筛选失效，见上）
+                ?.firstOrNull { it.code == code6 }
+                ?: return@runCatching null
             CapitalFlow(
                 mainNetInflow = item.mainNetInflow.takeIfFinite(),
                 mainNetInflowPct = item.mainNetInflowPct.takeIfFinite(),
@@ -116,6 +125,12 @@ class MarketDataRepository @Inject constructor(
                 mediumNetInflowPct = item.mediumNetInflowPct.takeIfFinite(),
                 smallNetInflow = item.smallNetInflow.takeIfFinite(),
                 smallNetInflowPct = item.smallNetInflowPct.takeIfFinite()
+            )
+        }.onFailure {
+            errorLogRepository.record(
+                source = "市场数据",
+                message = "个股资金流获取失败（$stockCode）",
+                throwable = it,
             )
         }.getOrNull()
     }
@@ -140,6 +155,12 @@ class MarketDataRepository @Inject constructor(
             fs = "m:90+t:2",
             fields = "f2,f3,f8,f12,f14,f62,f128,f140,f136,f184"
         ).toMarketList()
+    }.onFailure {
+        errorLogRepository.record(
+            source = "市场数据",
+            message = "板块列表获取失败",
+            throwable = it,
+        )
     }.getOrDefault(emptyList())
 
     /**
@@ -167,6 +188,12 @@ class MarketDataRepository @Inject constructor(
                 fs = "b:$bkCode",
                 fields = "f2,f3,f8,f9,f12,f14,f20,f23,f100"
             ).toMarketList()
+        }.onFailure {
+            errorLogRepository.record(
+                source = "市场数据",
+                message = "行业内个股获取失败（$industryCodeOrStockCode）",
+                throwable = it,
+            )
         }.getOrDefault(emptyList())
     }
 
@@ -209,6 +236,12 @@ class MarketDataRepository @Inject constructor(
                     (maxPe == null || (item.pe != null && item.pe <= maxPe))
             }
             .take(limit.coerceIn(1, 50))
+    }.onFailure {
+        errorLogRepository.record(
+            source = "市场数据",
+            message = "全市场榜单获取失败",
+            throwable = it,
+        )
     }.getOrDefault(emptyList())
 
     /**
@@ -220,9 +253,9 @@ class MarketDataRepository @Inject constructor(
     private suspend fun resolveIndustryCode(codeOrBk: String): String? {
         // 直接传 BK 代码
         if (codeOrBk.startsWith("BK", ignoreCase = true)) return codeOrBk.uppercase()
-        // 传股票 code：取其缓存的行业名，再反查 BK 代码
+        // 传股票 code：取其缓存的行业名，再反查 BK 代码（DB 读也吞异常，红线 #2）
         val stockCode = normalizeStockCode(codeOrBk) ?: return null
-        val saved = stockRepository.observeStock(stockCode).first()
+        val saved = runCatching { stockRepository.observeStock(stockCode).first() }.getOrNull()
         val industryName = saved?.industry?.takeIf { it.isNotBlank() } ?: return null
         return findBkCodeByName(industryName)
     }
@@ -240,7 +273,15 @@ class MarketDataRepository @Inject constructor(
     /** 主要指数行情（上证/深证/沪深300/创业板/科创50/中证500/中证1000）。失败返回空。 */
     suspend fun fetchIndexQuotes(): List<IndexQuote> {
         val results = MAIN_INDICES.map { (code, secid) ->
-            runCatching { marketApi.getIndexQuote(secid).toIndexQuote(code) }.getOrNull()
+            runCatching { marketApi.getIndexQuote(secid).toIndexQuote(code) }
+                .onFailure {
+                    errorLogRepository.record(
+                        source = "市场数据",
+                        message = "指数行情获取失败（$code）",
+                        throwable = it,
+                    )
+                }
+                .getOrNull()
         }
         return results.filterNotNull()
     }
@@ -248,7 +289,15 @@ class MarketDataRepository @Inject constructor(
     /** 查询单只指数/ETF 行情（传 6 位代码，自动判市场）。 */
     suspend fun fetchIndexOrEtfQuote(code6: String): IndexQuote? {
         val secid = guessSecidByCode6(code6) ?: return null
-        return runCatching { marketApi.getIndexQuote(secid).toIndexQuote(code6) }.getOrNull()
+        return runCatching { marketApi.getIndexQuote(secid).toIndexQuote(code6) }
+            .onFailure {
+                errorLogRepository.record(
+                    source = "市场数据",
+                    message = "指数/ETF行情获取失败（$code6）",
+                    throwable = it,
+                )
+            }
+            .getOrNull()
     }
 
     /** 龙虎榜。传 code 过滤单股，不传返回当日全市场。失败返回空。 */
@@ -272,21 +321,16 @@ class MarketDataRepository @Inject constructor(
                         billboardDealAmt = it.billboardDealAmt?.takeIfFinite()
                     )
                 }
+        }.onFailure {
+            errorLogRepository.record(
+                source = "市场数据",
+                message = "龙虎榜获取失败${stockCode?.let { "（$it）" } ?: ""}",
+                throwable = it,
+            )
         }.getOrDefault(emptyList())
     }
 
     // ── 辅助：secid / fs / 单位换算 ──
-
-    /** `sh.600036` / `sz.000001` → `1.600036` / `0.000001`（push2 secid，stock/get 用）。 */
-    private fun toSecid(stockCode: String): String? {
-        val code6 = stockCode.substringAfter(".", missingDelimiterValue = stockCode)
-        val market = when {
-            stockCode.startsWith("sh.", ignoreCase = true) -> 1
-            stockCode.startsWith("sz.", ignoreCase = true) -> 0
-            else -> guessMarketByCode6(code6)
-        }
-        return market?.let { "$it.$code6" }
-    }
 
     /**
      * `sh.600036` → clist 的 `fs` 筛选串：`m:1+t:2+s:600036`（沪主板）/ `m:0+t:2+s:000001`（深主板）。
@@ -313,10 +357,10 @@ class MarketDataRepository @Inject constructor(
         return "${if (market == 1) "sh" else "sz"}.$raw"
     }
 
-    /** 按 6 位代码规则猜市场：6xxxxx→沪(1)、其余→深(0)。 */
+    /** 按 6 位代码规则猜市场：6 开头（沪股票）/5 开头（沪基金 ETF·LOF，2026-08-22 修正，此前误判深市）→ 沪(1)，其余→深(0)。 */
     private fun guessMarketByCode6(code6: String): Int? {
         if (!code6.matches(Regex("\\d{6}"))) return null
-        return if (code6.startsWith("6")) 1 else 0
+        return if (code6.startsWith("6") || code6.startsWith("5")) 1 else 0
     }
 
     /** 按 6 位代码猜 push2 secid（指数/ETF/股票统一处理）。 */
@@ -325,46 +369,6 @@ class MarketDataRepository @Inject constructor(
         MAIN_INDICES.firstOrNull { it.second.endsWith(".$code6") }?.second?.let { return it }
         // ETF / 股票：6 开头沪市 1，其余深市 0；ETF 5xxxxx 也在沪市
         return guessMarketByCode6(code6)?.let { "$it.$code6" }
-    }
-
-    /**
-     * clist 响应 → [MarketListItem] 列表。
-     * ⚠️ clist（fltt=2）返回真实值：价格/百分比/资金净额均不 ÷100（与 ulist/stock/get 不同）。
-     */
-    private fun MarketClistResponse.toMarketList(): List<MarketListItem> =
-        data?.diff?.map {
-            MarketListItem(
-                code = it.code,
-                name = it.name,
-                price = it.price.takeIfFinite(),
-                changePct = it.changePct.takeIfFinite(),
-                pe = it.pe.takeIfFinite(),
-                pb = it.pb.takeIfFinite(),
-                totalMarketCap = it.totalMarketCap.takeIfFinite(),
-                turnoverRate = it.turnoverRate.takeIfFinite(),
-                industry = it.industry,
-                mainNetInflow = it.mainNetInflow.takeIfFinite(),
-                mainNetInflowPct = it.mainNetInflowPct.takeIfFinite(),
-                leaderName = it.leaderName,
-                leaderCode = it.leaderCode,
-                leaderChangePct = it.leaderChangePct.takeIfFinite(),
-                dividendYield = it.dividendYield.takeIfFinite()
-            )
-        }.orEmpty()
-
-    private fun IndexQuoteResponse.toIndexQuote(fallbackCode: String): IndexQuote {
-        val d = data
-        return IndexQuote(
-            code = d?.code ?: fallbackCode,
-            name = d?.name,
-            price = d?.price?.div100OrNull(),
-            changePct = d?.changePct?.div100OrNull(),
-            prevClose = d?.prevClose?.div100OrNull(),
-            high = d?.high?.div100OrNull(),
-            low = d?.low?.div100OrNull(),
-            open = d?.open?.div100OrNull(),
-            amount = d?.amount?.takeIfFinite()
-        )
     }
 
     /** 行业列表排序维度。 */
@@ -393,7 +397,53 @@ class MarketDataRepository @Inject constructor(
     }
 }
 
-private fun Double.div100OrNull(): Double? = takeIf { it.isFinite() }?.div(100.0)
+/**
+ * clist 响应 → [MarketListItem] 列表（顶层 internal 纯函数，配 MarketDataRepositoryParseTest）。
+ * ⚠️ clist（fltt=2）返回真实值：价格/百分比/资金净额均不 ÷100（与 ulist/stock/get 相反，§4.9.1）。
+ * 数值脏值（null/NaN/Infinity，以及容错 Gson 把 "-" 读成的 null）一律降 null，不臆造。
+ */
+internal fun MarketClistResponse.toMarketList(): List<MarketListItem> =
+    data?.diff?.map {
+        MarketListItem(
+            code = it.code,
+            name = it.name,
+            price = it.price.takeIfFinite(),
+            changePct = it.changePct.takeIfFinite(),
+            pe = it.pe.takeIfFinite(),
+            pb = it.pb.takeIfFinite(),
+            totalMarketCap = it.totalMarketCap.takeIfFinite(),
+            turnoverRate = it.turnoverRate.takeIfFinite(),
+            industry = it.industry,
+            mainNetInflow = it.mainNetInflow.takeIfFinite(),
+            mainNetInflowPct = it.mainNetInflowPct.takeIfFinite(),
+            leaderName = it.leaderName,
+            leaderCode = it.leaderCode,
+            leaderChangePct = it.leaderChangePct.takeIfFinite(),
+            dividendYield = it.dividendYield.takeIfFinite()
+        )
+    }.orEmpty()
 
-/** 可空 Double 取有限值；null/NaN/Infinity → null。clist 字段可空，统一用本扩展。 */
-private fun Double?.takeIfFinite(): Double? = this?.takeIf { it.isFinite() }
+/**
+ * stock/get 指数响应 → [IndexQuote]（顶层 internal 纯函数，配 MarketDataRepositoryParseTest）。
+ * ⚠️ 价格类字段（f43/f44/f45/f46/f60）除数随标的类型变：指数/股票 ×100 ÷100，
+ * **场内基金（ETF/LOF）×1000 ÷1000**（实测 2026-08-22：510880 f43=3387 → 3.387，腾讯同刻 3.387）；
+ * f170 涨跌幅两类均 ×100；f48 成交额（元）原值不除（§4.9.1）。
+ */
+internal fun IndexQuoteResponse.toIndexQuote(fallbackCode: String): IndexQuote {
+    val d = data
+    val isFund = FundDividendParser.isExchangeTradedFundCode(d?.code ?: fallbackCode)
+    return IndexQuote(
+        code = d?.code ?: fallbackCode,
+        name = d?.name,
+        price = d?.price.divPriceScaleOrNull(isFund),
+        changePct = d?.changePct?.div100OrNull(),
+        prevClose = d?.prevClose.divPriceScaleOrNull(isFund),
+        high = d?.high.divPriceScaleOrNull(isFund),
+        low = d?.low.divPriceScaleOrNull(isFund),
+        open = d?.open.divPriceScaleOrNull(isFund),
+        amount = d?.amount?.takeIfFinite()
+    )
+}
+
+/** 可空 Double 取有限值；null/NaN/Infinity → null。clist 字段可空，统一用本扩展（internal 供解析测试共用）。 */
+internal fun Double?.takeIfFinite(): Double? = this?.takeIf { it.isFinite() }

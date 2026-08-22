@@ -5,6 +5,7 @@ import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendRepository
+import com.stock.dividend.data.repository.ErrorLogRepository
 import com.stock.dividend.data.repository.FinancialStatementsRepository
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
@@ -36,6 +37,7 @@ class MarketDataPlaneTest {
     private val marketDataRepository = mockk<MarketDataRepository>()
     private val bondYieldRepository = mockk<BondYieldRepository>()
     private val researchRepository = mockk<ResearchRepository>()
+    private val errorLogRepository = mockk<ErrorLogRepository>(relaxed = true)
     private val store = FakeFreshnessStore()
 
     private lateinit var plane: MarketDataPlane
@@ -57,7 +59,8 @@ class MarketDataPlaneTest {
             marketDataRepository = marketDataRepository,
             bondYieldRepository = bondYieldRepository,
             researchRepository = researchRepository,
-            dividendFreshnessStore = store
+            dividendFreshnessStore = store,
+            errorLogRepository = errorLogRepository
         )
         plane.nowProvider = { now }
     }
@@ -336,5 +339,63 @@ class MarketDataPlaneTest {
         override fun markSuccess(stockCode: String, at: Long) { success[stockCode] = at }
         override fun markAttempt(stockCode: String, at: Long) { attempt[stockCode] = at }
         override fun clear() { success.clear(); attempt.clear() }
+    }
+
+    // ── cashPerShareByDividendYear：派息率年度合计口径（2026-08-20 审计 M2）──
+
+    @Test
+    fun `cashPerShareByDividendYear sums semi-annual dividends per year`() {
+        // 中国移动型：2024 年中期（reportDate 由腾讯 nd 补成 2024-12-31）+ 东财回退源真实
+        // 报告期 2024-06-30——两种源口径按「前 4 位年份」归一后合计 4.70
+        val dividends = listOf(
+            dividend(reportDate = "2024-12-31", cashPerShare = 2.2012),
+            dividend(reportDate = "2024-06-30", cashPerShare = 2.5025),
+            dividend(reportDate = "2025-12-31", cashPerShare = 2.2916)
+        )
+        val byYear = dividends.cashPerShareByDividendYear()
+
+        assertThat(byYear[2024]!!).isWithin(1e-9).of(4.7037)
+        assertThat(byYear[2025]!!).isWithin(1e-9).of(2.2916)
+    }
+
+    @Test
+    fun `cashPerShareByDividendYear drops invalid years and non-positive amounts`() {
+        val dividends = listOf(
+            dividend(reportDate = "2024-12-31", cashPerShare = 0.30),
+            dividend(reportDate = "bad-year", cashPerShare = 1.0),   // 年份不可解析 → 剔除
+            dividend(reportDate = "2023-12-31", cashPerShare = 0.0)   // 非正金额 → 剔除
+        )
+        val byYear = dividends.cashPerShareByDividendYear()
+
+        assertThat(byYear.keys).containsExactly(2024)
+        assertThat(byYear[2024]!!).isWithin(1e-9).of(0.30)
+    }
+
+    // ── 失败日志埋点（设置 → 数据 → 失败日志） ─────────────────
+
+    @Test
+    fun `getBoll failure records error log`() = runTest {
+        coEvery { klineRepository.fetchCloses("sh.600036", KlinePeriod.WEEKLY) } throws
+            java.io.IOException("timeout")
+
+        val band = plane.getBoll("sh.600036", KlinePeriod.WEEKLY)
+
+        assertThat(band).isNull()
+        coVerify(exactly = 1) {
+            errorLogRepository.record("K线", "周线数据获取失败（sh.600036）", any(), any())
+        }
+    }
+
+    @Test
+    fun `ensureDividendsFresh failure records error log`() = runTest {
+        coEvery { dividendRepository.getDividends("sh.600036") } returns emptyList()
+        coEvery { dividendRepository.fetchAndCacheDividends(any(), any()) } returns
+            Result.failure(Exception("network"))
+
+        plane.ensureDividendsFresh("sh.600036")
+
+        coVerify(exactly = 1) {
+            errorLogRepository.record("分红", "分红数据刷新失败（sh.600036）", any(), any())
+        }
     }
 }

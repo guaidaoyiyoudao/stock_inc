@@ -42,6 +42,7 @@ class AiChatViewModelTest {
     fun send_appendsUserMessageAndResetsIsSending() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send("s1", "你好") } returns flowOf(AiChatEvent.Final("你好呀"))
@@ -61,6 +62,7 @@ class AiChatViewModelTest {
     fun partial_accumulatesThenFinalOverwrites() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send("s1", "hi") } returns flowOf(
@@ -80,6 +82,7 @@ class AiChatViewModelTest {
     fun final_closesStreamingFlag() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send("s1", "hi") } returns flowOf(
@@ -98,6 +101,7 @@ class AiChatViewModelTest {
     fun confirmationCard_canConfirmAndClear() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send(any(), any()) } returns flowOf(
@@ -121,6 +125,7 @@ class AiChatViewModelTest {
     fun cancelConfirmation_setsConfirmFalse() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send(any(), any()) } returns flowOf(
@@ -142,6 +147,7 @@ class AiChatViewModelTest {
     fun errorEvent_appendsSystemBubble() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send(any(), any()) } returns flowOf(AiChatEvent.Error("网络失败"))
@@ -158,6 +164,7 @@ class AiChatViewModelTest {
     fun withoutLlmConfig_llmConfiguredIsFalse() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(false)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns emptyList()
         coEvery { repository.createSession() } returns "s1"
         coEvery { repository.loadMessages("s1") } returns emptyList()
@@ -170,6 +177,7 @@ class AiChatViewModelTest {
     fun withoutSession_autoCreatesAndSelects() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns emptyList()
         coEvery { repository.createSession() } returns "s-new"
         coEvery { repository.loadMessages("s-new") } returns emptyList()
@@ -182,6 +190,7 @@ class AiChatViewModelTest {
     fun newSession_switchesAndClearsMessages() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.createSession() } returns "s2"
@@ -198,6 +207,7 @@ class AiChatViewModelTest {
         // 复现 web_search 真实时序：先思考（reasoning），再最终答案
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send("s1", "今天大盘") } returns flowOf(
@@ -224,6 +234,7 @@ class AiChatViewModelTest {
         // reasoning_text.done 在 Final 之前到达 → 转圈应立即停（不等 Final）
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send("s1", "hi") } returns flowOf(
@@ -246,6 +257,7 @@ class AiChatViewModelTest {
     fun selectSession_loadsMessages() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns
             listOf(AiSessionSummary("s1", "会话1", 1000), AiSessionSummary("s2", "会话2", 2000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
@@ -265,6 +277,7 @@ class AiChatViewModelTest {
     fun firstRoundInNewSession_triggersTitleGeneration() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "新会话", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send("s1", "你好") } returns flowOf(AiChatEvent.Final("你好呀"))
@@ -281,6 +294,7 @@ class AiChatViewModelTest {
     fun sessionWithTitle_skipsTitleGeneration() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "持仓分析", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send("s1", "你好") } returns flowOf(AiChatEvent.Final("你好呀"))
@@ -296,6 +310,7 @@ class AiChatViewModelTest {
     fun deleteSession_callsRepoAndRefreshesList() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.deleteSession("s1") } returns Unit
@@ -310,6 +325,7 @@ class AiChatViewModelTest {
     fun toolStatus_sequenceFinalizesPreviousAndAppendsChineseName() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         // 两个工具接连调用，最后回复：第一个工具应在第二个开始时被标记完成
@@ -338,6 +354,7 @@ class AiChatViewModelTest {
     fun errorEvent_finalizesRunningToolsAsFailed() = runTest {
         val repository = mockk<AiChatRepository>()
         coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
         coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
         coEvery { repository.loadMessages("s1") } returns emptyList()
         coEvery { repository.send(any(), any()) } returns flowOf(
@@ -352,5 +369,128 @@ class AiChatViewModelTest {
 
         val toolMsg = vm.uiState.value.messages.single { it.role == ChatRole.TOOL }
         assertThat(toolMsg.toolCall?.status).isEqualTo(ToolCallStatus.FAILED)
+    }
+
+    // ── 图片输入（多模态）──
+
+    @Test
+    fun imagePicked_addsPendingAndSendClearsBoth() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        coEvery { repository.send("s1", "", listOf(IMG)) } returns flowOf(AiChatEvent.Final("已识别"))
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        vm.onImagePicked(IMG)
+        assertThat(vm.uiState.value.pendingImages).containsExactly(IMG)
+        // 纯图片（文字为空）也允许发送
+        vm.onSend()
+        advanceUntilIdle()
+        val state = vm.uiState.value
+        assertThat(state.pendingImages).isEmpty()
+        assertThat(state.isSending).isFalse()
+        val userMsg = state.messages.first { it.role == ChatRole.USER }
+        assertThat(userMsg.images).containsExactly(IMG)
+        assertThat(userMsg.text).isEmpty()
+        coVerify(exactly = 1) { repository.send("s1", "", listOf(IMG)) }
+    }
+
+    @Test
+    fun imagePicked_capsAtThreeWithHint() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        repeat(5) { vm.onImagePicked("$IMG$it") }
+        assertThat(vm.uiState.value.pendingImages).hasSize(3)
+        assertThat(vm.uiState.value.messages.last().role).isEqualTo(ChatRole.SYSTEM)
+    }
+
+    @Test
+    fun removePendingImage_dropsOnlyThatOne() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        vm.onImagePicked("data:image/jpeg;base64,AAA")
+        vm.onImagePicked("data:image/jpeg;base64,BBB")
+        vm.onRemovePendingImage("data:image/jpeg;base64,AAA")
+        assertThat(vm.uiState.value.pendingImages).containsExactly("data:image/jpeg;base64,BBB")
+    }
+
+    @Test
+    fun imageUnsupported_appendsExplainableHint() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(false)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.modelSupportsImages).isFalse()
+        vm.onImageUnsupported()
+        val last = vm.uiState.value.messages.last()
+        assertThat(last.role).isEqualTo(ChatRole.SYSTEM)
+        assertThat(last.text).contains("不支持图片输入")
+    }
+
+    @Test
+    fun multimodalCollector_updatesState() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        assertThat(vm.uiState.value.modelSupportsImages).isTrue()
+    }
+
+    @Test
+    fun imageLoadFailed_appendsSystemHint() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns listOf(AiSessionSummary("s1", "会话1", 1000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        vm.onImageLoadFailed()
+        assertThat(vm.uiState.value.messages.last().text).isEqualTo("图片读取失败，请重试")
+    }
+
+    @Test
+    fun loadMessages_mapsHistoryImagesToUserBubble() = runTest {
+        val repository = mockk<AiChatRepository>()
+        coEvery { repository.observeConfigured() } returns flowOf(true)
+        coEvery { repository.observeMultimodal() } returns flowOf(true)
+        coEvery { repository.listSessions() } returns
+            listOf(AiSessionSummary("s1", "会话1", 1000), AiSessionSummary("s2", "会话2", 2000))
+        coEvery { repository.loadMessages("s1") } returns emptyList()
+        coEvery { repository.loadMessages("s2") } returns listOf(
+            AiSessionMessage(isUser = true, text = "导入这个", images = listOf(IMG)),
+            AiSessionMessage(isUser = false, text = "好的")
+        )
+        val vm = AiChatViewModel(repository)
+        advanceUntilIdle()
+        vm.onSelectSession("s2")
+        advanceUntilIdle()
+        val userMsg = vm.uiState.value.messages.first()
+        assertThat(userMsg.role).isEqualTo(ChatRole.USER)
+        assertThat(userMsg.images).containsExactly(IMG)
+        // 会话切换清空待发送图片
+        assertThat(vm.uiState.value.pendingImages).isEmpty()
+    }
+
+    companion object {
+        private const val IMG = "data:image/jpeg;base64,QUJD"
     }
 }

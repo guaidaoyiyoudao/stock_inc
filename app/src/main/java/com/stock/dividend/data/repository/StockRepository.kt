@@ -74,7 +74,8 @@ class StockRepository @Inject constructor(
     private val searchCacheDao: SearchCacheDao,
     private val stockTagDao: StockTagDao,
     private val klineRepository: KlineRepository,
-    private val appDatabase: AppDatabase
+    private val appDatabase: AppDatabase,
+    private val errorLogRepository: ErrorLogRepository,
 ) {
     suspend fun searchStocks(query: String): Result<List<StockSearchResult>> {
         return try {
@@ -96,8 +97,11 @@ class StockRepository @Inject constructor(
             }
 
             val response = api.searchStocks(input = query)
+            // A 股 + 场内基金（ETF/LOF）。场内基金实测口径（2026-08-22）：Classify="Fund" 且
+            // MktNum 为 "1"(沪)/"0"(深)——与 A 股同市场规则（510300/159915/161907 均如此）；
+            // 场外基金 Classify="OTCFUND"（MktNum="150"）不可行情交易，继续排除。
             val items = response.quotationCodeTable?.Data
-                ?.filter { it.Classify == "AStock" }
+                ?.filter { it.Classify == "AStock" || (it.Classify == "Fund" && (it.MktNum == "1" || it.MktNum == "0")) }
                 ?.map { item ->
                     StockSearchResult(
                         code = formatStockCode(item.MktNum, item.Code),
@@ -127,8 +131,11 @@ class StockRepository @Inject constructor(
                 try {
                     val secids = items.joinToString(",") { "${it.marketCode}.${it.code.substringAfter(".")}" }
                     val quoteResponse = quoteApi.getQuotes(secids = secids)
+                    // ulist 价格除数随标的类型变：股票 ÷100、场内基金（ETF/LOF）÷1000（§4.9 单位纪律，
+                    // 2026-08-22 实测；与 toQuoteSnapshot 同源封装 divPriceScaleOrNull）
                     val priceMap = quoteResponse.data?.diff?.associate {
-                        "${it.market}.${it.code}" to (it.price?.div(100.0))
+                        "${it.market}.${it.code}" to
+                            it.price.divPriceScaleOrNull(FundDividendParser.isExchangeTradedFundCode(it.code))
                     } ?: emptyMap()
                     val priced = items.map { item ->
                         val key = "${item.marketCode}.${item.code.substringAfter(".")}"
@@ -283,6 +290,12 @@ class StockRepository @Inject constructor(
             cachePrices(snapshots.mapValues { it.value.price })
             snapshots
         } catch (e: Exception) {
+            // 静默失败落日志（设置 → 数据 → 失败日志）；返回空 map 走缓存兜底
+            errorLogRepository.record(
+                source = "行情",
+                message = "行情获取失败（${stocks.size} 只标的）",
+                throwable = e,
+            )
             emptyMap()
         }
     }

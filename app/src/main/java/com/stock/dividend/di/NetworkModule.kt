@@ -1,9 +1,11 @@
 package com.stock.dividend.di
 
+import com.google.gson.Gson
 import com.stock.dividend.data.remote.AnnouncementApi
 import com.stock.dividend.data.remote.BondYieldApi
 import com.stock.dividend.data.remote.DividendApi
 import com.stock.dividend.data.remote.FundamentalApi
+import com.stock.dividend.data.remote.FundDividendApi
 import com.stock.dividend.data.remote.LlmApi
 import com.stock.dividend.data.remote.MarketApi
 import com.stock.dividend.data.remote.QuoteApi
@@ -17,7 +19,9 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
+import com.stock.dividend.data.remote.lenientMarketGson
 import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.converter.scalars.ScalarsConverterFactory
 import java.util.concurrent.TimeUnit
 import javax.inject.Qualifier
 import javax.inject.Singleton
@@ -53,6 +57,10 @@ object NetworkModule {
     private const val TENCENT_KLINE_BASE_URL = "https://web.ifzq.gtimg.cn/"
     private const val REPORT_API_BASE_URL = "https://reportapi.eastmoney.com/"
     private const val ANNOUNCEMENT_BASE_URL = "https://np-anotice-stock.eastmoney.com/"
+    private const val FUND_F10_BASE_URL = "https://fundf10.eastmoney.com/"
+
+    /** 东财/腾讯系接口共享 Gson（容错 "-" 占位，见 [LenientDoubleDeserializer]）。LLM 接口不共享。 */
+    private val marketGson: Gson = lenientMarketGson()
 
     @Provides
     @Singleton
@@ -89,7 +97,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(SEARCH_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(SearchApi::class.java)
     }
@@ -101,7 +109,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(DATA_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(DividendApi::class.java)
     }
@@ -113,7 +121,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(DATA_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(FundamentalApi::class.java)
     }
@@ -125,7 +133,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(TENCENT_KLINE_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(TencentDividendApi::class.java)
     }
@@ -136,7 +144,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(QUOTE_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(QuoteApi::class.java)
     }
@@ -147,7 +155,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(DATACENTER_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(BondYieldApi::class.java)
     }
@@ -158,7 +166,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(QUOTE_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(MarketApi::class.java)
     }
@@ -169,7 +177,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(REPORT_API_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(ResearchApi::class.java)
     }
@@ -180,9 +188,21 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(ANNOUNCEMENT_BASE_URL)
             .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
             .build()
             .create(AnnouncementApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideFundDividendApi(client: OkHttpClient): FundDividendApi {
+        // 返回 HTML 原文（String）：只用 ScalarsConverter，不走 Gson（HTML 非 JSON）
+        return Retrofit.Builder()
+            .baseUrl(FUND_F10_BASE_URL)
+            .client(client)
+            .addConverterFactory(ScalarsConverterFactory.create())
+            .build()
+            .create(FundDividendApi::class.java)
     }
 
     @Provides
@@ -206,6 +226,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl("http://localhost/")   // 占位；实际 URL 走 @Url
             .client(client)
+            // LLM 走标准 OpenAI 协议 JSON，不用容错 Gson（数字字段语义由协议保证）
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(LlmApi::class.java)

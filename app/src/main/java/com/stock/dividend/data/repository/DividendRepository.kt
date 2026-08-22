@@ -4,7 +4,9 @@ import com.google.gson.Gson
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.remote.DividendApi
+import com.stock.dividend.data.remote.FundDividendApi
 import com.stock.dividend.data.remote.TencentDividendApi
+import com.stock.dividend.data.remote.dto.DividendResponse
 import com.stock.dividend.data.remote.dto.TencentDividendItem
 import com.stock.dividend.di.EastMoneyDividendApi
 import com.stock.dividend.di.TencentDividendSource
@@ -22,10 +24,14 @@ import javax.inject.Singleton
 class DividendRepository @Inject constructor(
     @TencentDividendSource private val tencentApi: TencentDividendApi,
     @EastMoneyDividendApi private val eastMoneyApi: DividendApi,
+    private val fundDividendApi: FundDividendApi,
     private val dividendDao: DividendDao
 ) {
     /**
      * 拉取并写入分红记录（腾讯主源 + 东财回退/补充）。
+     *
+     * **场内基金（ETF/LOF）走专用源**：腾讯 K 线分红与东财 RPT_SHAREBONUS_DET 均不覆盖
+     * ETF（2026-08-22 实测均空），改拉基金 f10 分红送配页解析（见 [FundDividendParser]）。
      *
      * **历史保留式写入**（历史分红不可变）：只定点删除本次结果覆盖到的行（同 id 或同除权日），
      * 腾讯拉取窗口（~6 年）之外的历史行永续累积，不随窗口滑动丢失；双源均无数据时不清库
@@ -33,12 +39,17 @@ class DividendRepository @Inject constructor(
      */
     suspend fun fetchAndCacheDividends(stockCode: String, securityCode: String): Result<Unit> {
         return try {
-            val fromTencent = fetchFromTencent(stockCode, securityCode)
-            val usedEastMoneyFallback = fromTencent.isEmpty()
-            val entities = if (usedEastMoneyFallback) {
-                fetchFromEastMoney(stockCode, securityCode)
+            var usedEastMoneyFallback = false
+            val entities = if (FundDividendParser.isExchangeTradedFund(stockCode)) {
+                fetchFundDividends(stockCode)
             } else {
-                enrichDividendYieldFromEastMoney(stockCode, securityCode, fromTencent)
+                val fromTencent = fetchFromTencent(stockCode, securityCode)
+                usedEastMoneyFallback = fromTencent.isEmpty()
+                if (usedEastMoneyFallback) {
+                    fetchFromEastMoney(stockCode, securityCode)
+                } else {
+                    enrichAndMergeFromEastMoney(stockCode, securityCode, fromTencent)
+                }
             }
 
             if (entities.isEmpty()) {
@@ -93,6 +104,21 @@ class DividendRepository @Inject constructor(
         return dividendDao.getLatestByStock(stockCode)
     }
 
+    // ── 场内基金（ETF/LOF）专用源 ────────────────────────────────
+
+    /**
+     * 基金 f10 分红送配页拉取。失败静默返回空（与腾讯主源同语义）——
+     * f10 页对未分红基金会返回「暂无分红」空表，同样得到空列表、不误清历史。
+     */
+    private suspend fun fetchFundDividends(stockCode: String): List<DividendEntity> {
+        val html = try {
+            fundDividendApi.getFundDividendHtml(stockCode.substringAfter("."))
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        return FundDividendParser.parseDividendHtml(html, stockCode)
+    }
+
     // ── 腾讯（主源）──────────────────────────────────────────────
 
     private suspend fun fetchFromTencent(
@@ -130,19 +156,20 @@ class DividendRepository @Inject constructor(
     }
 
     /**
-     * 腾讯 fqkline 单次上限约 640 个交易日（≈2.5 年）。为覆盖近 5 年分红，
-     * 按日期窗口分两块请求并合并：块1=最近 ~3 年，块2=再往前 ~3 年。
+     * 腾讯 fqkline 单次上限约 640 个交易日（≈2.6 年），**超出时锚定最新端截头**——
+     * 2026-08-20 审计实测：请求 3 年窗口（≈730 交易日）返回首根比请求起点晚 4 个月，
+     * 落在截断洞里的除权分红（如中国移动 2023-09-01 的 10派22.247）**永久丢失**。
+     * 故分**三块、每块 2 年**（≈487 交易日 < 640 必完整返回，不赌超窗截断行为，
+     * 与 KlineRepository.FULL_FETCH_BARS 的纪律一致），端点相接覆盖近 6 年；
+     * 块边界日重复请求由 [fetchTencentWindow] 返回 Map 按除权日去重。
      */
     private suspend fun fetchAllDividendsFromTencent(tencentCode: String): List<TencentDividendItem> {
         val today = LocalDate.now()
-        val block1End = today
-        val block1Start = today.minusYears(3)
-        val block2End = block1Start.minusDays(1)
-        val block2Start = block2End.minusYears(3)
 
         val merged = LinkedHashMap<String, TencentDividendItem>()
-        merged.putAll(fetchTencentWindow(tencentCode, block1Start, block1End))
-        merged.putAll(fetchTencentWindow(tencentCode, block2Start, block2End))
+        merged.putAll(fetchTencentWindow(tencentCode, today.minusYears(2), today))
+        merged.putAll(fetchTencentWindow(tencentCode, today.minusYears(4), today.minusYears(2)))
+        merged.putAll(fetchTencentWindow(tencentCode, today.minusYears(6), today.minusYears(4)))
         return merged.values.toList()
     }
 
@@ -173,29 +200,39 @@ class DividendRepository @Inject constructor(
     // ── 东方财富（补充/回退）──────────────────────────────────────
 
     /**
-     * 腾讯主源无股息率字段（[fetchFromTencent] 落地 dividendYield=null），
-     * 用东方财富分红明细按除权日对齐补充历史股息率快照。
-     * 仅补 dividendYield 一个字段；东财失败/无匹配时静默返回原列表，不影响主源数据。
+     * 东财明细对腾讯主数据的补充（同一请求两用）：① 按除权日对齐补 [DividendEntity.dividendYield]
+     * 历史股息率快照（腾讯无此字段）；② 合并**已排期未除权**记录——腾讯分红嵌在历史 K 线里、只有
+     * 已除权日的记录，「实施公告已发布、除权日在未来」的分红（如年度分红明天除权）只能来自东财。
+     * 预案（exDate=null，金额可能变）不合并；东财失败/无数据时静默返回原列表，不影响主源数据。
      */
-    private suspend fun enrichDividendYieldFromEastMoney(
+    private suspend fun enrichAndMergeFromEastMoney(
         stockCode: String,
         securityCode: String,
         entities: List<DividendEntity>
     ): List<DividendEntity> {
-        val yieldByExDate = runCatching {
+        val items = runCatching {
             eastMoneyApi.getDividends(filter = dividendFilter(stockCode, securityCode))
                 .result?.data.orEmpty()
         }.getOrDefault(emptyList())
-            .mapNotNull { item ->
-                val exDate = item.exDividendDate?.toDateOnlyOrNull() ?: return@mapNotNull null
-                val yieldPct = item.dividentRatio?.let { it * 100.0 } ?: return@mapNotNull null
-                exDate to yieldPct
-            }
-            .toMap()
-        if (yieldByExDate.isEmpty()) return entities
-        return entities.map {
-            it.copy(dividendYield = it.dividendYield ?: yieldByExDate[it.exDividendDate])
-        }
+        if (items.isEmpty()) return entities
+
+        val expectedSecuCode = stockCode.toEastmoneySecuCode()
+        val yieldByExDate = items.mapNotNull { item ->
+            val exDate = item.exDividendDate?.toDateOnlyOrNull() ?: return@mapNotNull null
+            val yieldPct = item.dividentRatio?.let { it * 100.0 } ?: return@mapNotNull null
+            exDate to yieldPct
+        }.toMap()
+
+        // 已排期未除权 = exDate 已定但腾讯按除权日没有对应记录（腾讯只有已除权的）
+        val tencentExDates = entities.mapNotNull { it.exDividendDate }.toSet()
+        val scheduledOnly = items.mapNotNull { item ->
+            item.exDividendDate?.toDateOnlyOrNull()
+                ?.takeIf { it !in tencentExDates }
+                ?.let { toEastMoneyEntity(item, stockCode, expectedSecuCode) }
+        }.distinctBy { it.exDividendDate }
+
+        return entities.map { it.copy(dividendYield = it.dividendYield ?: yieldByExDate[it.exDividendDate]) } +
+            scheduledOnly
     }
 
     /** 东财分红明细查询过滤条件：优先精确 SECUCODE，退化为 SECURITY_CODE。 */
@@ -212,32 +249,41 @@ class DividendRepository @Inject constructor(
     ): List<DividendEntity> {
         val expectedSecuCode = stockCode.toEastmoneySecuCode()
         val filter = dividendFilter(stockCode, securityCode)
+        // 数值脏值（"-" 占位）由 NetworkModule 的容错 Gson 兜（"-"→null，2026-08-20 审计 M1/M6），
+        // 网络异常保持向上传播——双源都失败时 fetchAndCacheDividends 需给出用户可感知的错误信息
         val response = eastMoneyApi.getDividends(filter = filter)
         val items = response.result?.data ?: emptyList()
 
-        return items.mapNotNull { item ->
-            if (expectedSecuCode != null &&
-                item.secuCode != null &&
-                !item.secuCode.equals(expectedSecuCode, ignoreCase = true)
-            ) {
-                return@mapNotNull null
-            }
-            val reportDate = item.reportDate.toDateOnlyOrNull() ?: return@mapNotNull null
-            val cashRatio = item.pretaxBonusRmb ?: return@mapNotNull null
-            if (cashRatio <= 0) return@mapNotNull null
+        return items.mapNotNull { toEastMoneyEntity(it, stockCode, expectedSecuCode) }
+    }
 
-            DividendEntity(
-                id = "${stockCode}_${reportDate}",
-                stockCode = stockCode,
-                reportDate = reportDate,
-                cashPerShare = cashRatio / 10.0,
-                dividendYield = item.dividentRatio?.let { it * 100.0 },
-                exDividendDate = item.exDividendDate.toDateOnlyOrNull(),
-                recordDate = item.equityRecordDate.toDateOnlyOrNull(),
-                planNoticeDate = item.planNoticeDate.toDateOnlyOrNull(),
-                planStatus = item.assignProgress
-            )
+    /** 东财明细 → 实体（回退全量与「已排期未除权」合并共用；PRETAX_BONUS_RMB 每10股派息需 ÷10）。 */
+    private fun toEastMoneyEntity(
+        item: DividendResponse.DividendItem,
+        stockCode: String,
+        expectedSecuCode: String?
+    ): DividendEntity? {
+        if (expectedSecuCode != null &&
+            item.secuCode != null &&
+            !item.secuCode.equals(expectedSecuCode, ignoreCase = true)
+        ) {
+            return null
         }
+        val reportDate = item.reportDate.toDateOnlyOrNull() ?: return null
+        val cashRatio = item.pretaxBonusRmb ?: return null
+        if (cashRatio <= 0) return null
+
+        return DividendEntity(
+            id = "${stockCode}_${reportDate}",
+            stockCode = stockCode,
+            reportDate = reportDate,
+            cashPerShare = cashRatio / 10.0,
+            dividendYield = item.dividentRatio?.let { it * 100.0 },
+            exDividendDate = item.exDividendDate.toDateOnlyOrNull(),
+            recordDate = item.equityRecordDate.toDateOnlyOrNull(),
+            planNoticeDate = item.planNoticeDate.toDateOnlyOrNull(),
+            planStatus = item.assignProgress
+        )
     }
 
     companion object {

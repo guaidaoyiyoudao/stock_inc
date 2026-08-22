@@ -49,8 +49,10 @@ data class QuoteSnapshot(
 /**
  * 把 [QuoteItem]（东方财富裸值）转成应用内单位（[QuoteSnapshot]）。纯函数，无 Android 依赖。
  *
- * 裸值 ÷100 规则（实测 2026-08，招行 600036 交叉验证腾讯 qt 同时刻可读值）：
- * - 价格/百分比类（f2/f3/f4/f7/f8/f9/f10/f15/f16/f17/f18/f23）接口省小数点传整数，需 ÷100；
+ * 裸值除数规则（实测 2026-08-22，腾讯 qt 同时刻交叉验证；股票 600519/000001、基金 510880/159915/518880）：
+ * - **价格类**（f2/f4/f15/f16/f17/f18）：股票 ×100 整数 ÷100；**场内基金（ETF/LOF）报价 3 位小数，
+ *   裸值为 ×1000**（510880 f2=3387 → 3.387 元）须 ÷1000——同一接口同一字段，除数随标的类型变；
+ * - 百分比类（f3/f7/f8/f9/f10/f23）两类标的均 ×100 ÷100（基金 f3=137 → 1.37%）；
  * - 绝对量类（f5 成交量手、f6 成交额元、f20 总市值元、f21 流通市值元）原值不除。
  *
  * 缺失/异常值（null、非有限、"-"/"")一律降为 null，绝不臆造（宪法原则 III：不换算原始数据，
@@ -63,15 +65,19 @@ data class QuoteSnapshot(
 fun toQuoteSnapshot(item: QuoteItem): QuoteSnapshot {
     val prefix = if (item.market == 1) "sh" else "sz"
     val stockCode = "$prefix.${item.code}"
+    // 价格类字段除数：场内基金 ×1000、其余 ×100（见函数头注释）
+    val priceScale: (Double?) -> Double? = { raw ->
+        raw.divPriceScaleOrNull(isFund = FundDividendParser.isExchangeTradedFundCode(item.code))
+    }
     return QuoteSnapshot(
         stockCode = stockCode,
-        price = item.price?.div100OrNull(),
+        price = priceScale(item.price),
         changePct = item.changePct?.div100OrNull(),
-        change = item.change?.div100OrNull(),
-        open = item.open?.div100OrNull(),
-        prevClose = item.prevClose?.div100OrNull(),
-        high = item.high?.div100OrNull(),
-        low = item.low?.div100OrNull(),
+        change = priceScale(item.change),
+        open = priceScale(item.open),
+        prevClose = priceScale(item.prevClose),
+        high = priceScale(item.high),
+        low = priceScale(item.low),
         volume = item.volume?.takeIf { it.isFinite() },
         amount = item.amount?.takeIf { it.isFinite() },
         amplitude = item.amplitude?.div100OrNull(),
@@ -84,5 +90,12 @@ fun toQuoteSnapshot(item: QuoteItem): QuoteSnapshot {
     )
 }
 
-/** 裸值 ÷100；非有限值（NaN/Infinity）降为 null，避免污染下游计算。 */
-private fun Double.div100OrNull(): Double? = takeIf { it.isFinite() }?.div(100.0)
+/** 裸值 ÷100；非有限值（NaN/Infinity）降为 null，避免污染下游计算。internal 供同包解析点共用（§4.9.5-2 单点封装）。 */
+internal fun Double.div100OrNull(): Double? = takeIf { it.isFinite() }?.div(100.0)
+
+/**
+ * 价格类裸值按标的类型选除数：场内基金（ETF/LOF）÷1000、其余 ÷100。
+ * 接收者可空（clist/ulist 字段可空，§4.9.5-2 可空接收者约定）；非有限值降 null。
+ */
+internal fun Double?.divPriceScaleOrNull(isFund: Boolean): Double? =
+    takeIf { it != null && it.isFinite() }?.div(if (isFund) 1000.0 else 100.0)

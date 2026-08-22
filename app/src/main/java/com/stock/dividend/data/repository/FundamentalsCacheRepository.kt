@@ -27,9 +27,22 @@ class FundamentalsCacheRepository @Inject constructor(
 
         val remote = runCatching { stockRepository.fetchFundamentals(stockCode) }.getOrNull()
         if (remote != null) {
-            // 历史期次不可变：远端窗口没返回的旧期次从缓存续接，不随刷新丢失
+            // 历史期次不可变：远端窗口没返回的旧期次从缓存续接，不随刷新丢失；
+            // 同期远端字段为 null（资产负债表子接口失败降级空表）时回退缓存已有值，防字段级回退
             val cachedPeriods = cached?.let { parse(it.payload)?.periods }.orEmpty()
-            val merged = Fundamentals(mergeByReportDate(cachedPeriods, remote.periods) { it.reportDate })
+            val merged = Fundamentals(
+                mergeByReportDate(cachedPeriods, remote.periods, { it.reportDate }) { r, c ->
+                    r.copy(
+                        roe = r.roe ?: c.roe,
+                        debtToAssetRatio = r.debtToAssetRatio ?: c.debtToAssetRatio,
+                        revenueYoy = r.revenueYoy ?: c.revenueYoy,
+                        netProfitYoy = r.netProfitYoy ?: c.netProfitYoy,
+                        basicEps = r.basicEps ?: c.basicEps,
+                        announceYield = r.announceYield ?: c.announceYield,
+                        dividendPlan = r.dividendPlan ?: c.dividendPlan
+                    )
+                }
+            )
             runCatching {
                 fundamentalsCacheDao.upsert(
                     FundamentalsCacheEntity(

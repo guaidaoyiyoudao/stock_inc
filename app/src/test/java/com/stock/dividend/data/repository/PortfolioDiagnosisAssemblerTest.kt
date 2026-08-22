@@ -5,6 +5,7 @@ import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.local.entity.StockEntity
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -112,5 +113,18 @@ class PortfolioDiagnosisAssemblerTest {
         assertThat(d!!.holdingCount).isEqualTo(1)
         assertThat(d.weightedDividendYieldPct).isNull()
         assertThat(d.yieldSpreadPct).isNull()
+    }
+
+    @Test
+    fun `ensures dividends freshness before reading - same policy as getDps`() = runTest {
+        // 2026-08-20 审计 M7 修复：此前只读本地（getDividends 不触发 ensureFresh），
+        // 从未刷新过分红的股票在诊断里股息率为 null，而同会话其他工具却有值
+        coEvery { plane.getDividends(any()) } returns emptyList()
+        coEvery { plane.get10YBondYield(any()) } returns 3.0
+
+        PortfolioDiagnosisAssembler(plane).assemble(listOf(stock("sh.600036")), mapOf("sh.600036" to 10.0))
+
+        coVerify(exactly = 1) { plane.ensureDividendsFresh("sh.600036") }
+        coVerify(exactly = 1) { plane.getDividends("sh.600036") }
     }
 }

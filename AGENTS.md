@@ -26,7 +26,7 @@
 | 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.1.20-1.0.32 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 25** |
+| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 26** |
 | AI Agent | Google ADK Kotlin（AI Tab，OpenAI 兼容协议适配） | 0.6.0 |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
@@ -69,7 +69,7 @@ stock_inc/
         │   │   │
         │   │   ├── data/
         │   │   │   ├── local/
-        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=25）+ 全部 Migration（红线 #1）
+        │   │   │   │   ├── AppDatabase.kt       # Room DB（version=26）+ 全部 Migration（红线 #1）
         │   │   │   │   ├── backup/BackupData.kt # 备份/恢复的数据载体（JSON 序列化；除 Room 表外，2026-08-03 起额外覆盖 LLM 与 AI 助手的 SharedPreferences 配置）
         │   │   │   │   ├── dao/                 # Room DAO 接口（@Dao）
         │   │   │   │   │   ├── StockDao.kt                  # 自选股（含 observeAll/observeByCode/getByCode）
@@ -89,7 +89,8 @@ stock_inc/
         │   │   │   │   │   ├── LivingExpenseItemDao.kt      # 生活支出项
         │   │   │   │   │   ├── AchievementDao.kt            # 成就解锁记录
         │   │   │   │   │   ├── GridPlanDao.kt               # 网格交易计划（2026-08-04 新增）
-        │   │   │   │   │   └── KlineCacheDao.kt             # K线缓存（getBars/upsertBars/replaceBars/trimToRecent/meta，2026-08-17 新增）
+        │   │   │   │   │   ├── KlineCacheDao.kt             # K线缓存（getBars/upsertBars/replaceBars/trimToRecent/meta，2026-08-17 新增）
+        │   │   │   │   │   └── ErrorLogDao.kt               # 失败日志（observeAll/latest/count/clearAll/trimToRecent，2026-08-20 新增）
         │   │   │   │   └── entity/             # @Entity（表名下划线、字段驼峰，Room 注解映射）
         │   │   │   │       ├── StockEntity.kt              # stocks：含 shares/costPerShare/industry/buyThresholdMultiplier
         │   │   │   │       ├── DividendEntity.kt          # dividends：报告期/每股分红/股息率/除权日
@@ -109,6 +110,7 @@ stock_inc/
         │   │   │   │       ├── AchievementEntity.kt
         │   │   │   │       ├── GridPlanEntity.kt               # 网格交易计划（仅计划/提示，不下单；含 levelWeights 自定义档位资金比例 JSON 列 + GridLevelWeights 编解码，2026-08-19 扩展）
         │   │   │   │       └── KlineCacheEntity.kt             # kline_cache + kline_cache_meta（K线永久缓存 + 除权漂移检测状态，2026-08-17 新增）
+        │   │   │   │       └── ErrorLogEntity.kt               # error_logs 失败日志（时间/分类/来源/摘要/异常详情，2026-08-20 新增）
         │   │   │   │
         │   │   │   ├── remote/                  # Retrofit 接口（DI 在 NetworkModule 装配，见 §4.7/§4.9）
         │   │   │   │   ├── SearchApi.kt         # 东财 searchapi（搜索）
@@ -117,6 +119,7 @@ stock_inc/
         │   │   │   │   ├── FundamentalApi.kt    # 东财 datacenter（基本面/财务三表/资产负债表/龙虎榜）
         │   │   │   │   ├── DividendApi.kt       # 东财 datacenter（分红明细，回退源）
         │   │   │   │   ├── TencentDividendApi.kt # 腾讯 ifzq（K线/分红，主源，见 §4.9.4）
+        │   │   │   │   ├── FundDividendApi.kt    # 东财基金 f10 分红送配页（场内 ETF/LOF 分红唯一源，HTML 原文，2026-08-22 新增）
         │   │   │   │   ├── BondYieldApi.kt      # 东财 datacenter（国债收益率，含多期限/LPR）
         │   │   │   │   ├── ResearchApi.kt       # 东财 reportapi（研报）+ np-anotice（公告）（2026-08-02 新增）
         │   │   │   │   ├── LlmApi.kt            # OpenAI 兼容 LLM（@Url 动态 base，60s 超时）
@@ -159,6 +162,7 @@ stock_inc/
         │   │   │   │   ├── AchievementRepository.kt
         │   │   │   │   ├── BackupRepository.kt             # 备份/恢复（事务式批量）
 │   │   │   │   ├── CacheManagementRepository.kt    # 缓存管理：7 类持久缓存条目统计 + 按种类清理（CacheKind 含 permanent 永久缓存标记与中文说明，2026-08-19 新增）
+│   │   │   │   ├── ErrorLogRepository.kt           # 失败日志记录门面：60s 同源同摘要防抖/保留最近 200 条/自身失败吞掉；数据获取失败埋点统一入口（2026-08-20 新增）
         │   │   │   │   ├── WidgetDataRepository.kt         # 桌面小组件数据
         │   │   │   │   ├── ScreenshotStrategyRepository.kt # 截图策略持久化
         │   │   │   │   ├── VisionImportRepository.kt      # 视觉导入编排（图片→GLM-4.6V→结构化行，自动重试 5 次，2026-08-16 新增）
@@ -210,16 +214,18 @@ stock_inc/
         │   │   │   │   ├── VisionImportParser.kt        # 视觉模型响应 → 持仓/交易行（日期/方向归一化，2026-08-16 新增）
         │   │   │   │   ├── VisionImportPromptBuilder.kt # 视觉解析 prompt（持仓/历史成交两种 schema + 同花顺列口径，2026-08-16 新增）
         │   │   │   │   ├── HistoryCacheMerge.kt         # mergeByReportDate：不可变历史按报告期合并（远端覆盖同期/缓存独有旧期保留，2026-08-17 新增）
+        │   │   │   │   ├── FundDividendParser.kt        # 场内基金识别（沪5/深15·16）+ 基金 f10 分红 HTML 解析纯函数（2026-08-22 新增）
         │   │   │   │   └── Formatters.kt                 # MoneyFormatter/PercentFormatter（纯函数 + 单测）
         │   │   │   │
         │   │   │   ├── agent/                  # AI Agent（Google ADK，AI Tab）
         │   │   │   │   ├── AiAgentFactory.kt           # 工具注册中心（47 工具：34 读 + 13 写，装配 LlmAgent）
         │   │   │   │   ├── AgentInstructionBuilder.kt  # 系统提示词（注入策略库）
-        │   │   │   │   ├── AiChatRepository.kt         # AI 会话编排（流式 SSE）
+        │   │   │   │   ├── AiChatRepository.kt         # AI 会话编排（流式 SSE；带图发送/历史图片回读/多模态探测，2026-08-22 扩展）
         │   │   │   │   ├── AiTitleGenerator.kt         # 会话标题生成
+        │   │   │   │   ├── ChatImages.kt              # 聊天图片编解码（data URL↔ADK Part）+ MultimodalModelDetector 模型名探测（2026-08-22 新增）
         │   │   │   │   ├── ConfirmationSummaryBuilder.kt # 写操作确认摘要
         │   │   │   │   ├── OpenAiCompatibleModel.kt    # ADK Model 适配（OpenAI 兼容协议）
-        │   │   │   │   ├── OpenAiProtocol.kt / OpenAiDtos.kt / OpenAiSse.kt  # 协议/DTO/SSE 解析
+        │   │   │   │   ├── OpenAiProtocol.kt / OpenAiDtos.kt / OpenAiSse.kt  # 协议/DTO/SSE 解析（DTO 含多模态 content 数组，2026-08-22 扩展）
         │   │   │   │   ├── ToolDisplayName.kt          # 工具调用展示名（英文→中文映射，2026-08-03 新增）
         │   │   │   │   └── tools/                      # Agent 工具（ReadTool/WriteTool 基类 + 47 个工具）
         │   │   │   │       ├── ToolBases.kt            # ReadTool（只读）/ WriteTool（带确认门）抽象基类
@@ -309,6 +315,7 @@ stock_inc/
         │   │   │       ├── AiSettingsScreen.kt   # AI 助手设置（系统提示词/温度/输出长度，会话旁入口，2026-08-02 新增）
         │   │   │       ├── NotificationSettingsScreen.kt / StockNotificationSettingsScreen.kt / NotificationReliabilityScreen.kt
         │   │   │       ├── CacheManagementScreen.kt   # 缓存管理（7 类缓存条目数 + 永久/短期标记 + 单类/全部清理确认，2026-08-19 新增）
+        │   │   │       ├── ErrorLogScreen.kt         # 失败日志页（列表/展开堆栈/全部清理，2026-08-20 新增）
 │   │   │       ├── BackupRestoreScreen.kt / FireGoalSetupScreen.kt / OcrDebugScreen.kt
         │   │   │       └── TabRefreshLocal.kt    # 本地刷新辅助
         │   │   │
@@ -319,6 +326,7 @@ stock_inc/
         │   │       ├── AiChatViewModel.kt        # AI 会话 VM
         │   │       ├── AiSettingsViewModel.kt   # AI 助手设置 VM（系统提示词/温度/输出长度，2026-08-02 新增）
 │   │       ├── CacheManagementViewModel.kt  # 缓存管理 VM（条目加载/确认清理/联动清平面内存缓存，2026-08-19 新增）
+        │       ├── ErrorLogViewModel.kt      # 失败日志 VM（observeAll 响应式/分类中文映射/展开/清理确认，2026-08-20 新增）
         │   │       ├── AddStockViewModel.kt / EditHoldingViewModel.kt
         │   │       ├── DividendCalendarViewModel.kt
         │   │       ├── DripSimulationViewModel.kt       # 分红再投模拟（参数可调，纯函数重算，2026-08-04 新增）
@@ -343,7 +351,7 @@ stock_inc/
             └── viewmodel/         # 24 个：PortfolioViewModelTest / CacheManagementViewModelTest 等（Robolectric + MockK + Turbine）
 ```
 
-**文件规模速览**（2026-08-19）：main 源集约 280 个 .kt，测试约 112 个 .kt；DB 19 张表/24 个 Migration（version=25）；AI Agent 47 个工具（34 读 + 13 写）。
+**文件规模速览**（2026-08-20）：main 源集约 285 个 .kt，测试约 115 个 .kt；DB 20 张表/25 个 Migration（version=26）；AI Agent 47 个工具（34 读 + 13 写）。
 
 ---
 
@@ -441,7 +449,7 @@ MarketDataPlane（data/plane/）
 
 ### 4.6 数据库（Room）纪律 —— 关键
 
-- **DB version 当前 = 25**，`exportSchema = false`（共 19 张表 / 24 个迁移步 `MIGRATION_1_2` … `MIGRATION_24_25`）。
+- **DB version 当前 = 26**，`exportSchema = false`（共 20 张表 / 25 个迁移步 `MIGRATION_1_2` … `MIGRATION_25_26`）。
 - 改 schema（加表/加列/改类型）**必须**：① 在 `AppDatabase` 的 `entities`/`version` 同步；② 新增 `MIGRATION_N_(N+1)` 并在 `DatabaseModule` 注册；③ `version` +1。
 - 历史迁移全部手写 `ALTER`/`CREATE`，保持这个风格。
 - 表名/列名用下划线（`dividend_income_records`、`stockCode`），实体字段用驼峰，靠 Room 注解映射。
@@ -467,11 +475,13 @@ MarketDataPlane（data/plane/）
 
 | 接口 | URL | `fltt` 参数 | 单位规则 | 代码位置 |
 |---|---|---|---|---|
-| `ulist.np/get`（批量行情） | `push2.eastmoney.com/api/qt/ulist.np/get` | 无此参数 | **价格/百分比 ×100 整数，需 ÷100**；成交量(手)/成交额(元)/市值(元) 原值不除 | `QuoteApi` + `toQuoteSnapshot`（`QuoteSnapshot.kt`） |
+| `ulist.np/get`（批量行情） | `push2.eastmoney.com/api/qt/ulist.np/get` | 无此参数 | **价格/百分比 ×100 整数，需 ÷100；场内基金（ETF/LOF）价格类 ×1000 需 ÷1000**；成交量(手)/成交额(元)/市值(元) 原值不除 | `QuoteApi` + `toQuoteSnapshot`（`QuoteSnapshot.kt`） |
 | `clist/get`（板块/个股/资金流列表） | `push2.eastmoney.com/api/qt/clist/get` | `fltt=2` 时 | **全部字段真实值，不 ÷100**（价格带小数、百分比直接是 %、净额是元） | `MarketApi.getClist` + `toMarketList`（`MarketDataRepository.kt`） |
-| `stock/get`（单股/指数详情） | `push2.eastmoney.com/api/qt/stock/get` | 无此参数 | **价格/百分比 ×100 整数，需 ÷100**；成交量(手)/成交额(元) 原值不除 | `QuoteApi.getStockInfo` / `MarketApi.getIndexQuote` |
+| `stock/get`（单股/指数详情） | `push2.eastmoney.com/api/qt/stock/get` | 无此参数 | **价格/百分比 ×100 整数，需 ÷100；场内基金（ETF/LOF）价格类 ×1000 需 ÷1000**；成交量(手)/成交额(元) 原值不除 | `QuoteApi.getStockInfo` / `MarketApi.getIndexQuote` + `toIndexQuote` |
 
 ⚠️ **`clist` 与 `ulist`/`stock/get` 的价格单位规则相反**——`ulist` 的 `f2` 是 ×100 整数（`3962`→39.62 元），`clist` 的 `f2` 是真实值（`127.24`→127.24 元）。两个解析函数**必须独立、切勿复用或混用** ÷100 逻辑。
+
+⚠️ **同一接口内，价格类除数还随标的类型变（2026-08-22 实测，腾讯 qt 同时刻交叉验证）**：场内基金（ETF/LOF）报价 3 位小数，`ulist`/`stock/get` 的价格类字段（f2/f4/f15-f18、f43-f46/f60）裸值为 **×1000**（510880 f2=3387→3.387、513100 f2=2195→2.195），股票仍 ×100（600519 f2=127283→1272.83）；百分比类（f3/f170 等）两类标的均 ×100。除数选择统一封装在 `divPriceScaleOrNull(isFund)`（`QuoteSnapshot.kt`），基金判定用 `FundDividendParser.isExchangeTradedFundCode`（裸 6 位：5/15/16 开头，两市无股票冲突号段）。
 
 #### 4.9.2 字段编号必须查官方文档，禁止凭直觉推断
 
@@ -599,6 +609,12 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 ---
 
 ## 10. 变更记录
+- 2026-08-22（二）：**支持 ETF/LOF 场内基金——可搜索、加自选/持仓、看行情 K 线、收分红全链路**（此前 `searchStocks` 的 `Classify=="AStock"` 过滤把基金全部挡掉，用户加不了 ETF）。① **搜索放行**（`StockRepository.searchStocks`）：实测 searchapi 口径——场内基金 `Classify="Fund"` 且 `MktNum` 为 "1"(沪)/"0"(深)（510300/159915/161907 实测），与 A 股同市场规则；场外基金 `Classify="OTCFUND"`（MktNum="150"，如易方达消费行业 110022）不可行情交易，继续排除。加股/批量导入/Agent `add_stock`/截图导入全走同一搜索，无需各自改动。② **行情除数修复（重要，§4.9.1 新规则）**：实测（push2delay + 腾讯 qt 同时刻交叉验证）`ulist` 与 `stock/get` 的**价格类字段（f2/f4/f15-f18、f43-f46/f60）对场内基金是 ×1000**（510880 f2=3387→3.387、513100 f2=2195→2.195），股票仍 ×100（600519 f2=127283→1272.83）；百分比类两类均 ×100。新 `Double?.divPriceScaleOrNull(isFund)` 封装（`QuoteSnapshot.kt`），`toQuoteSnapshot`/`toIndexQuote`/`searchStocks` 补价三处接入——顺带修复存量 bug：`get_etf_info` 工具此前对 ETF ÷100（价格大 10 倍）且 `guessMarketByCode6` 把 5 开头沪市 ETF 判成深市 secid（`0.510880`，请求即空）。③ **ETF 分红专用源**：腾讯 fqkline 分红仅覆盖股票（510880 六年 640 行实测 0 条分红行）、东财 RPT_SHAREBONUS_DET 对 ETF 返回空——新 `data/remote/FundDividendApi`（基金 f10 分红送配页 `fundf10.eastmoney.com/fhsp_{code}.html`，服务端渲染 HTML，ScalarsConverter 返回原文；未分红基金返回「暂无分红」空表）+ 纯函数 `FundDividendParser`（§4.4 惯例：cfxq 表解析——年份/权益登记日/除息日/每10份派现金/发放日，仅「每10份→每份」÷10 合规换算，送份额/缺除息日/零金额跳过，id=`code_除息日` 腾讯方案；`isExchangeTradedFund`/`isExchangeTradedFundCode` 判定——沪 5 开头、深 15/16 开头，两市无股票冲突号段）；`DividendRepository.fetchAndCacheDividends` 对场内基金分流到该源（失败静默空、不误清历史，与腾讯主源同语义），红利 ETF 510880 年度分红、红利ETF联接 161907 按月分红均正常入库，DPS/股息率/日历/今日信号/K 线股息率网格线全链路自动可用。④ **降级路径核验**：基本面/财务三表（datacenter 对 ETF 空 → null → UI 隐藏）、行业 f127（空 → 不写入）、资金流（clist 匹配不到行 → null）均天然优雅降级，零改动。⑤ 测试 +20（FundDividendParser 9：识别真值表/裸代码无冲突/真实 fhsp fixture 解析含 ÷10/暂无分红空/送份额跳过/缺除息日跳过/垃圾输入不抛/按除息日去重；QuoteSnapshot 4：基金价格 ÷1000/涨跌额 ÷1000/百分比仍 ÷100/深市基金；MarketDataRepositoryParse 2：toIndexQuote 基金 ÷1000+指数不误判；StockRepository 1：Fund+MktNum 放行/OTCFUND 排除；DividendRepository 4：分流到 f10 不打腾讯东财/解析入库/空表无写入/网络失败静默），全量 1305 过。**不改 schema**；新依赖 `converter-scalars`（libs.versions.toml 红线 #9）。
+- 2026-08-22：**AI 聊天支持发送图片（多模态）——识别持仓/成交截图直接导入**。① **多模态探测**：新纯函数 `MultimodalModelDetector`（`data/agent/ChatImages.kt`，按模型名启发式匹配主流多模态家族：GLM-4v/4.5v/4.6v、GPT-4o/4.1/5、Qwen-VL/QVQ、Claude 3/4/5、Gemini、deepseek-vl、`vision`/`-vl`/`pixtral` 通用兜底；deepseek-chat/v4-flash、glm-4-flash、qwen-plus 等纯文本模型不误判），`AiChatRepository.observeMultimodal()` 响应式暴露给 VM；当前模型不支持时点「加图」按钮给出可解释提示（SYSTEM 气泡引导切换多模态模型）而非静默禁用，误判兜底靠服务端 400 经 Error 事件透出。② **协议层**：`OpenAiMessage.content` 放宽为 `Any`（String 或多模态数组，Gson 按运行时类型序列化），新增 `OpenAiContentPart`/`OpenAiImageUrl` DTO；`buildOpenAiRequest` 把用户消息中 inlineData 图片 Part 转为 OpenAI `content:[{type:"text"},{type:"image_url"}]` 数组（纯文本消息保持字符串形态、请求体最小改动；纯图片 content 修复被「空文本跳过」分支吞掉的问题）。③ **编解码**：同文件 `imageDataUrlToPart`/`Part.imageDataUrl()`（kotlin.io.encoding.Base64，纯 JVM 可单测）——data URL ↔ ADK `Part(inlineData=Blob)`，图片随会话经 ADK SessionService 持久化，重开历史会话缩略图可回读（`AiSessionMessage.images`）。④ **发送链路**：`AiChatRepository.send(sessionId, text, imageDataUrls)` 构建文本+图片混合 Content；选图复用截图导入同一套 `loadSampledBitmap`（最长边 2048 下采样）+ `bitmapToJpegDataUrl`（1600px/80% JPEG，单张 150-400KB）；单轮上限 3 张（超出 SYSTEM 提示）；支持纯图片（无文字）发送，会话切换清空待发送。⑤ **UI**：输入栏新增「发送图片」按钮（Photo Picker）、待发送缩略图行（64dp、右上角移除）、用户气泡内图片渲染（data URL 本地解码、解码失败占位图标）；`ChatMessageUi.images` 全链路透传。⑥ **导入编排**：系统提示词新增「图片识别与导入」段——持仓截图→表格复述→`add_stock`（新股票，shares>0 自动记一笔买入）/`update_holding`（已持有）逐只走确认门；成交截图→`add_transaction` 逐笔记入（日期缺失用今天并告知）；识别不清的字段如实说明、禁止编造代码/价格/股数（宪法原则 III 延伸到图片输入）。**不改 schema、无新网络接口**（复用既有 LLM 通道）。测试 +19（编解码/探测 6、协议 3、指令 1、仓库 2、VM 7），全量 1285 过。
+  - 补记（同日）：DeepSeek 上线官方多模态模型 `deepseek-v4-flash-vision-exp`（支持图片输入，OpenAI 格式 Chat Completions，见官方 pricing 页）——探测器显式收录 `deepseek-v4-flash-vision` 前缀（此前靠 `vision` 兜底已能命中，显式化防兜底被收紧后漏判；`deepseek-v4-flash`/`v4-pro`/`chat` 仍为纯文本）；「不支持图片」提示与设置页 Model 输入框 supportingText 均补 DeepSeek Vision 示例。vision-exp 走 Chat Completions 路径（非 Responses），图片链路天然可用。
+- 2026-08-20（晚二）：**新增「失败日志」页（设置 → 数据 → 失败日志）——关键的静默失败集中可见、可清理**。背景：红线 #2 要求网络/DB 失败一律吞掉返回空值，但「数据获取失败」被吞后用户完全无感（页面悄悄降级为空数据/缓存/默认值，比崩溃更隐蔽）——现把这类失败持久化收集到日志页。① **数据层**：DB v25→26（新 `error_logs` 表：timestamp/category/source/message/detail，`MIGRATION_25_26` 建表）+ `ErrorLogDao`（observeAll/latest/count/clearAll/trimToRecent）+ `ErrorLogEntity`。② **记录门面** `ErrorLogRepository`：`record(source, message, throwable?, category)`——**60s 同 source+message 防抖**（退避重试/下拉刷新连点不刷屏）、每次插入后 `trimToRecent(200)` 防表膨胀、detail 堆栈裁 12 帧/2000 字符；**记录自身全程吞异常**（日志代码不能成为新故障源，红线 #2 对日志自身同样适用）；分类枚举 `ErrorLogCategory`（NETWORK 数据获取/DATABASE 本地存储/LLM AI 调用，raw 存储 label 展示）。③ **埋点范围**（数据获取失败，均为原本静默吞掉的失败路径，成功路径零改动）：`MarketDataPlane`（分红刷新失败 ensureDividendsFresh+refreshDividends、日/周/月 K 线 fetchCloses、基本面、财务三表）+ `StockRepository.fetchQuoteSnapshots`（行情，含标的数）+ `BondYieldRepository`（国债远端失败回退缓存/默认值——精度损失不可见）+ `MarketDataRepository`（资金流/板块列表/行业内个股/全市场榜单/指数行情/龙虎榜）；搜索与 LLM 失败原本就以 Result/错误提示对用户可见，不重复收集。④ **UI**：`ErrorLogViewModel`（observeAll 响应式订阅，清理后自动重发射；collect 异常退出也复位 isLoading 红线 #3；category raw→中文 label，未知 raw 原样回退；单展开切换）+ `ErrorLogScreen`（说明卡明示收集范围与 200 条上限 / LazyColumn 列表卡：来源+分类+摘要+时间，有 detail 点击展开等宽堆栈 / 「清理全部日志」确认弹窗 + Snackbar / 空状态）+ `DataSettingsScreen` 入口行（Warning 图标）+ MainScaffold `errorLogs` 路由。⑤ 测试 +20（ErrorLogRepository 9：插入含 detail+修剪/无异常 detail=null/防抖窗口内跳过/窗口外重记/不同源或摘要不防抖/detail 截长/record 吞 DB 异常/clearAll 吞/count 失败返 0；VM 6：加载映射中文/未知 category 回退/collect 异常复位 loading/单展开切换/清理确认全流程 message/dismiss 后 confirm 为 no-op；埋点 3：plane K 线失败+分红刷新失败、repo 行情失败均 verify record；时间格式化 2），全量 1266 过（净增 20）。**埋点只在失败路径上，不改变任何既有行为**。
+- 2026-08-20（晚）：**修复「已公告实施、明天除权」的年度分红不计入股息率**（用户实测：海尔智家 2025 年度分红 10派8.9151 除权日 2026-08-21、ASSIGN_PROGRESS=实施分配，股息率只算了 2025 中报那一半）。根因两层：① **数据层结构性缺失**——腾讯分红嵌在历史 K 线数组第 7 元素里，只有已除权日的记录（未来的 K 线不存在），而东财明细（含未来已排期记录）仅在腾讯完全无数据时才作回退，`enrichDividendYieldFromEastMoney` 拉了同一份东财数据却只用来补 dividendYield 字段——未来除权记录从未入库；② **计算层显式排除**——`rollingYearlyTotals` 的 `takeIf { !it.isAfter(today) }` 把未来除权日全部挡在 TTM 窗口外。修复：① `DividendRepository.enrichAndMergeFromEastMoney`（原 enrich 升级，同一东财请求两用、零新增网络）：按除权日对齐补股息率快照之外，把「exDate 已定且腾讯按除权日没有」的**已排期未除权**记录转实体合并入库（东财→实体转换抽 `toEastMoneyEntity` 与回退路径共用；预案 exDate=null 金额可能变，不合并）；② `rollingYearlyTotals` 窗口锚点从 today 前移至 `max(today, 入窗记录最大除权日)`，已排期除权日（未来 ≤365 天护栏，防脏数据漂移）视同已派入窗——海尔场景 TTM=(0.2692+0.89151)=1.16071 全款，`latestYearlyCashPerShare`/`calculateAvgCashPerShare` 共享锚点不变量保持。未来记录入库后股息日历/今日信号倒计时同步可见。**已知限制**：分红 7 天 TTL 内已排期记录不进库（实施公告→除权日窗口通常 1~2 周，7 天大多赶得上；赶不上时详情页手动刷新立即修复）。测试 +4（ForecastCalculator 3：海尔实测金标准/近未来计入含锚点挤出语义/远未来排除；DividendRepository 2：合并含预案不并入/零合并回归），全量 1246 过。**不改 schema**。
+- 2026-08-20：**数据一致性审计（真实接口交叉验证）+ 全量修复**。审计报告见 `docs/audit/2026-08-20-数据一致性审计报告.md`（14 项实测验证通过 + 2 高危/9 中危/13 低危发现）。当日修复闭环（单测 1216→1242 全绿，净增 26）：① **H1 资金流行归属校验**——实测发现 clist `fs=m:1+t:2+s:{code}` 单股筛选**不生效**（返回全市场列表按 fid 排序），`fetchCapitalFlow` 此前 `pz=1+firstOrNull()` 且 fields 无 f12，拿到的是「当日涨幅第一名」的资金流（张冠李戴）；修复为请求 f12 按 `it.code == code6` 精确匹配。② **H2 腾讯分红截断洞**——实测 3 年分块窗口（≈730 交易日）超 640 根上限时腾讯锚定最新端**截头约 4 个月**（中国移动 2023-09-01 的 10派22.247 永久丢失、9 笔丢 1 笔）；分块改**三块各 2 年**（<640 必完整，与 KlineRepository「不赌超窗截断」纪律对齐）。③ **M1/M6 数值脏值容错 Gson**——实测 clist 对退市/停牌股全字段返回 "-"，默认 Gson 抛 NumberFormatException 且**整批 diff 解析失败**（一条脏记录毒死整个列表）；新 `data/remote/LenientDoubleDeserializer.kt`（"-"→null）注册到全部东财/腾讯 Retrofit（LLM 不共享）；东财分红裸调用的网络异常**保持传播**（双源失败用户可感知，不吞）。④ **M2 派息率年度合计口径**——`enrichPayoutRatio` 签名改 `Map<Int, Double>`（分红年→年度合计），仅挂年报期 12-31（中期 EPS 是半年值，除年度分红会得约两倍错误值）；腾讯 nd 年度/东财真实报告期按「前 4 位年份」归一（`cashPerShareByDividendYear` 扩展收敛于平面）——修复半年派息股派息率约低估一半。⑤ **M3 国债失败不锁死缓存**——冷启动失败路径不再把 DEFAULT_YIELD/旧缓存写入 memoryCache/prefs（此前进程存活期永远假基准 2.5%），旧缓存回退不刷 updated_at，首行 10Y null 向后扫备选行。⑥ **M5 merge 字段级保底**——`mergeByReportDate` 新增 `repairRemote` 参数（远端同期 null 字段回退缓存值），基本面/三表两调用点全字段保底（防「子接口失败→整期覆盖抹掉缓存齐全字段且被持久化」）。⑦ **M7** 诊断装配器逐股前置 `ensureDividendsFresh`（与 getDps 同新鲜度策略）。⑧ **M8 解析函数回归锁**——`toMarketList`/`toIndexQuote` 提为顶层 internal + 新建 `MarketDataRepositoryParseTest`（clist 不除/stock/get ÷100 规则反转锁定，含实测样本断言）。⑨ 其余：searchStocks 复用 div100OrNull（L1）、DTO 死字段清理与 f47 移除（L3/L4）、rollingYearlyTotals 非正金额统一过滤（L11）、漂移检测过滤未来除权日（M4-3）。**不修项及理由**见审计报告第〇节（M4-1 送转漂移盲区/M4-2 混纪元窗口/L5 北交所前缀等 5 项，均记录为已知限制）。
 - 2026-08-19：**网格交易系统支持逐档自定义资金比例**（此前固定 1/price 反比分配，越便宜买越多——现可对单个档位单独配置比例，如底部档加大弹药/首档轻仓试探）。① **计算层**：`GridCalculator.generate` 新增尾参 `levelWeights: List<Double>?`（与档位同序、从最便宜档起的**相对权重**，无需合计 100，计算时归一化）；null = 反比默认（全链路旧数据/旧调用零影响）；长度≠grids 或含非正 → 参数错误「各档资金比例须为正数且与档数一致」（档位价/下一档提示不受权重影响，只改资金分配）。② **持久层**：DB v24→25（grid_plans 加可空列 `levelWeights`（JSON 数组字符串如 "[20.0,30.0,50.0]"），`MIGRATION_24_25`）；实体文件内新增 `GridLevelWeights` 编解码纯函数（toJson/parse：格式损坏/含 0 负数/空数组 → null 回退反比，绝不让脏数据炸档位计算；+5 单测）。③ **生成器 UI**：`GridPlanScreen` 新增「资金分配」区——「反比（默认）/自定义比例」FilterChip，切自定义时**以当前预览的反比权重百分比预填**（用户从合理基线微调而非从零手填，参数不全时按均分 100/n）；逐档输入行（档位价 + 比例输入框，YIELD 计划附股息率）+ 合计提示（相对比例语义，不强制 100）；预览区自定义模式下逐档展示股数/金额；改档数时权重输入随档数伸缩（截断/均分补位）。④ **VM**：UiState 加 `customWeights`/`levelWeightInputs`；非法输入（空/非数字）折算 0 → generate 报参数错误 → 预览可见报错 + 保存被阻（沿用「参数无效：…」口径，不静默）；savePlan 序列化 JSON 入库、editPlan 由存档反解回填（编辑预览与存库分配一致）；重锚定确认经 plan.copy 保留权重（资金意图不随价格重算）。⑤ **全链路透传**（否则通知/信号/小组件/Agent/回测的股数与执行进度与网格页不一致）：GridNotifyEvaluator/TodaySignalAggregator/WidgetDataRepository/GridTools（get_grid_plans 补 allocation 口径字段）/PortfolioAnalysisTools/GridBacktestCalculator/列表装配/回测入口全部传 `GridLevelWeights.parse(plan.levelWeights)`。⑥ **备份防御**：normalizeGridPlans 对损坏 JSON/档数不匹配的 levelWeights 置 null（回退反比），脏数据不让整个计划不可用；可空列无 Gson NOT NULL 撞库风险，旧备份恢复零修补。⑦ 计划卡档位表标题对自定义计划加「· 自定义比例」标记。测试净增 +20（GridCalculator 6：金标准/相对归一化/价格与下一档不变/档数不匹配/非正报错/等比与 YIELD 兼容；编解码 5；VM 7：预填/预览重算/序列化保存/非法保存阻断/编辑回填/档数伸缩/列表渲染/重锚定保留；回测 1；备份 1），全量单测过。**网格仍仅计划与提示，不自动下单**。
 - 2026-08-19：**新增「缓存管理」页（设置 → 数据 → 缓存管理）——缓存可见、可清，永久缓存策略明示**。① 新仓库 `CacheManagementRepository`（+`CacheKind` 枚举：PRICE/SEARCH/KLINE/FUNDAMENTALS/STATEMENTS/DIVIDENDS/LLM_ANALYSIS 七类，含 `permanent` 永久缓存标记与中文 label/description——K线/财务指标/三表/分红四类为历史不可变数据即永久缓存，price/search/LLM 为可随时重建的短期缓存）：`loadStats` 逐类 COUNT 统计（单 DAO 失败记 0 不拖累其余，吞异常红线 #2）+ `clear(kind)`/`clearAll` 全表清理；**清理 dividends 联动清 `DividendFreshnessStore` 记账**（接口/实现新增 `clear()`——否则退避时间戳残留，清库后 5 分钟内 getDps 吃闭门羹不重新拉网）。② `MarketDataPlane` 新增 `clearSessionCaches()`（清行情 10s/BOLL·市场 60s 内存会话缓存——堵「持久缓存清了但内存窗口还剩旧值」的死角）。③ 7 个缓存 DAO 补 `count()`（KlineCacheDao 另补 `clearAll()`=bars+meta 事务删除）——纯 @Query 增量，**不改 schema、无迁移**。④ 新 `CacheManagementViewModel`（条目加载/确认弹窗状态/单类清理/全部清理/一次性 message，`isLoading`/`isClearing` 显式复位红线 #3）+ `CacheManagementScreen`（说明卡明示永久缓存策略 + 每类条目数与「永久缓存/短期缓存」徽标 + 清理确认弹窗防误触 + 全部清理 + Snackbar 反馈；条目数千分位走 `formatEntryCount`）+ `DataSettingsScreen` 入口行 + MainScaffold `cacheManagement` 路由。清理范围只含可再生缓存，自选股/持仓/交易等用户数据不涉及。测试 +18（仓库 10：统计/逐类清理/dividends 联动/permanent 策略锁定/标签非空；VM 6：Robolectric；平面 1：清内存后同窗口重新发网；页面纯函数 1），全量 1184 过。
 

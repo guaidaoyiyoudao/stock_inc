@@ -159,6 +159,9 @@ internal fun LlmConfigSettingsContent(viewModel: NotificationSettingsViewModel) 
             onValueChange = { model = it },
             label = { Text("Model") },
             singleLine = true,
+            supportingText = {
+                Text("AI 聊天发图识别需多模态模型，如 deepseek-v4-flash-vision-exp / glm-4.6v / gpt-4o")
+            },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(12.dp))

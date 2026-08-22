@@ -45,10 +45,11 @@ data class AiSessionSummary(
     val updatedAtMs: Long,
 )
 
-/** 会话内的历史消息（加载用）。 */
+/** 会话内的历史消息（加载用）。images 为用户消息携带的图片 data URL（多模态输入）。 */
 data class AiSessionMessage(
     val isUser: Boolean,
     val text: String,
+    val images: List<String> = emptyList(),
 )
 
 /**
@@ -64,6 +65,10 @@ class AiChatRepository @Inject constructor(
 ) {
 
     fun observeConfigured(): Flow<Boolean> = configSource.observeConfig().map { it.isComplete }
+
+    /** 当前聊天模型是否多模态（按模型名启发式，控制「加图」入口是否可用）。 */
+    fun observeMultimodal(): Flow<Boolean> =
+        configSource.observeConfig().map { MultimodalModelDetector.isMultimodal(it.model) }
 
     @OptIn(kotlin.time.ExperimentalTime::class)
     suspend fun listSessions(): List<AiSessionSummary> = runCatching {
@@ -98,9 +103,10 @@ class AiChatRepository @Inject constructor(
             val text = event.content?.parts.orEmpty()
                 .filter { it.thought != true && it.text != null }
                 .joinToString("") { it.text!! }
+            val images = event.content?.parts.orEmpty().mapNotNull { it.imageDataUrl() }
             when {
-                event.author == Role.USER && text.isNotEmpty() ->
-                    AiSessionMessage(isUser = true, text = text)
+                event.author == Role.USER && (text.isNotEmpty() || images.isNotEmpty()) ->
+                    AiSessionMessage(isUser = true, text = text, images = images)
                 event.author == AiAgentFactory.AGENT_NAME && !event.partial && text.isNotEmpty() ->
                     AiSessionMessage(isUser = false, text = text)
                 else -> null
@@ -124,9 +130,23 @@ class AiChatRepository @Inject constructor(
         }
     }
 
-    fun send(sessionId: String, text: String): Flow<AiChatEvent> = runTurn(
+    /**
+     * 发送一轮用户消息；[imageDataUrls] 为图片 data URL（多模态模型识别用），可为空。
+     * 文本与图片都为空时由调用方拦住（这里不再兜底，保持与 UI 校验一致）。
+     */
+    fun send(
+        sessionId: String,
+        text: String,
+        imageDataUrls: List<String> = emptyList(),
+    ): Flow<AiChatEvent> = runTurn(
         sessionId,
-        Content(role = Role.USER, parts = listOf(Part(text = text)))
+        Content(
+            role = Role.USER,
+            parts = buildList {
+                text.trim().takeIf { it.isNotEmpty() }?.let { add(Part(text = it)) }
+                imageDataUrls.forEach { url -> imageDataUrlToPart(url)?.let { add(it) } }
+            }
+        )
     )
 
     fun confirm(sessionId: String, requestId: String, confirmed: Boolean): Flow<AiChatEvent> = runTurn(

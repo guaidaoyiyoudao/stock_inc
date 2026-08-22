@@ -32,9 +32,38 @@ class FinancialStatementsRepository @Inject constructor(
 
         val remote = runCatching { fetchFromNetwork(stockCode) }.getOrNull()
         if (remote != null) {
-            // 历史期次不可变：远端窗口没返回的旧期次从缓存续接，不随刷新丢失
+            // 历史期次不可变：远端窗口没返回的旧期次从缓存续接，不随刷新丢失；
+            // 同期远端子表为 null（三表各自 runCatching，某表失败降级空）时回退缓存已有子表，防字段级回退
             val cachedPeriods = cached?.let { parse(it.payload)?.periods }.orEmpty()
-            val merged = FinancialStatements(mergeByReportDate(cachedPeriods, remote.periods) { it.reportDate })
+            val merged = FinancialStatements(
+                mergeByReportDate(cachedPeriods, remote.periods, { it.reportDate }) { r, c ->
+                    // 三表任一子接口失败时该表全部字段为 null，逐字段回退缓存（防字段级回退被持久化）
+                    r.copy(
+                        totalOperateIncome = r.totalOperateIncome ?: c.totalOperateIncome,
+                        operateCost = r.operateCost ?: c.operateCost,
+                        saleExpense = r.saleExpense ?: c.saleExpense,
+                        manageExpense = r.manageExpense ?: c.manageExpense,
+                        financeExpense = r.financeExpense ?: c.financeExpense,
+                        operateProfit = r.operateProfit ?: c.operateProfit,
+                        totalProfit = r.totalProfit ?: c.totalProfit,
+                        incomeTax = r.incomeTax ?: c.incomeTax,
+                        parentNetProfit = r.parentNetProfit ?: c.parentNetProfit,
+                        deductParentNetProfit = r.deductParentNetProfit ?: c.deductParentNetProfit,
+                        netcashOperate = r.netcashOperate ?: c.netcashOperate,
+                        netcashInvest = r.netcashInvest ?: c.netcashInvest,
+                        netcashFinance = r.netcashFinance ?: c.netcashFinance,
+                        endCce = r.endCce ?: c.endCce,
+                        totalAssets = r.totalAssets ?: c.totalAssets,
+                        totalLiabilities = r.totalLiabilities ?: c.totalLiabilities,
+                        totalEquity = r.totalEquity ?: c.totalEquity,
+                        monetaryFunds = r.monetaryFunds ?: c.monetaryFunds,
+                        accountsRece = r.accountsRece ?: c.accountsRece,
+                        inventory = r.inventory ?: c.inventory,
+                        accountsPayable = r.accountsPayable ?: c.accountsPayable,
+                        fixedAsset = r.fixedAsset ?: c.fixedAsset
+                    )
+                }
+            )
             runCatching {
                 financialStatementsCacheDao.upsert(
                     FinancialStatementsCacheEntity(

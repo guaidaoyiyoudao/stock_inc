@@ -113,4 +113,23 @@ class FinancialStatementsRepositoryTest {
         val persisted = gson.fromJson(payloadSlot.captured.payload, FinancialStatements::class.java)
         assertThat(persisted.periods).hasSize(3)
     }
+
+    @Test
+    fun `remote null statement fields fall back to cached same-period values`() = runTest {
+        // 2026-08-20 审计 M5：cash/balance 子接口失败（stubNetwork 降级空）时远端同期该表字段全 null——
+        // 修复前整期覆盖会把缓存里原本齐全的科目抹掉且随后被持久化（无法自愈）；修复后字段级回退
+        coEvery { dao.get("sh.600036") } returns entity(
+            FinancialStatements(listOf(period("2024-12-31", income = 100.0, cash = 200.0, assets = 300.0))),
+            fetchedAt = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000
+        )
+        // 远端：利润表成功（新值 111），现金/资产负债表失败 → netcashOperate/totalAssets 为 null
+        stubNetwork(listOf(incomeItem("2024-12-31 00:00:00", 111.0)))
+
+        val result = repository.getFinancialStatements("sh.600036")!!
+
+        val merged = result.periods.first { it.reportDate == "2024-12-31" }
+        assertThat(merged.totalOperateIncome).isEqualTo(111.0) // 远端有值 → 远端覆盖
+        assertThat(merged.netcashOperate).isEqualTo(200.0)     // 远端 null → 缓存保底
+        assertThat(merged.totalAssets).isEqualTo(300.0)
+    }
 }

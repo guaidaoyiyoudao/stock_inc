@@ -189,4 +189,68 @@ class QuoteSnapshotTest {
         // 市值原值不除
         assertThat(snap.totalMarketCap).isEqualTo(225690828643.0)
     }
+
+    // ── 场内基金（ETF/LOF）：价格类裸值 ×1000（2026-08-22 实测 push2delay ulist，
+    //     腾讯 qt 同时刻交叉验证：510880 f2=3387 → 3.387、159915 f2=3560 → 3.560、
+    //     股票对照 600519 f2=127283 → 1272.83 仍 ×100）──────────────────────
+
+    private val etfShItem = QuoteItem(
+        price = 3387.0,
+        changePct = 15.0,
+        change = 5.0,
+        volume = 13626.0,
+        amount = 4610000.0,
+        turnoverRate = 56.0,
+        code = "510880",
+        market = 1,
+        high = 3397.0,
+        low = 3372.0,
+        open = 3378.0,
+        prevClose = 3382.0
+    )
+
+    private val etfSzItem = QuoteItem(
+        price = 3560.0,
+        changePct = 137.0,
+        change = 48.0,
+        code = "159915",
+        market = 0
+    )
+
+    @Test
+    fun `fund price div 1000 - 红利ETF f2 3387 to 3_387`() {
+        val snap = toQuoteSnapshot(etfShItem)
+        assertThat(snap.stockCode).isEqualTo("sh.510880")
+        assertThat(snap.price).isWithin(0.0001).of(3.387)
+        assertThat(snap.high).isWithin(0.0001).of(3.397)
+        assertThat(snap.low).isWithin(0.0001).of(3.372)
+        assertThat(snap.open).isWithin(0.0001).of(3.378)
+        assertThat(snap.prevClose).isWithin(0.0001).of(3.382)
+    }
+
+    @Test
+    fun `fund change div 1000 - 红利ETF f4 5 to 0_005`() {
+        val snap = toQuoteSnapshot(etfShItem)
+        assertThat(snap.change).isWithin(0.00001).of(0.005)
+    }
+
+    @Test
+    fun `fund percent fields still div 100 - changePct and turnover`() {
+        // 百分比类不随标的类型变：f3=15 → 0.15%、f8=56 → 0.56%（腾讯同刻 0.15% 交叉验证）
+        val snap = toQuoteSnapshot(etfShItem)
+        assertThat(snap.changePct).isWithin(0.001).of(0.15)
+        assertThat(snap.turnoverRate).isWithin(0.001).of(0.56)
+        // 绝对量类原值不除
+        assertThat(snap.volume).isEqualTo(13626.0)
+        assertThat(snap.amount).isEqualTo(4610000.0)
+    }
+
+    @Test
+    fun `shenzhen fund also div 1000 - 创业板ETF f2 3560 to 3_560`() {
+        val snap = toQuoteSnapshot(etfSzItem)
+        assertThat(snap.stockCode).isEqualTo("sz.159915")
+        assertThat(snap.price).isWithin(0.0001).of(3.560)
+        assertThat(snap.change).isWithin(0.0001).of(0.048)
+        assertThat(snap.changePct).isWithin(0.01).of(1.37)   // f3=137 → 1.37%
+    }
 }

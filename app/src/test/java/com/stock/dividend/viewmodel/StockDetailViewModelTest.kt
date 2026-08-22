@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.plane.MarketDataPlane
+import com.stock.dividend.data.plane.cashPerShareByDividendYear
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.LlmAnalysisRepository
@@ -74,10 +75,7 @@ class StockDetailViewModelTest {
         // enrichFundamentals 按平面真实口径用测试 dividendsFlow 补派息率（纯函数）
         coEvery { plane.enrichFundamentals(any(), any()) } coAnswers {
             val f: Fundamentals = firstArg()
-            val epsDiv = dividendsFlow.value
-                .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
-                .associate { it.reportDate to it.cashPerShare }
-            enrichPayoutRatio(f, epsDiv)
+            enrichPayoutRatio(f, dividendsFlow.value.cashPerShareByDividendYear())
         }
     }
 

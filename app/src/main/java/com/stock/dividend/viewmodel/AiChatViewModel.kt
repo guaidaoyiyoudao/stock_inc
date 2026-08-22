@@ -40,6 +40,8 @@ data class ChatMessageUi(
     val thinking: String? = null,
     /** 思考过程是否仍在流式接收中（true=展开+转圈，false=可折叠）。 */
     val thinkingStreaming: Boolean = false,
+    /** 仅 [ChatRole.USER] 有效：消息携带的图片 data URL（多模态输入）。 */
+    val images: List<String> = emptyList(),
 )
 
 @Stable
@@ -58,6 +60,10 @@ data class AiChatUiState(
     val llmConfigured: Boolean = false,
     val input: String = "",
     val pendingConfirmation: ConfirmationUi? = null,
+    /** 待发送图片（data URL），与输入框文字一同发出；上限 [MAX_PENDING_IMAGES] 张。 */
+    val pendingImages: List<String> = emptyList(),
+    /** 当前聊天模型是否多模态（按模型名启发式探测）；false 时点「加图」给出提示而非静默禁用。 */
+    val modelSupportsImages: Boolean = false,
 )
 
 @HiltViewModel
@@ -72,6 +78,11 @@ class AiChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.observeConfigured().collect { configured ->
                 _uiState.update { it.copy(llmConfigured = configured) }
+            }
+        }
+        viewModelScope.launch {
+            repository.observeMultimodal().collect { multimodal ->
+                _uiState.update { it.copy(modelSupportsImages = multimodal) }
             }
         }
         viewModelScope.launch { initSession() }
@@ -103,7 +114,7 @@ class AiChatViewModel @Inject constructor(
             val id = repository.createSession()
             refreshSessions()
             _uiState.update {
-                it.copy(currentSessionId = id, messages = emptyList(), pendingConfirmation = null)
+                it.copy(currentSessionId = id, messages = emptyList(), pendingConfirmation = null, pendingImages = emptyList())
             }
         }
     }
@@ -113,7 +124,7 @@ class AiChatViewModel @Inject constructor(
         viewModelScope.launch {
             val messages = loadMessages(sessionId)
             _uiState.update {
-                it.copy(currentSessionId = sessionId, messages = messages, pendingConfirmation = null)
+                it.copy(currentSessionId = sessionId, messages = messages, pendingConfirmation = null, pendingImages = emptyList())
             }
             refreshSessions()
         }
@@ -139,7 +150,8 @@ class AiChatViewModel @Inject constructor(
                     sessions = sessions,
                     currentSessionId = currentId,
                     messages = messages,
-                    pendingConfirmation = null
+                    pendingConfirmation = null,
+                    pendingImages = emptyList()
                 )
             }
         }
@@ -149,21 +161,67 @@ class AiChatViewModel @Inject constructor(
         _uiState.update { it.copy(input = text) }
     }
 
+    /** 图片读取失败（解码/IO 异常）时给出可见提示，不静默丢弃。 */
+    fun onImageLoadFailed() {
+        _uiState.update { state ->
+            state.copy(messages = state.messages + ChatMessageUi(ChatRole.SYSTEM, "图片读取失败，请重试"))
+        }
+    }
+
+    /** 当前模型不支持图片时点「加图」入口：给可解释提示而非无反应。 */
+    fun onImageUnsupported() {
+        _uiState.update { state ->
+                state.copy(
+                    messages = state.messages + ChatMessageUi(
+                        ChatRole.SYSTEM,
+                        "当前对话模型不支持图片输入，请在设置中把 Model 换成多模态模型" +
+                            "（如 deepseek-v4-flash-vision-exp、GLM-4.6V、GPT-4o、Qwen-VL、Claude 系列）后再试"
+                    )
+                )
+        }
+    }
+
+    /** 加入一张待发送图片（data URL，Screen 层已完成下采样与 JPEG 压缩）。 */
+    fun onImagePicked(dataUrl: String) {
+        _uiState.update { state ->
+            if (state.pendingImages.size >= MAX_PENDING_IMAGES) {
+                state.copy(
+                    messages = state.messages + ChatMessageUi(ChatRole.SYSTEM, "一次最多发送 $MAX_PENDING_IMAGES 张图片")
+                )
+            } else {
+                state.copy(pendingImages = state.pendingImages + dataUrl)
+            }
+        }
+    }
+
+    fun onRemovePendingImage(dataUrl: String) {
+        _uiState.update { state ->
+            state.copy(pendingImages = state.pendingImages - dataUrl)
+        }
+    }
+
     fun onSend() {
         val state = _uiState.value
         val sessionId = state.currentSessionId ?: return
         val text = state.input.trim()
-        if (text.isEmpty() || state.isSending) return
+        val images = state.pendingImages
+        if ((text.isEmpty() && images.isEmpty()) || state.isSending) return
         val titleNeedsGeneration =
             state.sessions.firstOrNull { it.id == sessionId }?.title == DEFAULT_TITLE
         _uiState.update {
             it.copy(
-                messages = it.messages + ChatMessageUi(ChatRole.USER, text),
+                messages = it.messages + ChatMessageUi(ChatRole.USER, text, images = images),
                 input = "",
+                pendingImages = emptyList(),
                 isSending = true
             )
         }
-        collectTurn(repository.send(sessionId, text), sessionId = sessionId, userText = text, titleOnComplete = titleNeedsGeneration)
+        collectTurn(
+            repository.send(sessionId, text, images),
+            sessionId = sessionId,
+            userText = text.ifEmpty { "图片" },
+            titleOnComplete = titleNeedsGeneration
+        )
     }
 
     fun onConfirm(confirmation: ConfirmationUi) {
@@ -249,12 +307,16 @@ class AiChatViewModel @Inject constructor(
         repository.loadMessages(sessionId).map { message ->
             ChatMessageUi(
                 role = if (message.isUser) ChatRole.USER else ChatRole.AGENT,
-                text = message.text
+                text = message.text,
+                images = if (message.isUser) message.images else emptyList()
             )
         }
 
     companion object {
         private const val DEFAULT_TITLE = "新会话"
+
+        /** 单轮最多携带图片数（控制请求体大小与识别噪声）。 */
+        const val MAX_PENDING_IMAGES = 3
     }
 }
 

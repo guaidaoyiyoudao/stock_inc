@@ -83,7 +83,7 @@ class OpenAiProtocolTest {
         val msg = request.messages.single()
         assertThat(msg.role).isEqualTo("tool")
         assertThat(msg.toolCallId).isEqualTo("call-1")
-        assertThat(msg.content).contains("holdings")
+        assertThat(msg.content as String).contains("holdings")
     }
 
     @Test
@@ -117,6 +117,67 @@ class OpenAiProtocolTest {
         assertThat(tool.function.parameters!!["required"]).isEqualTo(listOf("code"))
         val props = tool.function.parameters!!["properties"] as Map<*, *>
         assertThat((props["code"] as Map<*, *>)["type"]).isEqualTo("string")
+    }
+
+    @Test
+    fun buildOpenAiRequest_userContentWithImage_becomesMultimodalPartsArray() {
+        val request = buildOpenAiRequest(
+            LlmRequest(
+                contents = listOf(
+                    Content(
+                        role = Role.USER,
+                        parts = listOf(
+                            Part(text = "识别这张持仓截图"),
+                            imageDataUrlToPart("data:image/png;base64,QUJD")!!,
+                        )
+                    )
+                )
+            ),
+            modelName = "glm-4.6v-flash"
+        )
+        val msg = request.messages.single()
+        assertThat(msg.role).isEqualTo("user")
+        val parts = msg.content as List<*>
+        assertThat(parts).hasSize(2)
+        val textPart = parts[0] as OpenAiContentPart
+        assertThat(textPart.type).isEqualTo("text")
+        assertThat(textPart.text).isEqualTo("识别这张持仓截图")
+        val imagePart = parts[1] as OpenAiContentPart
+        assertThat(imagePart.type).isEqualTo("image_url")
+        assertThat(imagePart.imageUrl!!.url).isEqualTo("data:image/png;base64,QUJD")
+        // 序列化后符合 OpenAI 多模态协议（content 数组 + image_url 字段）
+        assertThat(Gson().toJson(request)).contains("\"image_url\"")
+    }
+
+    @Test
+    fun buildOpenAiRequest_imageOnlyUserContent_stillEmitsMessage() {
+        val request = buildOpenAiRequest(
+            LlmRequest(
+                contents = listOf(
+                    Content(
+                        role = Role.USER,
+                        parts = listOf(imageDataUrlToPart("data:image/jpeg;base64,QUJD")!!)
+                    )
+                )
+            ),
+            modelName = "gpt-4o"
+        )
+        val msg = request.messages.single()
+        assertThat(msg.role).isEqualTo("user")
+        val parts = msg.content as List<*>
+        assertThat(parts).hasSize(1)
+        assertThat((parts[0] as OpenAiContentPart).type).isEqualTo("image_url")
+    }
+
+    @Test
+    fun buildOpenAiRequest_textOnlyUserContent_staysPlainString() {
+        val request = buildOpenAiRequest(
+            LlmRequest(
+                contents = listOf(Content(role = Role.USER, parts = listOf(Part(text = "你好"))))
+            ),
+            modelName = "glm-4-flash"
+        )
+        assertThat(request.messages.single().content).isEqualTo("你好")
     }
 
     @Test

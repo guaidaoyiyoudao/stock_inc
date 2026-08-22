@@ -167,9 +167,10 @@ class ForecastCalculatorTest {
     }
 
     @Test
-    fun `pending plan without ex date and future ex date are excluded from ttm`() {
-        // 已公布未除权的 2026 中期预案（exDate=null）与已定未来除权日（2026-11-20）均不计入——
-        // 它们属前瞻而非最近 12 个月已派；TTM 仍取已除权的两笔
+    fun `scheduled future ex date within one year is included in ttm`() {
+        // 已定除权日（2026-11-20，实施公告已发布）计入 TTM，未除权预案（exDate=null）不计——
+        // 锚点前移至 2026-11-20：窗口 (2025-11-20, 2026-11-20] 含 2026-06 已派 + 2026-11-20 已排期，
+        // 2025-11-12（上一轮中期，已滚出 12 个月）不再计入
         val dividends = listOf(
             makeExDividend(reportDate = "2025-12-31", exDividendDate = "2025-11-12", cashPerShare = 2.3449),
             makeExDividend(reportDate = "2026-06-18", exDividendDate = "2026-06-18", cashPerShare = 2.4900),
@@ -181,7 +182,47 @@ class ForecastCalculatorTest {
             dividends, today = LocalDate.parse("2026-08-19")
         )
 
+        assertThat(dps).isWithin(1e-9).of(2.4900 + 2.5545)
+    }
+
+    @Test
+    fun `far future ex date beyond one year is excluded from ttm`() {
+        // 遥远未来除权日（2028 年，脏数据/异常占位）不参与锚点、不计入 TTM——护栏防窗口整体漂移
+        val dividends = listOf(
+            makeExDividend(reportDate = "2025-12-31", exDividendDate = "2025-11-12", cashPerShare = 2.3449),
+            makeExDividend(reportDate = "2026-06-18", exDividendDate = "2026-06-18", cashPerShare = 2.4900),
+            makeExDividend(reportDate = "2027-12-31", exDividendDate = "2028-06-30", cashPerShare = 9.9999)
+        )
+
+        val dps = ForecastCalculator.latestYearlyCashPerShare(
+            dividends, today = LocalDate.parse("2026-08-19")
+        )
+
         assertThat(dps).isWithin(1e-9).of(2.3449 + 2.4900)
+    }
+
+    @Test
+    fun `haier scenario annual dividend scheduled tomorrow completes the ttm`() {
+        // 海尔智家实测（东财 RPT_SHAREBONUS_DET，2026-08-20 查询）：
+        // 2025 中报 10派2.692 除权 2025-11-07（已派）；2025 年度 10派8.9151 除权 2026-08-21（明天，
+        // ASSIGN_PROGRESS=实施分配）——旧口径 TTM 只含中报一半（0.2692），锚点前移后两笔全计
+        val dividends = listOf(
+            makeExDividend(reportDate = "2023-12-31", exDividendDate = "2024-08-16", cashPerShare = 0.80131),
+            makeExDividend(reportDate = "2024-12-31", exDividendDate = "2025-07-25", cashPerShare = 0.96504),
+            makeExDividend(reportDate = "2025-06-30", exDividendDate = "2025-11-07", cashPerShare = 0.2692),
+            makeExDividend(reportDate = "2025-12-31", exDividendDate = "2026-08-21", cashPerShare = 0.89151)
+        )
+        val today = LocalDate.parse("2026-08-20")
+
+        val dps = ForecastCalculator.latestYearlyCashPerShare(dividends, today = today)
+
+        // 锚点 2026-08-21：窗口 (2025-08-21, 2026-08-21] = 0.2692 + 0.89151
+        assertThat(dps).isWithin(1e-9).of(0.2692 + 0.89151)
+
+        // N 年均共享同一锚点：w1 = (2024-08-21, 2025-08-21] = 0.96504（2024-08-16 已滚出）
+        val avg = ForecastCalculator.calculateAvgCashPerShare(dividends, years = 2, today = today)!!
+        assertThat(avg.avgCashPerShare).isWithin(1e-9).of((0.2692 + 0.89151 + 0.96504) / 2.0)
+        assertThat(avg.actualYears).isEqualTo(2)
     }
 
     @Test

@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.stock.dividend.data.local.dao.AchievementDao
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.DividendIncomeRecordDao
+import com.stock.dividend.data.local.dao.ErrorLogDao
 import com.stock.dividend.data.local.dao.FinancialStatementsCacheDao
 import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.FundamentalsCacheDao
@@ -25,6 +26,7 @@ import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
+import com.stock.dividend.data.local.entity.ErrorLogEntity
 import com.stock.dividend.data.local.entity.FinancialStatementsCacheEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.FundamentalsCacheEntity
@@ -62,9 +64,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         FinancialStatementsCacheEntity::class,
         GridPlanEntity::class,
         KlineCacheEntity::class,
-        KlineCacheMetaEntity::class
+        KlineCacheMetaEntity::class,
+        ErrorLogEntity::class
     ],
-    version = 25,
+    version = 26,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -86,6 +89,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun financialStatementsCacheDao(): FinancialStatementsCacheDao
     abstract fun gridPlanDao(): GridPlanDao
     abstract fun klineCacheDao(): KlineCacheDao
+    abstract fun errorLogDao(): ErrorLogDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -420,6 +424,21 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // 网格自定义档位资金比例（JSON 数组字符串；null = 默认 1/price 反比分配）
                 db.execSQL("ALTER TABLE grid_plans ADD COLUMN levelWeights TEXT")
+            }
+        }
+
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 关键失败日志（数据获取失败等静默失败的持久化记录，设置 → 数据 → 失败日志）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `error_logs` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`timestamp` INTEGER NOT NULL, " +
+                        "`category` TEXT NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`message` TEXT NOT NULL, " +
+                        "`detail` TEXT)"
+                )
             }
         }
     }

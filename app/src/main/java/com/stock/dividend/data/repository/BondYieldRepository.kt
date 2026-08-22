@@ -20,7 +20,8 @@ import javax.inject.Singleton
 @Singleton
 class BondYieldRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val api: BondYieldApi
+    private val api: BondYieldApi,
+    private val errorLogRepository: ErrorLogRepository,
 ) {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -31,6 +32,11 @@ class BondYieldRepository @Inject constructor(
 
     /**
      * 取当前 10Y 国债收益率（%）。优先内存 → 过期内缓存 → 远程 → 旧缓存 → 默认值。
+     *
+     * ⚠️ **仅成功值写缓存**（2026-08-20 审计修复）：此前失败时把回退值（默认 2.5 / 旧缓存）
+     * 也写入 memoryCache 与 prefs——断网冷启动后整个进程存活期都返回假基准（当前 10Y 真实值
+     * 约 1.8~2.0，2.5 会系统性抬高买入线），且旧缓存被 updated_at 续期成「新鲜」。
+     * 现失败路径不落任何缓存，下次调用自动重试远端。
      */
     suspend fun fetch10YBondYield(forceRefresh: Boolean = false): Double = withContext(Dispatchers.IO) {
         memoryCache?.let { if (!forceRefresh) return@withContext it }
@@ -45,21 +51,30 @@ class BondYieldRepository @Inject constructor(
 
         val remote = mutex.withLock {
             runCatching {
-                // result.data 按日期倒序，首条即最新；10Y 字段值已是「%」单位
-                api.getTreasuryYield().result?.data?.firstOrNull()?.yield10Y
+                // result.data 按日期倒序；首行 10Y 为 null（当日尚未更新）时向后扫备选行（pageSize=5）
+                api.getTreasuryYield().result?.data
+                    ?.firstOrNull { it.yield10Y != null && it.yield10Y > 0.0 }
+                    ?.yield10Y
+            }.onFailure {
+                // 静默失败落日志（设置 → 数据 → 失败日志）：回退旧缓存/默认值属于不可见的精度损失
+                errorLogRepository.record(
+                    source = "国债收益率",
+                    message = "国债收益率获取失败，已回退缓存或默认值",
+                    throwable = it,
+                )
             }.getOrNull()
         }
-        val value = when {
-            remote != null && remote.isFinite() && remote > 0.0 -> remote
-            else -> cachedValue?.takeIf { it > 0.0 } ?: DEFAULT_YIELD
-        }
 
-        prefs.edit()
-            .putString(KEY_YIELD, value.toString())
-            .putLong(KEY_UPDATED_AT, now)
-            .apply()
-        memoryCache = value
-        value
+        if (remote != null && remote.isFinite() && remote > 0.0) {
+            prefs.edit()
+                .putString(KEY_YIELD, remote.toString())
+                .putLong(KEY_UPDATED_AT, now)
+                .apply()
+            memoryCache = remote
+            return@withContext remote
+        }
+        // 失败：过期旧缓存回退（不刷 updated_at，保持真实新鲜度）；无缓存用默认值——都不落缓存，下次调用重试远端
+        cachedValue?.takeIf { it > 0.0 } ?: DEFAULT_YIELD
     }
 
     /**
@@ -109,4 +124,4 @@ data class TreasuryYields(
     val lpr5Y: Double?
 )
 
-private fun Double.takeIfFinite(): Double? = takeIf { it.isFinite() }
+// takeIfFinite 统一用 MarketDataRepository.kt 的 internal 扩展（§4.9.5-2 单点封装）

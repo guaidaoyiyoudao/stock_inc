@@ -1,5 +1,11 @@
 package com.stock.dividend.ui.screen
 
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,13 +22,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -41,14 +48,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.data.scan.bitmapToJpegDataUrl
+import com.stock.dividend.data.scan.loadSampledBitmap
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.viewmodel.AiChatUiState
@@ -65,6 +79,7 @@ import dev.jeziellago.compose.markdowntext.MarkdownText
 import com.stock.dividend.ui.component.AppTextButton
 import com.stock.dividend.ui.component.AppButton
 import com.stock.dividend.ui.component.AppTextField
+import kotlinx.coroutines.launch
 
 private val SUGGESTIONS = listOf(
     "我的持仓怎么样？",
@@ -83,6 +98,31 @@ fun AiChatScreen(
     var showSessions by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val messages = state.messages
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val pickMedia = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    // 选图即下采样 + JPEG 压缩成 data URL（最长边 1600，单张约 150-400KB），
+                    // 与截图导入链路同一套编解码工具
+                    val bitmap = loadSampledBitmap(context, uri)
+                    bitmapToJpegDataUrl(bitmap)
+                }.onSuccess { viewModel.onImagePicked(it) }
+                    .onFailure { viewModel.onImageLoadFailed() }
+            }
+        }
+    }
+    val onAttachImage: () -> Unit = {
+        if (state.modelSupportsImages) {
+            pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        } else {
+            viewModel.onImageUnsupported()
+        }
+    }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
@@ -152,11 +192,20 @@ fun AiChatScreen(
             )
         }
 
+        if (state.pendingImages.isNotEmpty()) {
+            PendingImagesRow(
+                images = state.pendingImages,
+                onRemove = viewModel::onRemovePendingImage
+            )
+        }
+
         ChatInputBar(
             input = state.input,
             isSending = state.isSending,
+            hasPendingImages = state.pendingImages.isNotEmpty(),
             onInputChanged = viewModel::onInputChanged,
-            onSend = viewModel::onSend
+            onSend = viewModel::onSend,
+            onAttachImage = onAttachImage
         )
     }
 
@@ -298,7 +347,7 @@ private fun ChatGreeting(onSuggestionClick: (String) -> Unit) {
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            text = "可以查持仓、看行情、估值、买入线，也可以帮你记账和改持仓",
+            text = "可以查持仓、看行情、估值、买入线，也可以帮你记账和改持仓；\n多模态模型支持发送持仓/成交截图直接识别导入",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -321,15 +370,33 @@ private fun ChatGreeting(onSuggestionClick: (String) -> Unit) {
 @Composable
 private fun MessageBubble(message: ChatMessageUi) {
     when (message.role) {
-        ChatRole.USER -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Text(
-                    text = message.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                )
+        ChatRole.USER -> Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            // 用户消息携带的图片（多模态输入）：缩略图置于文字上方
+            if (message.images.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    message.images.forEach { url ->
+                        DataUrlImage(
+                            dataUrl = url,
+                            contentDescription = "用户发送的图片",
+                            modifier = Modifier
+                                .size(width = 110.dp, height = 150.dp)
+                                .clip(MaterialTheme.shapes.small)
+                        )
+                    }
+                }
+            }
+            if (message.text.isNotEmpty()) {
+                Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+                    Text(
+                        text = message.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                }
             }
         }
         ChatRole.AGENT -> Column(
@@ -524,15 +591,21 @@ private fun ConfirmationCard(
 private fun ChatInputBar(
     input: String,
     isSending: Boolean,
+    hasPendingImages: Boolean,
     onInputChanged: (String) -> Unit,
     onSend: () -> Unit,
+    onAttachImage: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Bottom
     ) {
+        IconButton(onClick = onAttachImage, enabled = !isSending) {
+            Icon(Icons.Filled.ImageIcon, contentDescription = "发送图片")
+        }
+        Spacer(Modifier.width(4.dp))
         AppTextField(
             value = input,
             onValueChange = onInputChanged,
@@ -543,7 +616,10 @@ private fun ChatInputBar(
         )
         Spacer(Modifier.width(8.dp))
         Box(contentAlignment = Alignment.Center) {
-            FilledIconButton(onClick = onSend, enabled = input.isNotBlank() && !isSending) {
+            FilledIconButton(
+                onClick = onSend,
+                enabled = (input.isNotBlank() || hasPendingImages) && !isSending
+            ) {
                 if (isSending) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
@@ -555,4 +631,93 @@ private fun ChatInputBar(
             }
         }
     }
+}
+
+/** 输入框上方的待发送图片行：64dp 缩略图 + 右上角移除按钮。 */
+@Composable
+private fun PendingImagesRow(
+    images: List<String>,
+    onRemove: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        images.forEach { url ->
+            Box {
+                DataUrlImage(
+                    dataUrl = url,
+                    contentDescription = "待发送图片",
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(MaterialTheme.shapes.small)
+                )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(2.dp)
+                        .size(20.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "移除图片",
+                        modifier = Modifier
+                            .clickable { onRemove(url) }
+                            .padding(3.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * data URL（`data:image/jpeg;base64,…`）→ Bitmap 渲染。
+ * 会话历史重开时图片从 ADK SessionService 持久化字节还原，这里本地解码，不经网络。
+ */
+@Composable
+private fun DataUrlImage(
+    dataUrl: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+) {
+    val bitmap = remember(dataUrl) { decodeDataUrlBitmap(dataUrl) }
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        // 解码失败兜底：占位块（历史会话数据损坏时不至于空白无解释）
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = modifier
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Filled.ImageIcon,
+                    contentDescription = contentDescription,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+private fun decodeDataUrlBitmap(dataUrl: String): android.graphics.Bitmap? {
+    if (!dataUrl.startsWith("data:image/")) return null
+    return runCatching {
+        val payload = dataUrl.substringAfter("base64,", "")
+        if (payload.isEmpty()) return null
+        val bytes = Base64.decode(payload, Base64.NO_WRAP)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }.getOrNull()
 }

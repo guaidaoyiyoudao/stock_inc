@@ -30,14 +30,16 @@ import org.junit.Test
 
 class AiChatRepositoryTest {
 
-    /** 脚本化假 Model：按调用次数依次返回预置响应。 */
+    /** 脚本化假 Model：按调用次数依次返回预置响应，并捕获每次 LlmRequest 供断言。 */
     private class ScriptedModel(
         private val script: MutableList<() -> LlmResponse>,
     ) : Model {
         override val name: String = "fake"
         private var calls = 0
+        val capturedRequests = mutableListOf<LlmRequest>()
 
         override fun generateContent(request: LlmRequest, stream: Boolean): Flow<LlmResponse> = flow {
+            capturedRequests += request
             val index = calls++
             emit(script[index]())
         }
@@ -234,5 +236,71 @@ class AiChatRepositoryTest {
         val events = repository.send("s1", "hi").toList()
         assertThat(events.single()).isInstanceOf(AiChatEvent.Error::class.java)
         coVerify(exactly = 0) { factory.create(any()) }
+    }
+
+    @Test
+    fun sendWithImage_carriesInlinePartIntoLlmRequestAndPersistsForReload() = runTest {
+        val model = ScriptedModel(
+            mutableListOf(
+                { LlmResponse(content = Content(role = Role.MODEL, parts = listOf(Part(text = "识别到 2 行持仓")))) }
+            )
+        )
+        val factory = mockk<AiAgentFactory>(relaxed = true)
+        coEvery { factory.create(any()) } returns LlmAgent(
+            name = "ai_tab_agent",
+            model = model,
+            instruction = Instruction("test"),
+            tools = emptyList()
+        )
+        val repository = AiChatRepository(
+            configSource(LlmConfig("http://x", "k", "m")),
+            factory,
+            com.google.adk.kt.sessions.InMemorySessionService(),
+            mockk<AiTitleGenerator>(relaxed = true)
+        )
+        val sessionId = repository.createSession()
+        val dataUrl = "data:image/png;base64,QUJD"
+        val events = repository.send(sessionId, "识别这张截图", listOf(dataUrl)).toList()
+        assertThat(events.filterIsInstance<AiChatEvent.Final>().single().text).isEqualTo("识别到 2 行持仓")
+
+        // ADK 链路把用户图片 Part（inlineData）原样送进 LlmRequest.contents
+        val userContent = model.capturedRequests.single().contents.first { it.role == Role.USER }
+        assertThat(userContent.parts.mapNotNull { it.text }).contains("识别这张截图")
+        assertThat(userContent.parts.mapNotNull { it.imageDataUrl() }).containsExactly(dataUrl)
+
+        // 会话重开：历史用户消息带图片回读（缩略图渲染用）
+        val messages = repository.loadMessages(sessionId)
+        assertThat(messages.first().isUser).isTrue()
+        assertThat(messages.first().text).isEqualTo("识别这张截图")
+        assertThat(messages.first().images).containsExactly(dataUrl)
+    }
+
+    @Test
+    fun sendWithImage_onlyImages_stillRunsTurn() = runTest {
+        val model = ScriptedModel(
+            mutableListOf(
+                { LlmResponse(content = Content(role = Role.MODEL, parts = listOf(Part(text = "这是持仓截图")))) },
+                { LlmResponse(content = Content(role = Role.MODEL, parts = listOf(Part(text = "已收到")))) }
+            )
+        )
+        val factory = mockk<AiAgentFactory>(relaxed = true)
+        coEvery { factory.create(any()) } returns LlmAgent(
+            name = "ai_tab_agent",
+            model = model,
+            instruction = Instruction("test"),
+            tools = emptyList()
+        )
+        val repository = AiChatRepository(
+            configSource(LlmConfig("http://x", "k", "m")),
+            factory,
+            com.google.adk.kt.sessions.InMemorySessionService(),
+            mockk<AiTitleGenerator>(relaxed = true)
+        )
+        val sessionId = repository.createSession()
+        val events = repository.send(sessionId, "", listOf("data:image/jpeg;base64,QUJD")).toList()
+        assertThat(events.filterIsInstance<AiChatEvent.Final>()).isNotEmpty()
+        // 无效 data URL 被丢弃、不炸整轮
+        val events2 = repository.send(sessionId, "再看这张", listOf("not-a-data-url")).toList()
+        assertThat(events2.filterIsInstance<AiChatEvent.Final>()).isNotEmpty()
     }
 }

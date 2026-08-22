@@ -25,6 +25,10 @@ internal fun buildOpenAiRequest(
     llmRequest.contents.forEach { content ->
         val text = content.parts.mapNotNull { it.text }.joinToString("")
         val toolCalls = content.parts.mapNotNull { it.functionCall }
+        // 仅用户侧携带图片（inlineData → image_url data URL）；模型不产图。
+        val imageUrls = if (content.role == Role.USER) {
+            content.parts.mapNotNull { it.imageDataUrl() }
+        } else emptyList()
         when {
             toolCalls.isNotEmpty() -> messages += OpenAiMessage(
                 role = if (content.role == Role.USER) "user" else "assistant",
@@ -36,9 +40,18 @@ internal fun buildOpenAiRequest(
                     )
                 }
             )
-            text.isEmpty() -> Unit // 仅含 functionResponse 的 content 不产生普通消息
+            // 仅含 functionResponse 的 content 不产生普通消息（纯图片 content 有 imageUrls 兜底，不跳过）
+            text.isEmpty() && imageUrls.isEmpty() -> Unit
             content.role == Role.MODEL -> messages += OpenAiMessage(
                 role = "assistant", content = text.ifEmpty { null }
+            )
+            imageUrls.isNotEmpty() -> messages += OpenAiMessage(
+                role = "user",
+                // 多模态消息 content 必须是数组（text 段 + image_url 段），纯文本仍用字符串以最小改动请求体
+                content = buildList {
+                    if (text.isNotEmpty()) add(OpenAiContentPart(type = "text", text = text))
+                    imageUrls.forEach { add(OpenAiContentPart(type = "image_url", imageUrl = OpenAiImageUrl(it))) }
+                }
             )
             else -> messages += OpenAiMessage(role = "user", content = text.ifEmpty { null })
         }
@@ -106,7 +119,8 @@ internal fun toLlmResponse(
         ?: return LlmResponse(errorMessage = "模型返回空响应")
     val message = choice.message ?: return LlmResponse(errorMessage = "模型返回空消息")
     val parts = mutableListOf<Part>()
-    message.content?.takeIf { it.isNotBlank() }?.let { parts += Part(text = it) }
+    // content 兼容 String（普通文本）与数组（多模态请求，仅用户侧发送、响应不会出现）
+    (message.content as? String)?.takeIf { it.isNotBlank() }?.let { parts += Part(text = it) }
     message.toolCalls?.forEach { tc ->
         val args = runCatching {
             gson.fromJson(tc.function.arguments, Map::class.java) as? Map<String, Any?>

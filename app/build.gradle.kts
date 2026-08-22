@@ -113,6 +113,7 @@ dependencies {
     // Network
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)
+    implementation(libs.retrofit.scalars) // 基金分红 f10 HTML 原文响应（ScalarsConverter）
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 

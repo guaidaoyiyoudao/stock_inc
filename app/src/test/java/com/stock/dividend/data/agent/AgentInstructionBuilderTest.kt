@@ -69,6 +69,18 @@ class AgentInstructionBuilderTest {
     }
 
     @Test
+    fun baseInstruction_guidesImageRecognitionImport() {
+        // 图片导入链路：识别持仓/成交截图 → 复述确认 → 走写工具（add_stock/update_holding/add_transaction）
+        val instruction = AgentInstructionBuilder.build(emptyList())
+        assertThat(instruction).contains("图片识别与导入")
+        assertThat(instruction).contains("add_stock")
+        assertThat(instruction).contains("update_holding")
+        assertThat(instruction).contains("add_transaction")
+        // 禁止编造识别结果（数据准确性契约延伸到图片输入）
+        assertThat(instruction).contains("禁止编造")
+    }
+
+    @Test
     fun customPrompt_appendedAfterStrategies_andKeepsBaseContract() {
         val strategy = TradeStrategyEntity(
             id = "s3",

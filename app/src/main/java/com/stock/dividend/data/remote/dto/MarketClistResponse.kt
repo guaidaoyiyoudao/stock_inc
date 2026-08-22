@@ -11,12 +11,14 @@ import com.google.gson.annotations.SerializedName
  * 都是真实小数；金额类 f6/f20/f21/f62/f66/f72/f78/f84 为「元」原值。
  * ⚠️ 这与 [QuoteResponse]（push2 ulist）的「价格百分比 ÷100」规则**不同**——ulist 省小数点传 ×100 整数，
  *   clist 传真实值。两者解析逻辑独立，切勿混用。
- * 字段值 "-" 表示停牌/无效，Gson 反序列化为 null 兼容（[Double] 可空 + 宽松解析）。
  *
- * 字段含义（东财 f 序列，资金流字段编号经官方文档确认）：
- * 行情：f2 现价 / f3 涨跌幅% / f4 涨跌额 / f5 成交量手 / f6 成交额元 / f7 振幅% / f8 换手率% /
- *   f9 PE(TTM) / f10 量比 / f12 代码 / f13 市场(1沪0深) / f14 名称 / f20 总市值元 / f21 流通市值元 / f23 PB /
- *   f100 所属行业 / f128 领涨股名 / f140 领涨股代码 / f136 领涨股涨跌幅%。
+ * 字段值 "-" 表示停牌/退市/无效（2026-08-20 审计实测：退市股全字段 "-"）——**默认 Gson 会抛
+ * NumberFormatException 导致整批解析失败**，NetworkModule 已为东财系 Retrofit 注册容错
+ * Double 反序列化（"-"→null），单条记录降级而非整批丢弃。
+ *
+ * 字段含义（东财 f 序列，资金流字段编号经官方文档确认；仅保留实际请求/解析的字段）：
+ * 行情：f2 现价 / f3 涨跌幅% / f8 换手率% / f9 PE(TTM) / f12 代码 / f14 名称 /
+ *   f20 总市值元 / f23 PB / f100 所属行业 / f128 领涨股名 / f140 领涨股代码 / f136 领涨股涨跌幅%。
  *   f133 股息率%（2026-08-15 实测交叉验证：汇洁股份 f133=14.61，与「近 12 月每股分红 1.10 元 ÷
  *   现价 7.53 元 ≈ 14.6%」吻合；全市场 fs 按 f133 降序返回即为股息率榜）。
  * 资金流净额（元）：f62 主力 / f66 超大单 / f72 大单 / f78 中单 / f84 小单。
@@ -35,30 +37,16 @@ data class MarketClistResponse(
         val price: Double? = null,
         @SerializedName("f3")
         val changePct: Double? = null,
-        @SerializedName("f4")
-        val change: Double? = null,
-        @SerializedName("f5")
-        val volume: Double? = null,
-        @SerializedName("f6")
-        val amount: Double? = null,
-        @SerializedName("f7")
-        val amplitude: Double? = null,
         @SerializedName("f8")
         val turnoverRate: Double? = null,
         @SerializedName("f9")
         val pe: Double? = null,
-        @SerializedName("f10")
-        val volumeRatio: Double? = null,
         @SerializedName("f12")
         val code: String? = null,
-        @SerializedName("f13")
-        val market: Int? = null,
         @SerializedName("f14")
         val name: String? = null,
         @SerializedName("f20")
         val totalMarketCap: Double? = null,
-        @SerializedName("f21")
-        val circMarketCap: Double? = null,
         @SerializedName("f23")
         val pb: Double? = null,
         @SerializedName("f133")
@@ -98,8 +86,8 @@ data class MarketClistResponse(
  * 东方财富 push2 `api/qt/stock/get` 单标的详情响应壳（用于指数 / ETF 行情）。
  *
  * ⚠️ **与 [MarketClistResponse] 单位规则不同**：stock/get 的价格/百分比类字段（f43/f44/f45/f46/f60/f170）
- * 为**真实值 ×100 的整数，解析时必须 ÷100**（实测上证指数 f43=383226 → 3832.26 点）；量额类（f47 成交量手、
- * f48 成交额元）为原值不除。返回 `data: { 字段... }`（单对象，无 diff 数组）。
+ * 为**真实值 ×100 的整数，解析时必须 ÷100**（实测上证指数 f43=383226 → 3832.26 点）；f48 成交额元
+ * 为原值不除。返回 `data: { 字段... }`（单对象，无 diff 数组）。
  */
 data class IndexQuoteResponse(
     val data: IndexQuoteData?
@@ -113,8 +101,6 @@ data class IndexQuoteResponse(
         val low: Double? = null,
         @SerializedName("f46")
         val open: Double? = null,
-        @SerializedName("f47")
-        val volume: Double? = null,
         @SerializedName("f48")
         val amount: Double? = null,
         @SerializedName("f57")

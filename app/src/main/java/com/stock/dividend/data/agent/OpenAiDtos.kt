@@ -14,12 +14,27 @@ internal data class OpenAiChatRequest(
     val stream: Boolean = false,
 )
 
+/**
+ * content 兼容两种形态（OpenAI Chat Completions 协议）：
+ * - 纯文本消息：String；
+ * - 含图片的多模态消息：`List<OpenAiContentPart>`（type=text + type=image_url 的 data URL）。
+ * Gson 按运行时类型序列化，故声明为 [Any]。
+ */
 internal data class OpenAiMessage(
     val role: String,
-    val content: String? = null,
+    val content: Any? = null,
     @SerializedName("tool_calls") val toolCalls: List<OpenAiToolCall>? = null,
     @SerializedName("tool_call_id") val toolCallId: String? = null,
 )
+
+/** 多模态 content 数组元素：type=text（文本段）或 type=image_url（图片段，data URL）。 */
+internal data class OpenAiContentPart(
+    val type: String,
+    val text: String? = null,
+    @SerializedName("image_url") val imageUrl: OpenAiImageUrl? = null,
+)
+
+internal data class OpenAiImageUrl(val url: String)
 
 internal data class OpenAiToolCall(
     val id: String,

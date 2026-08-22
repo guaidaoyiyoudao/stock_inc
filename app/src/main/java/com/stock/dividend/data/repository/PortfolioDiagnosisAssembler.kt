@@ -39,6 +39,9 @@ class PortfolioDiagnosisAssembler @Inject constructor(
             coroutineScope {
                 val holdings = stocks.mapNotNull { s ->
                     val price = prices[s.code]?.takeIf { it > 0.0 } ?: return@mapNotNull null
+                    // 与 plane.getDps 同新鲜度策略（2026-08-20 审计修复 M7）：先确保分红拉取过，
+                    // 否则从未刷新过分红的股票在诊断里 annualDividend/yieldPct=null，同会话其他工具却有值
+                    runCatching { marketDataPlane.ensureDividendsFresh(s.code) }
                     val dividends = runCatching { marketDataPlane.getDividends(s.code) }
                         .getOrDefault(emptyList())
                     val yearlyCash = ForecastCalculator.latestYearlyCashPerShare(dividends)

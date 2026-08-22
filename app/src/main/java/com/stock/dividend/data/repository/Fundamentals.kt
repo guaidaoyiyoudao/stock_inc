@@ -85,34 +85,44 @@ object FundamentalsBuilder {
 }
 
 /**
- * 用股息接口的 EPS_DIV（每股派息）补全 [Fundamentals.Period.payoutRatio]（纯函数）。
+ * 用本地分红的**年度合计**补全 [Fundamentals.Period.payoutRatio]（纯函数）。
  *
- * 派息率 = EPS_DIV ÷ BASIC_EPS × 100；BASIC_EPS 已在 [Fundamentals.Period.basicEps] 中（由 [FundamentalsBuilder] 保留）。
+ * 年度派息率 = 该分红年度每股分红合计 ÷ 该年度年报 BASIC_EPS × 100（仅挂在年报期 12-31 上）。
+ *
+ * ⚠️ 必须按年度合计而非按报告期单笔（2026-08-20 审计修复）：半年派息股（如中国移动）的
+ * 中期+末期若不合计，年报期只匹配到单笔（约低估一半）、真实中期报告期又永远匹配不上——
+ * 与 TTM 股息率修复（2026-08-19）同类问题的派息率分支。腾讯源 `nd` 即分红年度、东财源
+ * reportDate 含真实报告期，两者按「reportDate 前 4 位年份」分组合计后口径天然统一。
+ *
  * - BASIC_EPS 缺失 / 为 0 / 为负 → payoutRatio = null（不臆造）
- * - 该报告期无对应 EPS_DIV → payoutRatio = null
+ * - 非年报期（Q1/Q2/Q3）不挂派息率（半年 EPS 对年度分红会算出约两倍的错误值）→ null
+ * - 该年度无分红 → null
  *
- * @param fundamentals         [FundamentalsBuilder.build] 的产物（payoutRatio 字段会被覆盖）
- * @param cashPerShareByDate   各报告期 → 每股派息映射（来自已订阅的股息数据）
+ * @param fundamentals          [FundamentalsBuilder.build] 的产物（payoutRatio 字段会被覆盖）
+ * @param cashPerShareByYear    分红年度 → 该年每股分红合计（来自已订阅的股息数据）
  */
 fun enrichPayoutRatio(
     fundamentals: Fundamentals,
-    cashPerShareByDate: Map<String, Double>
+    cashPerShareByYear: Map<Int, Double>
 ): Fundamentals {
     return fundamentals.copy(
         periods = fundamentals.periods.map { period ->
-            period.copy(payoutRatio = computePayoutRatio(period, cashPerShareByDate))
+            period.copy(payoutRatio = computePayoutRatio(period, cashPerShareByYear))
         }
     )
 }
 
 private fun computePayoutRatio(
     period: Fundamentals.Period,
-    cashPerShareByDate: Map<String, Double>
+    cashPerShareByYear: Map<Int, Double>
 ): Double? {
+    // 仅年报期挂年度派息率；中期 EPS 是半年值，除年度分红会得约两倍错误值
+    if (!period.reportDate.endsWith("12-31")) return null
     val eps = period.basicEps
     if (eps == null || eps <= 0.0) return null   // EPS 缺失/为 0/为负，不臆造
-    val cashPerShare = cashPerShareByDate[period.reportDate] ?: return null
-    if (!cashPerShare.isFinite() || cashPerShare < 0.0) return null
+    val year = period.reportDate.take(4).toIntOrNull() ?: return null
+    val cashPerShare = cashPerShareByYear[year] ?: return null
+    if (!cashPerShare.isFinite() || cashPerShare <= 0.0) return null
     return cashPerShare / eps * 100
 }
 

@@ -122,4 +122,22 @@ class FundamentalsCacheRepositoryTest {
         val persisted = gson.fromJson(payloadSlot.captured.payload, Fundamentals::class.java)
         assertThat(persisted.periods).hasSize(3)
     }
+
+    @Test
+    fun `remote null fields fall back to cached same-period values`() = runTest {
+        // 2026-08-20 审计 M5：远端资产负债表子接口失败（降级空表）时同期负债率为 null——
+        // 修复前整期覆盖会把缓存里已有的负债率抹掉且持久化；修复后字段级回退
+        coEvery { dao.get("sh.600036") } returns entity(fetchedAt = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000)
+        val remoteDegraded = Fundamentals(
+            periods = listOf(Fundamentals.Period("2025-03-31", 13.0, null, 8.5, 5.5))
+        )
+        coEvery { stockRepository.fetchFundamentals("sh.600036") } returns remoteDegraded
+        coEvery { dao.upsert(any()) } returns Unit
+
+        val result = repo().getFundamentals("sh.600036")!!
+
+        assertThat(result.periods[0].roe).isEqualTo(13.0)              // 远端有值 → 远端
+        assertThat(result.periods[0].debtToAssetRatio).isEqualTo(60.0) // 远端 null → 缓存保底
+        assertThat(result.periods[0].revenueYoy).isEqualTo(8.5)
+    }
 }

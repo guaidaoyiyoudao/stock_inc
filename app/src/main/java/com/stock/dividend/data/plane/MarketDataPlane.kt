@@ -9,6 +9,7 @@ import com.stock.dividend.data.repository.CapitalFlow
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.DividendMetricsCalculator
 import com.stock.dividend.data.repository.DragonTigerItem
+import com.stock.dividend.data.repository.ErrorLogRepository
 import com.stock.dividend.data.repository.FinancialStatements
 import com.stock.dividend.data.repository.FinancialStatementsRepository
 import com.stock.dividend.data.repository.ForecastCalculator
@@ -71,6 +72,7 @@ class MarketDataPlane @Inject constructor(
     private val bondYieldRepository: BondYieldRepository,
     private val researchRepository: ResearchRepository,
     private val dividendFreshnessStore: DividendFreshnessStore,
+    private val errorLogRepository: ErrorLogRepository,
 ) {
     /** 测试可替换的时钟（默认真实时间）。 */
     @VisibleForTesting
@@ -181,6 +183,13 @@ class MarketDataPlane @Inject constructor(
             )
             if (result.isSuccess) {
                 dividendFreshnessStore.markSuccess(stockCode, nowProvider())
+            } else {
+                // 静默失败落日志（设置 → 数据 → 失败日志），60s 防抖不刷屏
+                errorLogRepository.record(
+                    source = "分红",
+                    message = "分红数据刷新失败（$stockCode）",
+                    throwable = result.exceptionOrNull(),
+                )
             }
         }
     }
@@ -196,6 +205,12 @@ class MarketDataPlane @Inject constructor(
         )
         if (result.isSuccess) {
             dividendFreshnessStore.markSuccess(stockCode, nowProvider())
+        } else {
+            errorLogRepository.record(
+                source = "分红",
+                message = "分红数据刷新失败（$stockCode）",
+                throwable = result.exceptionOrNull(),
+            )
         }
         return result
     }
@@ -266,6 +281,13 @@ class MarketDataPlane @Inject constructor(
         return bollFlights.run(key) {
             val closes = bollSemaphore.withPermit {
                 runCatching { klineRepository.fetchCloses(stockCode, period) }
+                    .onFailure {
+                        errorLogRepository.record(
+                            source = "K线",
+                            message = "${period.chineseName()}线数据获取失败（$stockCode）",
+                            throwable = it,
+                        )
+                    }
                     .getOrDefault(emptyList())
             }
             BollCalculator.calculate(closes).also { bollSession[key] = Timed(nowProvider(), it) }
@@ -292,13 +314,17 @@ class MarketDataPlane @Inject constructor(
         forceRefresh: Boolean = false
     ): Fundamentals? {
         val raw = runCatching { fundamentalsCacheRepository.getFundamentals(stockCode, forceRefresh) }
+            .onFailure {
+                errorLogRepository.record(
+                    source = "基本面",
+                    message = "基本面数据获取失败（$stockCode）",
+                    throwable = it,
+                )
+            }
             .getOrNull() ?: return null
         val dividends = runCatching { dividendRepository.getDividends(stockCode) }
             .getOrDefault(emptyList())
-        val cashByReportDate = dividends
-            .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
-            .associate { it.reportDate to it.cashPerShare }
-        return enrichPayoutRatio(raw, cashByReportDate)
+        return enrichPayoutRatio(raw, dividends.cashPerShareByDividendYear())
     }
 
     /** 财务三表全量（利润/现金流/资产负债；7 天缓存 + 报告期合并）。 */
@@ -307,6 +333,13 @@ class MarketDataPlane @Inject constructor(
         forceRefresh: Boolean = false
     ): FinancialStatements? =
         runCatching { financialStatementsRepository.getFinancialStatements(stockCode, forceRefresh) }
+            .onFailure {
+                errorLogRepository.record(
+                    source = "财务三表",
+                    message = "财务报表获取失败（$stockCode）",
+                    throwable = it,
+                )
+            }
             .getOrNull()
 
     /**
@@ -316,10 +349,7 @@ class MarketDataPlane @Inject constructor(
     suspend fun enrichFundamentals(fundamentals: Fundamentals, stockCode: String): Fundamentals {
         val dividends = runCatching { dividendRepository.getDividends(stockCode) }
             .getOrDefault(emptyList())
-        val cashByReportDate = dividends
-            .filter { it.reportDate.isNotBlank() && it.cashPerShare > 0.0 }
-            .associate { it.reportDate to it.cashPerShare }
-        return enrichPayoutRatio(fundamentals, cashByReportDate)
+        return enrichPayoutRatio(fundamentals, dividends.cashPerShareByDividendYear())
     }
 
     // ══ 市场（指数/板块/榜单/资金流/龙虎榜；60s 内存缓存） ══
@@ -443,4 +473,25 @@ class MarketDataPlane @Inject constructor(
             fetch().also { marketSession[key] = Timed(nowProvider(), it) }
         } as T
     }
+}
+
+/**
+ * 分红年度（reportDate 前 4 位）→ 该年每股分红**合计**。
+ * 半年派息股中期+末期必须合计后才能对年报 EPS 算派息率（见 [enrichPayoutRatio] 口径说明）；
+ * 腾讯源 `nd` 与东财真实报告期按年份归一后口径统一。无效年份/非正金额剔除（不臆造）。
+ */
+internal fun List<DividendEntity>.cashPerShareByDividendYear(): Map<Int, Double> =
+    mapNotNull { d ->
+        val year = d.reportDate.take(4).toIntOrNull() ?: return@mapNotNull null
+        if (d.cashPerShare <= 0.0 || !d.cashPerShare.isFinite()) return@mapNotNull null
+        year to d.cashPerShare
+    }
+        .groupBy({ it.first }, { it.second })
+        .mapValues { (_, values) -> values.sum() }
+
+/** K 线周期中文名（失败日志 message 用）。 */
+private fun KlinePeriod.chineseName(): String = when (this) {
+    KlinePeriod.DAILY -> "日"
+    KlinePeriod.WEEKLY -> "周"
+    KlinePeriod.MONTHLY -> "月"
 }

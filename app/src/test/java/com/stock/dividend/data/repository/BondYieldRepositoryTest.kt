@@ -25,7 +25,7 @@ class BondYieldRepositoryTest {
     private val context: Context = mockk {
         every { getSharedPreferences(any(), any()) } returns prefs
     }
-    private val repo = BondYieldRepository(context, api)
+    private val repo = BondYieldRepository(context, api, mockk(relaxed = true))
 
     /** 真实结构响应：data 倒序，首条 10Y=1.7337。 */
     private fun realResponse(): BondYieldResponse = BondYieldResponse(
@@ -113,5 +113,35 @@ class BondYieldRepositoryTest {
             BondYieldResponse(BondYieldResponse.BondYieldResult(listOf(BondYieldResponse.BondYieldItem("2026-07-27", 0.0))))
         val yield = repo.fetch10YBondYield(forceRefresh = true)
         assertThat(yield).isWithin(1e-9).of(BondYieldRepository.DEFAULT_YIELD)
+    }
+
+    // ---------- 2026-08-20 审计 M3/L9 修复：失败不锁死缓存 + 向后扫备选行 ----------
+
+    @Test
+    fun `failed fetch does not poison memory cache - next call retries remote`() = runTest {
+        // 断网冷启动时首次失败返回默认值，但恢复后第二次调用必须重试远端拿到真值
+        // （修复前：DEFAULT_YIELD 被写入 memoryCache，进程存活期永远 2.5）
+        primePrefs()
+        coEvery { api.getTreasuryYield(any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
+            java.net.SocketTimeoutException("down") andThen realResponse()
+
+        val first = repo.fetch10YBondYield(forceRefresh = true)
+        assertThat(first).isWithin(1e-9).of(BondYieldRepository.DEFAULT_YIELD)
+
+        val second = repo.fetch10YBondYield(forceRefresh = false)   // 非强制——修复前这里会命中被污染的 memoryCache
+        assertThat(second).isWithin(1e-9).of(1.7337)
+    }
+
+    @Test
+    fun `skips rows with null 10Y and scans next available row`() = runTest {
+        // 首行 10Y 为 null（当日尚未更新）时向后扫备选行，而非直接落默认值
+        primePrefs()
+        coEvery { api.getTreasuryYield(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            BondYieldResponse(BondYieldResponse.BondYieldResult(listOf(
+                BondYieldResponse.BondYieldItem(solarDate = "2026-07-27 00:00:00", yield10Y = null),
+                BondYieldResponse.BondYieldItem(solarDate = "2026-07-23 00:00:00", yield10Y = 1.7325)
+            )))
+        val yield = repo.fetch10YBondYield(forceRefresh = true)
+        assertThat(yield).isWithin(1e-9).of(1.7325)
     }
 }

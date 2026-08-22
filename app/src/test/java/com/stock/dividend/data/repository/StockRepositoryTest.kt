@@ -13,6 +13,7 @@ import com.stock.dividend.data.local.entity.PriceCacheEntity
 import com.stock.dividend.data.local.entity.SearchCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.data.repository.ErrorLogRepository
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.SearchApi
 import com.stock.dividend.data.remote.dto.BalanceSheetResponse
@@ -53,9 +54,10 @@ class StockRepositoryTest {
     private val stockTagDao: StockTagDao = mockk(relaxed = true)
     private val klineRepository: KlineRepository = mockk(relaxed = true)
     private val appDatabase: AppDatabase = mockk(relaxed = true)
+    private val errorLogRepository: ErrorLogRepository = mockk(relaxed = true)
     private val repository = StockRepository(
         api, quoteApi, fundamentalApi, dao, transactionDao, industryTargetDao,
-        priceCacheDao, searchCacheDao, stockTagDao, klineRepository, appDatabase
+        priceCacheDao, searchCacheDao, stockTagDao, klineRepository, appDatabase, errorLogRepository
     )
 
     @org.junit.Before
@@ -107,6 +109,42 @@ class StockRepositoryTest {
         assertThat(results).hasSize(1)
         assertThat(results[0].name).isEqualTo("平安银行")
         assertThat(results[0].code).isEqualTo("sz.000001")
+    }
+
+    @Test
+    fun `searchStocks keeps exchange traded funds but rejects OTC funds`() = runTest {
+        // 实测口径（2026-08-22 searchapi）：场内基金 Classify="Fund" 且 MktNum="1"/"0"（与 A 股同市场规则）；
+        // 场外基金 Classify="OTCFUND"（MktNum="150"，如易方达消费行业 110022）不可行情交易，必须排除
+        coEvery { api.searchStocks(input = "红利ETF") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(
+                    StockSearchResponse.StockItem(
+                        Code = "510880", Name = "红利ETF华泰柏瑞",
+                        MktNum = "1", SecurityTypeName = "基金", Classify = "Fund"
+                    ),
+                    StockSearchResponse.StockItem(
+                        Code = "159905", Name = "红利ETF工银",
+                        MktNum = "0", SecurityTypeName = "基金", Classify = "Fund"
+                    ),
+                    StockSearchResponse.StockItem(
+                        Code = "110022", Name = "易方达消费行业股票",
+                        MktNum = "150", SecurityTypeName = "基金", Classify = "OTCFUND"
+                    ),
+                    StockSearchResponse.StockItem(
+                        Code = "000001", Name = "平安银行",
+                        MktNum = "0", SecurityTypeName = "深A", Classify = "AStock"
+                    )
+                )
+            )
+        )
+
+        val result = repository.searchStocks("红利ETF")
+
+        assertThat(result.isSuccess).isTrue()
+        val results = result.getOrNull()!!
+        assertThat(results.map { it.code }).containsExactly("sh.510880", "sz.159905", "sz.000001").inOrder()
+        // marketCode 沿用 MktNum（1=沪/0=深），行情 secid 构造与 A 股同路
+        assertThat(results[0].marketCode).isEqualTo("1")
     }
 
     @Test
@@ -356,7 +394,7 @@ class StockRepositoryTest {
     }
 
     @Test
-    fun `fetchQuotes converts API prices from fen to yuan`() = runTest {
+    fun `fetchQuotes converts API prices from x100 raw integers to yuan`() = runTest {
         val stocks = listOf(
             StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1", costPerShare = 1500.0),
             StockEntity(code = "sz.000001", name = "平安银行", marketCode = "0", costPerShare = 12.0, shares = 1000)
@@ -905,6 +943,19 @@ class StockRepositoryTest {
         coEvery { quoteApi.getQuotes(secids = any()) } throws java.io.IOException("down")
 
         assertThat(repository.fetchQuoteSnapshots(stocks)).isEmpty()
+    }
+
+    @Test
+    fun `fetchQuoteSnapshots failure records error log`() = runTest {
+        val stocks = listOf(StockEntity(code = "sh.600036", name = "招商银行", marketCode = "1"))
+        coEvery { quoteApi.getQuotes(secids = any()) } throws java.io.IOException("down")
+
+        assertThat(repository.fetchQuoteSnapshots(stocks)).isEmpty()
+
+        // 静默失败落日志（设置 → 数据 → 失败日志）
+        coVerify(exactly = 1) {
+            errorLogRepository.record("行情", "行情获取失败（1 只标的）", any(), any())
+        }
     }
 
     @Test
