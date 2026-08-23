@@ -57,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -131,7 +132,14 @@ fun AiChatScreen(
     }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+        if (messages.isNotEmpty()) {
+            // 滚到列表绝对底部（scrollOffset 传大值会被 clamp 到末尾）：此前按 lastIndex
+            // 顶对齐，比视口高的长回复下半截会滞留在视口外，观感即「被输入框遮住」
+            listState.animateScrollToItem(
+                index = messages.lastIndex,
+                scrollOffset = Int.MAX_VALUE / 2
+            )
+        }
     }
 
     if (!state.llmConfigured) {
@@ -688,17 +696,26 @@ private fun ChatInputBar(
             IconButton(onClick = onAttachImage, enabled = !isSending) {
                 Icon(Icons.Filled.ImageIcon, contentDescription = "发送图片")
             }
+            val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+            val inputInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp)
-                    .padding(horizontal = 2.dp),
+                    .padding(horizontal = 2.dp)
+                    // 整个输入区可点聚焦（无涟漪）：手机上点输入框空白/占位符区域也弹键盘
+                    .clickable(
+                        interactionSource = inputInteraction,
+                        indication = null
+                    ) { focusRequester.requestFocus() },
                 contentAlignment = Alignment.CenterStart
             ) {
                 androidx.compose.foundation.text.BasicTextField(
                     value = input,
                     onValueChange = onInputChanged,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
                     enabled = !isSending,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = MaterialTheme.colorScheme.onSurface

@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import com.stock.dividend.ui.theme.LocalExtendedColors
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -66,46 +67,60 @@ fun IncomeTimelineCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(AppCardDefaults.ListPadding)
+                .padding(horizontal = 14.dp, vertical = 9.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = displayDate,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        StatusPill(
-                            text = sourceText,
-                            tone = if (isManual) FinanceStatusTone.Positive else FinanceStatusTone.Neutral
-                        )
-                    }
+                    // 行1：股票名（信息主体）
                     Text(
                         text = stockName ?: "其他收入",
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    // 行2：日期 + 来源，小字一行（时间线/来源降为辅助信息）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = displayDate,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "·",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = sourceText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isManual) {
+                                LocalExtendedColors.current.positive
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                FinanceMetric(
-                    label = "到账金额",
-                    value = "¥%.2f".format(amount),
-                    valueColor = MaterialTheme.colorScheme.primary,
+                // 金额右对齐单行大字（省掉 FinanceMetric 的 label 行，行高立减）
+                Text(
+                    text = "¥%.2f".format(amount),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.End
                 )
 
@@ -114,7 +129,7 @@ fun IncomeTimelineCard(
                     IconButton(
                         onClick = { menuExpanded = true },
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(32.dp)
                             .semantics { contentDescription = "收入记录操作" }
                     ) {
                         Icon(

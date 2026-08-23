@@ -256,10 +256,21 @@ private fun IncomeTabContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        IncomeBreakdownChart(
-            records = state.records,
-            modifier = Modifier.padding(horizontal = 16.dp)
+        // 占比图默认收起：饼图+图例约一屏高，展开后严重挤压收入记录列表
+        //（用户反馈一屏只显示两条记录的另一半原因）；点标题行按需展开
+        var breakdownExpanded by remember { mutableStateOf(false) }
+        SectionHeader(
+            title = "股票占比",
+            actionText = if (breakdownExpanded) "收起" else "展开",
+            onActionClick = { breakdownExpanded = !breakdownExpanded },
+            modifier = Modifier.padding(horizontal = AppCardDefaults.PageHorizontalPadding)
         )
+        androidx.compose.animation.AnimatedVisibility(visible = breakdownExpanded) {
+            IncomeBreakdownChart(
+                records = state.records,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
