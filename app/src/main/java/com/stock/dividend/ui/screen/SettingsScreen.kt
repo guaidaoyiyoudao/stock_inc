@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +38,7 @@ internal val settingsGroupTitles = listOf(
     "数据",
     "交易记录",
     "网格交易",
+    "交易策略",
     "成就",
 )
 
@@ -55,6 +57,7 @@ fun SettingsScreen(
     onOpenDataSettings: () -> Unit,
     onOpenTransactionHistory: () -> Unit,
     onOpenGridPlan: () -> Unit,
+    onOpenStrategyPlan: () -> Unit = {},
     onOpenAchievements: () -> Unit,
 ) {
     Column(
@@ -96,6 +99,12 @@ fun SettingsScreen(
         )
         SettingsNavRow(
             title = settingsGroupTitles[5],
+            description = "年线定投：低于年线定投、高于阈值卖出（仅提示，不下单）",
+            icon = Icons.Filled.Timeline,
+            onClick = onOpenStrategyPlan
+        )
+        SettingsNavRow(
+            title = settingsGroupTitles[6],
             description = "使用成就与里程碑",
             icon = Icons.Filled.EmojiEvents,
             onClick = onOpenAchievements

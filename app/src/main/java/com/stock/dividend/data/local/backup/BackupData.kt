@@ -12,6 +12,8 @@ import com.stock.dividend.data.local.entity.LivingExpenseItemEntity
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.StockTagEntity
+import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DCA
+import com.stock.dividend.data.local.entity.StrategyPlanEntity
 import com.stock.dividend.data.local.entity.TradeStrategyEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 
@@ -59,6 +61,29 @@ fun normalizeGridPlans(plans: List<GridPlanEntity>?, dbVersion: Int): List<GridP
 }
 
 /**
+ * 按备份 [dbVersion] 归一化 strategy_plans（恢复路径用，模式同 [normalizeGridPlans]）。
+ *
+ * - `dbVersion < 30` 的备份不可能含策略表，直接返回空表（防御异常数据）；
+ * - strategyType 非空列：Gson 缺字段 → null，会撞 Room NOT NULL 约束 → 恢复 MA_DCA；
+ * - notifyEnabled 无需修补（v30 起建表即有该列且恒序列化，Gson 不会缺失）；
+ * - maPeriod/sellHalf/sellAll/dcaAmount 基本类型缺失被置 0（非法）→ 恢复对应默认值。
+ */
+fun normalizeStrategyPlans(plans: List<StrategyPlanEntity>?, dbVersion: Int): List<StrategyPlanEntity> {
+    val list = plans.orEmpty()
+    if (list.isEmpty()) return list
+    if (dbVersion < 30) return emptyList()
+    return list.map { plan ->
+        plan.copy(
+            strategyType = plan.strategyType ?: STRATEGY_TYPE_MA_DCA,
+            maPeriod = plan.maPeriod.takeIf { it >= 2 } ?: 250,
+            sellHalfPercent = plan.sellHalfPercent.takeIf { it > 0.0 } ?: 7.5,
+            sellAllPercent = plan.sellAllPercent.takeIf { it > 0.0 } ?: 15.0,
+            dcaAmount = plan.dcaAmount.takeIf { it > 0.0 } ?: 1000.0
+        )
+    }
+}
+
+/**
  * 备份校验摘要：元信息 + 各表记录数，供导入确认对话框预览。
  * counts 仅用于展示，不参与序列化（由 [com.stock.dividend.data.repository.BackupRepository.validateBackup] 计算）。
  */
@@ -99,6 +124,8 @@ data class BackupContainer(
     val industryTargets: List<IndustryTargetEntity> = emptyList(),
     /** 网格交易计划：v20 起新增，旧备份缺失 → null → orEmpty 兜底。 */
     val gridPlans: List<GridPlanEntity> = emptyList(),
+    /** 交易策略计划：v30 起新增，旧备份缺失 → null → orEmpty 兜底。 */
+    val strategyPlans: List<StrategyPlanEntity> = emptyList(),
     /**
      * 用户配置（SharedPreferences）：外层 key 为 prefs 文件名（如 "llm_prefs"），
      * 内层为该文件全部 key→value。默认空 Map 保证旧备份向后兼容。

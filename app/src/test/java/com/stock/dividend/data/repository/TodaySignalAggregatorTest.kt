@@ -3,6 +3,7 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.GridPlanEntity
+import com.stock.dividend.data.local.entity.StrategyPlanEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 import org.junit.Test
 import java.time.LocalDate
@@ -217,5 +218,121 @@ class TodaySignalAggregatorTest {
             TodaySignalInput(emptyList(), listOf(plan), mapOf("sh.600010" to 9.6), emptyList(), today, gridTransactionsByStock = txs)
         )
         assertThat(result.none { it.type == TodaySignalType.SELL_TRIGGER }).isTrue()
+    }
+
+    // ── 策略信号（年线定投）──────────────────────
+
+    private fun strategyPlan(
+        id: String = "s1",
+        code: String = "sh.510880",
+        half: Double = 7.5,
+        all: Double = 15.0
+    ) = StrategyPlanEntity(
+        id = id, stockCode = code, stockName = "红利ETF",
+        sellHalfPercent = half, sellAllPercent = all
+    )
+
+    private fun strategyEval(
+        signal: MaDcaSignal,
+        dev: Double,
+        ma: Double = 10.0,
+        halfPrice: Double = 10.75,
+        allPrice: Double = 11.5
+    ) = MaDcaEvaluation(
+        maValue = ma, deviationPercent = dev, signal = signal,
+        sellHalfTriggerPrice = halfPrice, sellAllTriggerPrice = allPrice
+    )
+
+    /** 低于年线 → 定投窗口信号（key 用 planId，同股多策略互不顶替）。 */
+    @Test
+    fun strategyDcaWindow_triggersStrategyDcaSignal() {
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(
+                emptyList(), emptyList(), emptyMap(), emptyList(), today,
+                strategyPlans = listOf(strategyPlan()),
+                strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.DCA_WINDOW, -5.0))
+            )
+        )
+        val s = result.single()
+        assertThat(s.type).isEqualTo(TodaySignalType.STRATEGY_DCA)
+        assertThat(s.key).isEqualTo("strategydca-s1")
+        assertThat(s.sortPriority).isEqualTo(0)
+        assertThat(s.detail).contains("10.00")   // 年线值
+    }
+
+    /** 高于年线卖半阈值 → 卖出信号，detail 带整手折算后的卖出股数。 */
+    @Test
+    fun strategySellHalf_triggersStrategySellSignal() {
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(
+                emptyList(), emptyList(), emptyMap(), emptyList(), today,
+                strategyPlans = listOf(strategyPlan()),
+                strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.SELL_HALF, 8.0)),
+                strategyHoldings = mapOf("sh.510880" to 500)
+            )
+        )
+        val s = result.single()
+        assertThat(s.type).isEqualTo(TodaySignalType.STRATEGY_SELL)
+        assertThat(s.key).isEqualTo("strategysell-s1")
+        assertThat(s.sortPriority).isEqualTo(1)
+        assertThat(s.detail).contains("200")
+        assertThat(s.detail).contains("7.5")
+    }
+
+    /** 清仓档 → 卖出信号，股数为全部持仓。 */
+    @Test
+    fun strategySellAll_triggersStrategySellSignalWithAllShares() {
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(
+                emptyList(), emptyList(), emptyMap(), emptyList(), today,
+                strategyPlans = listOf(strategyPlan()),
+                strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.SELL_ALL, 16.0)),
+                strategyHoldings = mapOf("sh.510880" to 600)
+            )
+        )
+        val s = result.single()
+        assertThat(s.type).isEqualTo(TodaySignalType.STRATEGY_SELL)
+        assertThat(s.detail).contains("600")
+    }
+
+    /** 年线与阈值之间 → 无信号；评估缺失（数据不足）→ 无信号。 */
+    @Test
+    fun strategyHoldOrMissingEvaluation_noSignal() {
+        assertThat(
+            TodaySignalAggregator.aggregate(
+                TodaySignalInput(
+                    emptyList(), emptyList(), emptyMap(), emptyList(), today,
+                    strategyPlans = listOf(strategyPlan()),
+                    strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.HOLD, 3.0))
+                )
+            )
+        ).isEmpty()
+        assertThat(
+            TodaySignalAggregator.aggregate(
+                TodaySignalInput(
+                    emptyList(), emptyList(), emptyMap(), emptyList(), today,
+                    strategyPlans = listOf(strategyPlan()),
+                    strategyEvaluations = emptyMap()
+                )
+            )
+        ).isEmpty()
+    }
+
+    /** 同股网格 + 策略并存 → 各自信号、key 不冲突。 */
+    @Test
+    fun strategyAndGridSignals_coexistWithDistinctKeys() {
+        val grid = GridPlanEntity(
+            id = "g1", stockCode = "sh.510880", stockName = "红利ETF",
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 11.0, grids = 3, totalCapital = 9000.0
+        )
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(
+                emptyList(), listOf(grid), mapOf("sh.510880" to 9.6), emptyList(), today,
+                strategyPlans = listOf(strategyPlan()),
+                strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.DCA_WINDOW, -5.0))
+            )
+        )
+        assertThat(result).hasSize(2)
+        assertThat(result.map { it.key }.toSet()).hasSize(2)
     }
 }

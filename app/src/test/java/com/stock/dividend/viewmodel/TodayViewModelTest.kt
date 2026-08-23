@@ -42,6 +42,7 @@ class TodayViewModelTest {
     private val diagnosisAssembler = mockk<PortfolioDiagnosisAssembler>(relaxed = true)
     private val dividendIncomeRepository = mockk<DividendIncomeRepository>(relaxed = true)
     private val transactionRepository: com.stock.dividend.data.repository.TransactionRepository = mockk(relaxed = true)
+    private val strategyPlanRepository = mockk<com.stock.dividend.data.repository.StrategyPlanRepository>(relaxed = true)
 
     @Before
     fun setUp() {
@@ -55,6 +56,7 @@ class TodayViewModelTest {
         coEvery { marketDataPlane.getIndustryList(any(), any()) } returns emptyList()
         every { marketDataPlane.observeAllStocks() } returns flowOf(emptyList())
         every { gridPlanRepository.observeAll() } returns flowOf(emptyList())
+        every { strategyPlanRepository.observeAll() } returns flowOf(emptyList())
         every { dividendIncomeRepository.observeTotalByYear(any()) } returns flowOf(0.0)
         every { dividendIncomeRepository.observeForecastTotal() } returns flowOf(0.0)
         coEvery { diagnosisAssembler.assemble(any(), any()) } returns null
@@ -64,7 +66,7 @@ class TodayViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     private fun makeVm() = TodayViewModel(
-        marketDataPlane, gridPlanRepository, briefingCoordinator,
+        marketDataPlane, gridPlanRepository, strategyPlanRepository, briefingCoordinator,
         diagnosisAssembler, dividendIncomeRepository, transactionRepository,
     )
 

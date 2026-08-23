@@ -43,3 +43,10 @@ const val GRID_NEXT_LEVEL_ALERT = "GRID_NEXT_LEVEL"
  * grid_plans.lastNotifiedSellLevelPrice。仅用于文案/渠道路由。
  */
 const val GRID_SELL_LEVEL_ALERT = "GRID_SELL_LEVEL"
+
+/**
+ * 交易策略**卖出阈值**到档提醒的「规则类型」标识（年线定投：高于年线卖半/清仓）。
+ * 同样不落表——去重状态存 strategy_plans.lastNotifiedSellTier（HALF/ALL 边沿触发）。
+ * 仅用于文案/渠道路由。
+ */
+const val STRATEGY_SELL_ALERT = "STRATEGY_SELL"

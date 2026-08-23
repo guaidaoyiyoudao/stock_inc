@@ -7,12 +7,15 @@ import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.plane.MarketDataPlane
+import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DCA
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.LlmAnalysisRepository
+import com.stock.dividend.data.repository.MaDcaStrategyCalculator
 import com.stock.dividend.data.repository.QuoteSnapshot
+import com.stock.dividend.data.repository.StrategyPlanRepository
 import com.stock.dividend.data.repository.StockLlmAnalysisResult
 import com.stock.dividend.data.repository.StockLlmAnalysisState
 import com.stock.dividend.data.repository.StockLlmInput
@@ -67,6 +70,10 @@ data class StockDetailUiState(
     val quote: QuoteSnapshot? = null,
     /** 近 N 日 K 线（OHLCV，前复权）；供走势/成交量图，空表表示未加载/失败。 */
     val klines: List<KlineBar> = emptyList(),
+    /** 均线序列（与 [klines] 等长对齐；该股有年线定投策略时按策略周期计算，否则空表不画线）。 */
+    val maSeries: List<Double?> = emptyList(),
+    /** 均线周期（日；null = 无策略不画线），如 250 = 年线。 */
+    val maPeriod: Int? = null,
     /** 年度每股现金分红（最新年度累计，与 plane.getDps 同源）；供 K 线股息率网格线，无分红为 null。 */
     val dps: Double? = null,
     val llmAnalysis: StockLlmAnalysisState = StockLlmAnalysisState.Idle
@@ -78,6 +85,8 @@ class StockDetailViewModel @Inject constructor(
     private val marketDataPlane: MarketDataPlane,
     private val llmAnalysisRepository: LlmAnalysisRepository,
     private val tradeStrategyRepository: TradeStrategyRepository,
+    /** 年线定投策略读取（K 线叠加均线用）。 */
+    private val strategyPlanRepository: StrategyPlanRepository,
     /** 仅用于写操作（updateYieldPeriod/updateBuyThresholdMultiplier）；读一律走数据平面。 */
     private val stockRepository: com.stock.dividend.data.repository.StockRepository
 ) : ViewModel() {
@@ -178,14 +187,30 @@ class StockDetailViewModel @Inject constructor(
         }
     }
 
-    /** 拉取近 [KLINE_BARS] 日 K 线（OHLCV，前复权）供走势/成交量图；失败降级为空表（红线 #2）。 */
+    /** 拉取近 [KLINE_BARS] 日 K 线（OHLCV，前复权）供走势/成交量图；失败降级为空表（红线 #2）。
+     *  该股存在年线定投策略时按策略周期拉长窗口（策略周期 + 可见根数），保证每个可见蜡烛
+     *  都有均线值；均线序列按全量收盘价滚动计算后与可见段对齐。 */
     private fun loadKlines() {
         viewModelScope.launch {
+            val plan = runCatching {
+                strategyPlanRepository.observeByStock(stockCode).first()
+                    .firstOrNull { it.strategyType == STRATEGY_TYPE_MA_DCA }
+            }.getOrNull()
+            val fetchBars = plan?.let { it.maPeriod + KLINE_BARS } ?: KLINE_BARS
             val bars = runCatching {
-                marketDataPlane.getKlines(stockCode, KlinePeriod.DAILY, KLINE_BARS)
+                marketDataPlane.getKlines(stockCode, KlinePeriod.DAILY, fetchBars)
             }.getOrDefault(emptyList())
             if (bars.isNotEmpty()) {
-                _uiState.value = _uiState.value.copy(klines = bars)
+                val display = bars.takeLast(KLINE_BARS)
+                val ma = plan?.let {
+                    MaDcaStrategyCalculator.maSeries(bars.map { b -> b.close }, it.maPeriod)
+                        .takeLast(display.size)
+                }.orEmpty()
+                _uiState.value = _uiState.value.copy(
+                    klines = display,
+                    maSeries = ma,
+                    maPeriod = plan?.maPeriod
+                )
             }
         }
     }

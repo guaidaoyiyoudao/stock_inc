@@ -9,6 +9,7 @@ import com.google.gson.JsonSyntaxException
 import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.backup.BackupContainer
 import com.stock.dividend.data.local.backup.normalizeGridPlans
+import com.stock.dividend.data.local.backup.normalizeStrategyPlans
 import com.stock.dividend.data.local.backup.BackupCounts
 import com.stock.dividend.data.local.backup.BackupMetadata
 import com.stock.dividend.data.local.backup.BackupSummary
@@ -45,7 +46,8 @@ class BackupRepository @Inject constructor(
     private val stockTagDao: StockTagDao,
     private val tradeStrategyDao: TradeStrategyDao,
     private val industryTargetDao: IndustryTargetDao,
-    private val gridPlanDao: com.stock.dividend.data.local.dao.GridPlanDao
+    private val gridPlanDao: com.stock.dividend.data.local.dao.GridPlanDao,
+    private val strategyPlanDao: com.stock.dividend.data.local.dao.StrategyPlanDao
 ) {
     private val gson = GsonBuilder().setPrettyPrinting().create()
 
@@ -71,6 +73,7 @@ class BackupRepository @Inject constructor(
                 val tradeStrategies = async { tradeStrategyDao.getAllForBackup() }
                 val industryTargets = async { industryTargetDao.getAll() }
                 val gridPlans = async { gridPlanDao.getAllForBackup() }
+                val strategyPlans = async { strategyPlanDao.getAllForBackup() }
 
                 BackupContainer(
                     metadata = BackupMetadata(
@@ -101,6 +104,7 @@ class BackupRepository @Inject constructor(
                     tradeStrategies = tradeStrategies.await(),
                     industryTargets = industryTargets.await(),
                     gridPlans = gridPlans.await(),
+                    strategyPlans = strategyPlans.await(),
                     prefs = readPrefsForBackup(context)
                 )
             }
@@ -133,6 +137,7 @@ class BackupRepository @Inject constructor(
                 stockTagDao.deleteAll()
                 tradeStrategyDao.clear()
                 gridPlanDao.clear()
+                strategyPlanDao.clear()
                 dividendIncomeRecordDao.deleteAll()
                 dividendDao.deleteAll()
                 transactionDao.deleteAll()
@@ -163,6 +168,11 @@ class BackupRepository @Inject constructor(
                 // 后者 Gson → null 会撞 NOT NULL 约束使恢复事务整体失败）
                 gridPlanDao.insertAll(
                     normalizeGridPlans(container.gridPlans, container.metadata?.dbVersion ?: 0)
+                )
+                // strategy_plans v30 起新增，旧备份无此字段 → null → orEmpty 兜底；
+                // 再按备份 dbVersion 归一化（非空列 strategyType 缺失会撞 NOT NULL 约束）
+                strategyPlanDao.insertAll(
+                    normalizeStrategyPlans(container.strategyPlans, container.metadata?.dbVersion ?: 0)
                 )
 
                 // 交易记录已全部回灌，按移动加权平均重算每只股票的持仓量与成本，

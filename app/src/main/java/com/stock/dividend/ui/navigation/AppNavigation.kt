@@ -13,6 +13,7 @@ import com.stock.dividend.ui.screen.TradeStrategyListScreen
 import com.stock.dividend.ui.screen.TransactionHistoryScreen
 import com.stock.dividend.ui.screen.TransactionImportScreen
 import com.stock.dividend.ui.screen.GridPlanScreen
+import com.stock.dividend.ui.screen.StrategyPlanScreen
 object Routes {
     const val MAIN = "main"
     const val FIRE_GOAL_SETUP = "fireGoalSetup"
@@ -24,6 +25,7 @@ object Routes {
     const val TRANSACTION_IMPORT = "transactionImport"
     const val GRID_PLAN = "gridPlan"
     const val GRID_PLAN_FOR_STOCK = "gridPlanFor/{code}"
+    const val STRATEGY_PLAN = "strategyPlan"
 }
 
 @Composable
@@ -89,6 +91,11 @@ fun AppNavigation(
         }
         composable(Routes.GRID_PLAN) {
             GridPlanScreen(
+                onBack = { rootNavController.popBackStack() }
+            )
+        }
+        composable(Routes.STRATEGY_PLAN) {
+            StrategyPlanScreen(
                 onBack = { rootNavController.popBackStack() }
             )
         }

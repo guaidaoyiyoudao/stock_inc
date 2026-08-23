@@ -182,6 +182,7 @@ fun MainScaffold(
                     onOpenAddStock = { tabNavController.navigate("addStock") },
                     onOpenIncome = { tabNavController.navigate("income") },
                     onOpenGridPlan = { code -> tabNavController.navigate("gridPlanFor/$code") },
+                    onOpenStrategyPlan = { code -> tabNavController.navigate("strategyPlanFor/$code") },
                 )
                 }
             }
@@ -259,6 +260,7 @@ fun MainScaffold(
                     onOpenDataSettings = { tabNavController.navigate("dataSettings") },
                     onOpenTransactionHistory = { rootNavController.navigate(Routes.TRANSACTION_HISTORY) },
                     onOpenGridPlan = { rootNavController.navigate(Routes.GRID_PLAN) },
+                    onOpenStrategyPlan = { rootNavController.navigate(Routes.STRATEGY_PLAN) },
                     onOpenAchievements = { tabNavController.navigate("achievements") }
                 )
             }
@@ -313,6 +315,7 @@ fun MainScaffold(
                     onEditHolding = { c -> tabNavController.navigate("editHolding/$c") },
                     onOpenDripSimulation = { c -> tabNavController.navigate("dripSimulation/$c") },
                     onOpenGridPlan = { c -> tabNavController.navigate("gridPlanFor/$c") },
+                    onOpenStrategyPlan = { c -> tabNavController.navigate("strategyPlanFor/$c") },
                     onOpenNotificationSettings = { c -> tabNavController.navigate("stockNotificationSettings/$c") }
                 )
                 }
@@ -331,6 +334,21 @@ fun MainScaffold(
                     onBack = { tabNavController.popBackStack() },
                     onAddTransaction = { code, price, shares, isBuy ->
                         // 波段卖出档与买入档共用「一键记账」闭环：按方向拼对应预填参数
+                        val direction = if (isBuy) "buy" else "sell"
+                        tabNavController.navigate(
+                            "editHolding/$code?${direction}Price=${"%.2f".format(price)}&${direction}Shares=$shares"
+                        )
+                    }
+                )
+            }
+            composable(
+                route = "strategyPlanFor/{code}",
+                arguments = listOf(navArgument("code") { type = NavType.StringType })
+            ) {
+                StrategyPlanScreen(
+                    onBack = { tabNavController.popBackStack() },
+                    onAddTransaction = { code, price, shares, isBuy ->
+                        // 策略定投买入/卖出共用「一键记账」闭环：按方向拼对应预填参数
                         val direction = if (isBuy) "buy" else "sell"
                         tabNavController.navigate(
                             "editHolding/$code?${direction}Price=${"%.2f".format(price)}&${direction}Shares=$shares"

@@ -102,6 +102,7 @@ fun StockDetailScreen(
     onEditHolding: (String) -> Unit = {},
     onOpenDripSimulation: (String) -> Unit = {},
     onOpenGridPlan: (String) -> Unit = {},
+    onOpenStrategyPlan: (String) -> Unit = {},
     onOpenNotificationSettings: (String) -> Unit = {},
     viewModel: StockDetailViewModel = hiltViewModel()
 ) {
@@ -259,6 +260,11 @@ fun StockDetailScreen(
                                 onClick = { onOpenGridPlan(stockCode) }
                             )
                         }
+                        item {
+                            StrategyPlanEntryCard(
+                                onClick = { onOpenStrategyPlan(stockCode) }
+                            )
+                        }
                     }
 
                     item {
@@ -297,7 +303,9 @@ fun StockDetailScreen(
                             KlineYieldChart(
                                 bars = uiState.klines,
                                 dps = uiState.dps,
-                                currentPrice = uiState.quote?.price ?: uiState.klines.lastOrNull()?.close
+                                currentPrice = uiState.quote?.price ?: uiState.klines.lastOrNull()?.close,
+                                maSeries = uiState.maSeries,
+                                maLabel = uiState.maPeriod?.let { "MA$it" }
                             )
                         }
                     }
@@ -484,6 +492,43 @@ private fun GridPlanEntryCard(onClick: () -> Unit) {
                 )
                 Text(
                     text = "日/周/月 BOLL + 目标股息率自动锚定纯买入档位（仅计划，不下单）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppTextButton(
+                onClick = onClick,
+                text = "设置",
+            )
+        }
+    }
+}
+
+@Composable
+private fun StrategyPlanEntryCard(onClick: () -> Unit) {
+    AppCard(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(AppCardDefaults.ListPadding),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "交易策略（年线定投）",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "低于 250 日年线定投买入；高于年线阈值卖出一半/全部（仅提示，不下单）",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

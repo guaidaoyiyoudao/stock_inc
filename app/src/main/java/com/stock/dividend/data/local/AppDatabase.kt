@@ -21,6 +21,7 @@ import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.dao.StockTagDao
+import com.stock.dividend.data.local.dao.StrategyPlanDao
 import com.stock.dividend.data.local.dao.TradeStrategyDao
 import com.stock.dividend.data.local.dao.TransactionDao
 import com.stock.dividend.data.local.entity.AchievementEntity
@@ -42,6 +43,7 @@ import com.stock.dividend.data.local.entity.PriceCacheEntity
 import com.stock.dividend.data.local.entity.SearchCacheEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.StockTagEntity
+import com.stock.dividend.data.local.entity.StrategyPlanEntity
 import com.stock.dividend.data.local.entity.TradeStrategyEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
 
@@ -67,9 +69,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         KlineCacheEntity::class,
         KlineCacheMetaEntity::class,
         ErrorLogEntity::class,
-        FuyaoCacheEntity::class
+        FuyaoCacheEntity::class,
+        StrategyPlanEntity::class
     ],
-    version = 29,
+    version = 30,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -93,6 +96,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun klineCacheDao(): KlineCacheDao
     abstract fun errorLogDao(): ErrorLogDao
     abstract fun fuyaoCacheDao(): com.stock.dividend.data.local.dao.FuyaoCacheDao
+    abstract fun strategyPlanDao(): StrategyPlanDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -479,6 +483,36 @@ abstract class AppDatabase : RoomDatabase() {
                     "ALTER TABLE grid_plans ADD COLUMN swingRatioPercent REAL NOT NULL DEFAULT 30"
                 )
                 db.execSQL("ALTER TABLE grid_plans ADD COLUMN lastNotifiedSellLevelPrice REAL")
+            }
+        }
+
+        val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 交易策略计划（首版：MA_DCA 年线定投——250 日线下定投买入，
+                // 高于年线 7.5% 卖一半 / 15% 全卖；仅提示不下单）。
+                // notifyEnabled 卖出阈值推送开关（默认开）、lastNotifiedSellTier
+                // 卖出档边沿触发去重状态（HALF/ALL，偏离回落清空，仅通知回写不动 updatedAt）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `strategy_plans` (" +
+                            "`id` TEXT NOT NULL PRIMARY KEY, " +
+                            "`stockCode` TEXT NOT NULL, " +
+                            "`stockName` TEXT NOT NULL, " +
+                            "`strategyType` TEXT NOT NULL DEFAULT 'MA_DCA', " +
+                            "`maPeriod` INTEGER NOT NULL DEFAULT 250, " +
+                            "`sellHalfPercent` REAL NOT NULL DEFAULT 7.5, " +
+                            "`sellAllPercent` REAL NOT NULL DEFAULT 15, " +
+                            "`dcaAmount` REAL NOT NULL DEFAULT 1000, " +
+                            "`note` TEXT, " +
+                            "`notifyEnabled` INTEGER NOT NULL DEFAULT 1, " +
+                            "`lastNotifiedSellTier` TEXT, " +
+                            "`createdAt` INTEGER NOT NULL, " +
+                            "`updatedAt` INTEGER NOT NULL, " +
+                            "FOREIGN KEY(`stockCode`) REFERENCES `stocks`(`code`) ON DELETE CASCADE)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_strategy_plans_stockCode` " +
+                            "ON `strategy_plans`(`stockCode`)"
+                )
             }
         }
     }

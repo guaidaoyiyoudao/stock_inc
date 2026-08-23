@@ -111,6 +111,49 @@ class AndroidDividendAlertNotifier @Inject constructor(
         }
     }
 
+    @SuppressLint("MissingPermission")
+    override suspend fun sendStrategySellAlert(signal: StrategySellSignal) {
+        if (!canNotify()) return
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_STOCK_CODE, signal.stockCode)   // deep link：点击跳个股详情
+        }
+        // 同股多条策略各自成条（planId 维度去重），互不覆盖
+        val notifyId = (signal.stockCode + "strategy-" + signal.planId).hashCode()
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notifyId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val isAll = signal.tier == STRATEGY_SELL_TIER_ALL
+        val title = if (isAll) "策略到达清仓阈值" else "策略到达卖出一半阈值"
+        val action = if (isAll) {
+            "全部卖出"
+        } else {
+            if (signal.sellShares > 0) "卖出一半（约 ${signal.sellShares} 股）" else "卖出一半"
+        }
+        val body = "%s 现价高于年线 %.2f%%（阈值 %.2f%%），按策略 %s".format(
+            Locale.US, signal.stockName, signal.deviationPercent, signal.thresholdPercent, action
+        )
+        val notification = NotificationCompat.Builder(context, channelFor(STRATEGY_SELL_ALERT))
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setContentIntent(pendingIntent)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)   // 锁屏可见
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(notifyId, notification)
+        } catch (_: SecurityException) {
+            return
+        }
+    }
+
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)

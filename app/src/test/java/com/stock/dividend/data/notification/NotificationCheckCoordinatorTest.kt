@@ -7,11 +7,17 @@ import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_BOLL_WEEKLY_U
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_DIVIDEND_YIELD_THRESHOLD
 import com.stock.dividend.data.local.entity.NOTIFICATION_RULE_TYPE_PRICE_ABOVE
 import com.stock.dividend.data.local.entity.NotificationRuleEntity
+import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DCA
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.local.entity.StrategyPlanEntity
+import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.GridPlanRepository
+import com.stock.dividend.data.repository.KlineBar
+import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.StrategyPlanRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -28,13 +34,15 @@ class NotificationCheckCoordinatorTest {
     private val notifier: DividendAlertNotifier = mockk(relaxed = true)
     private val gridPlanRepository: GridPlanRepository = mockk(relaxed = true)
     private val transactionRepository: TransactionRepository = mockk(relaxed = true)
+    private val strategyPlanRepository: StrategyPlanRepository = mockk(relaxed = true)
     private val coordinator = NotificationCheckCoordinator(
         marketDataPlane = marketDataPlane,
         ruleRepository = ruleRepository,
         evaluator = NotificationRuleEvaluator(),
         notifier = notifier,
         gridPlanRepository = gridPlanRepository,
-        transactionRepository = transactionRepository
+        transactionRepository = transactionRepository,
+        strategyPlanRepository = strategyPlanRepository
     ).apply {
         clock = { 1000L }
     }
@@ -280,6 +288,74 @@ class NotificationCheckCoordinatorTest {
 
         coVerify(exactly = 0) { marketDataPlane.getPrices(any(), any()) }
     }
+
+    // ── 策略卖出阈值提醒（checkStrategies）──────────────────────
+
+    /** 现价高于年线 7.5% → 发卖半信号 + 回写 HALF 档；数据不足的计划跳过。 */
+    @Test
+    fun `sends strategy sell alert when price exceeds half threshold`() = runTest {
+        val stock = StockEntity("sh.510880", "红利ETF", "0", shares = 500)
+        coEvery { strategyPlanRepository.observeAll() } returns flowOf(listOf(strategyPlan()))
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { marketDataPlane.getPrices(any(), any()) } returns mapOf(stock.code to 10.8)
+        coEvery { transactionRepository.getAll() } returns listOf(
+            TransactionEntity(stockCode = stock.code, type = "BUY", shares = 500, date = "2026-01-05")
+        )
+        coEvery { marketDataPlane.getKlines(stock.code, KlinePeriod.DAILY, 250) } returns
+            List(250) { KlineBar("d$it", 10.0, 10.0, 10.0, 10.0, 1000.0) }
+        coEvery { notifier.canNotify() } returns true
+
+        coordinator.checkStrategies()
+
+        coVerify {
+            notifier.sendStrategySellAlert(
+                match { signal ->
+                    signal.planId == "s1" && signal.tier == STRATEGY_SELL_TIER_HALF &&
+                        signal.sellShares == 200 && signal.deviationPercent > 7.5
+                }
+            )
+            strategyPlanRepository.updateNotifiedSellTier("s1", STRATEGY_SELL_TIER_HALF)
+        }
+    }
+
+    /** 日线数据拉不到（空）→ 计划跳过：不发通知、不动状态。 */
+    @Test
+    fun `skips strategy plan when klines unavailable`() = runTest {
+        val stock = StockEntity("sh.510880", "红利ETF", "0", shares = 500)
+        coEvery { strategyPlanRepository.observeAll() } returns flowOf(listOf(strategyPlan()))
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(listOf(stock))
+        coEvery { marketDataPlane.getPrices(any(), any()) } returns mapOf(stock.code to 10.8)
+        coEvery { transactionRepository.getAll() } returns emptyList()
+        coEvery { marketDataPlane.getKlines(stock.code, KlinePeriod.DAILY, 250) } returns emptyList()
+
+        coordinator.checkStrategies()
+
+        coVerify(exactly = 0) { notifier.sendStrategySellAlert(any()) }
+        coVerify(exactly = 0) { strategyPlanRepository.updateNotifiedSellTier(any(), any()) }
+    }
+
+    /** 无策略计划 → 直接返回，不拉行情。 */
+    @Test
+    fun `no strategy plans means no quote fetch`() = runTest {
+        coEvery { strategyPlanRepository.observeAll() } returns flowOf(emptyList())
+
+        coordinator.checkStrategies()
+
+        coVerify(exactly = 0) { marketDataPlane.getPrices(any(), any()) }
+    }
+
+    private fun strategyPlan(lastNotifiedSellTier: String? = null) = StrategyPlanEntity(
+        id = "s1",
+        stockCode = "sh.510880",
+        stockName = "红利ETF",
+        strategyType = STRATEGY_TYPE_MA_DCA,
+        maPeriod = 250,
+        sellHalfPercent = 7.5,
+        sellAllPercent = 15.0,
+        dcaAmount = 1000.0,
+        notifyEnabled = true,
+        lastNotifiedSellTier = lastNotifiedSellTier
+    )
 
     private fun gridPlan(lastNotifiedLevelPrice: Double? = null) = GridPlanEntity(
         id = "p1",

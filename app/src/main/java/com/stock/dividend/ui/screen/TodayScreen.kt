@@ -82,6 +82,8 @@ fun TodayScreen(
     onOpenIncome: () -> Unit = {},
     /** 网格信号点击直达该标的的网格计划页（其余信号仍跳个股详情）。 */
     onOpenGridPlan: (String) -> Unit = {},
+    /** 策略信号点击直达该标的的交易策略页（改参数/看触发价/记账都在那里）。 */
+    onOpenStrategyPlan: (String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -304,12 +306,16 @@ fun TodayScreen(
         } else {
             items(items = state.signals, key = { it.key }) { signal ->
                 AppCard(
-                    // 网格信号（买入下一档/波段到卖出档）直达网格计划页（改参数/看档位/记账都在那里），其余跳个股详情
+                    // 网格信号直达网格计划页、策略信号直达策略页（改参数/看档位/记账都在那里），其余跳个股详情
                     onClick = {
                         if (signal.type == TodaySignalType.GRID_NEXT_LEVEL ||
                             signal.type == TodaySignalType.SELL_TRIGGER
                         ) {
                             onOpenGridPlan(signal.stockCode)
+                        } else if (signal.type == TodaySignalType.STRATEGY_DCA ||
+                            signal.type == TodaySignalType.STRATEGY_SELL
+                        ) {
+                            onOpenStrategyPlan(signal.stockCode)
                         } else {
                             onOpenStock(signal.stockCode)
                         }
@@ -656,14 +662,19 @@ private fun signalLabel(type: TodaySignalType): String = when (type) {
     TodaySignalType.SELL_TRIGGER -> "波段"
     TodaySignalType.GRID_NEXT_LEVEL -> "网格"
     TodaySignalType.DIVIDEND_COUNTDOWN -> "分红"
+    TodaySignalType.STRATEGY_DCA -> "定投"
+    TodaySignalType.STRATEGY_SELL -> "策略"
 }
 
-/** 信号类型 → 财务语义色：买入(Positive 绿) / 波段卖出(Warning 黄·即时可执行) / 网格(Warning 黄) / 分红(Neutral 灰)。 */
+/** 信号类型 → 财务语义色：买入(Positive 绿) / 波段卖出(Warning 黄·即时可执行) / 网格(Warning 黄) / 分红(Neutral 灰) /
+ *  策略定投窗口(Positive 绿·买点) / 策略卖出(Negative 红·减仓离场)。 */
 private fun signalTone(type: TodaySignalType): FinanceStatusTone = when (type) {
     TodaySignalType.BUY_TRIGGER -> FinanceStatusTone.Positive
     TodaySignalType.SELL_TRIGGER -> FinanceStatusTone.Warning
     TodaySignalType.GRID_NEXT_LEVEL -> FinanceStatusTone.Warning
     TodaySignalType.DIVIDEND_COUNTDOWN -> FinanceStatusTone.Neutral
+    TodaySignalType.STRATEGY_DCA -> FinanceStatusTone.Positive
+    TodaySignalType.STRATEGY_SELL -> FinanceStatusTone.Negative
 }
 
 /** 体检分级 → 总体标签。 */

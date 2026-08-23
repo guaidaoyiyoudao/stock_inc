@@ -13,6 +13,7 @@ import com.stock.dividend.data.repository.StockLlmAnalysisResult
 import com.stock.dividend.data.repository.StockLlmAnalysisState
 import com.stock.dividend.data.repository.StockLlmInput
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.StrategyPlanRepository
 import com.stock.dividend.data.repository.enrichPayoutRatio
 import com.stock.dividend.data.repository.TradeStrategyRepository
 import io.mockk.Runs
@@ -51,6 +52,11 @@ class StockDetailViewModelTest {
     }
     private val tradeStrategyRepository: TradeStrategyRepository = mockk {
         coEvery { activeStrategies() } returns emptyList()
+    }
+
+    /** 年线定投策略读取 mock（K 线均线叠加用）：默认无策略 → 不画线。 */
+    private val strategyPlanRepository: StrategyPlanRepository = mockk {
+        every { observeByStock(any()) } returns kotlinx.coroutines.flow.flowOf(emptyList())
     }
 
     private val stocksFlow = MutableStateFlow<List<StockEntity>>(emptyList())
@@ -166,6 +172,7 @@ class StockDetailViewModelTest {
         marketDataPlane = plane,
         llmAnalysisRepository = llmAnalysisRepository,
         tradeStrategyRepository = tradeStrategyRepository,
+        strategyPlanRepository = strategyPlanRepository,
         stockRepository = stockRepository
     )
 

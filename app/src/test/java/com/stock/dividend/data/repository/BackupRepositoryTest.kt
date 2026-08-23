@@ -7,8 +7,10 @@ import com.stock.dividend.data.local.backup.BackupContainer
 import com.stock.dividend.data.local.backup.BackupCounts
 import com.stock.dividend.data.local.backup.BackupMetadata
 import com.stock.dividend.data.local.backup.normalizeGridPlans
+import com.stock.dividend.data.local.backup.normalizeStrategyPlans
 import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.GridPlanEntity
+import com.stock.dividend.data.local.entity.StrategyPlanEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
@@ -449,5 +451,51 @@ class BackupRepositoryTest {
         assertThat(plans[0].levelWeights).isEqualTo("[1.0,1.0,2.0]")
         assertThat(plans[1].levelWeights).isNull()
         assertThat(plans[2].levelWeights).isNull()
+    }
+
+    /** v29 旧备份不可能含策略表：即使 JSON 被手改出 strategyPlans 字段也整体丢弃（防异常数据）。 */
+    @Test
+    fun `normalizeStrategyPlans drops strategy rows from pre-v30 backup`() {
+        val plan = StrategyPlanEntity(
+            id = "s1", stockCode = "sh.510880", stockName = "红利ETF"
+        )
+        val plans = normalizeStrategyPlans(listOf(plan), dbVersion = 29)
+        assertThat(plans).isEmpty()
+    }
+
+    /** 手改/Gson 缺字段：strategyType=null（撞 NOT NULL）与非法数值（0）→ 恢复默认。 */
+    @Test
+    fun `normalizeStrategyPlans repairs null strategyType and invalid numbers`() {
+        val json = """
+              {"metadata": {"appVersion": "1.0.0", "versionCode": 1, "exportTimestamp": 0, "dbVersion": 30},
+              "strategyPlans": [{
+                "id": "s1", "stockCode": "sh.510880", "stockName": "红利ETF",
+                "maPeriod": 0, "sellHalfPercent": 0.0, "sellAllPercent": 0.0, "dcaAmount": 0.0,
+                "notifyEnabled": false,
+                "createdAt": 1, "updatedAt": 1
+              }]}
+        """.trimIndent()
+        val container = Gson().fromJson(json, BackupContainer::class.java)
+        // Gson 绕过构造函数：strategyType=null（非空列撞 NOT NULL 的隐患）、数值字段全 0
+        val plans = normalizeStrategyPlans(container.strategyPlans, container.metadata.dbVersion)
+        assertThat(plans).hasSize(1)
+        assertThat(plans[0].strategyType).isEqualTo("MA_DCA")
+        assertThat(plans[0].maPeriod).isEqualTo(250)
+        assertThat(plans[0].sellHalfPercent).isEqualTo(7.5)
+        assertThat(plans[0].sellAllPercent).isEqualTo(15.0)
+        assertThat(plans[0].dcaAmount).isEqualTo(1000.0)
+        assertThat(plans[0].notifyEnabled).isFalse()   // v30 起建表即有该列且恒序列化，显式值保留
+    }
+
+    /** v30 备份原样透传（自定义参数与提醒状态不被动过）。 */
+    @Test
+    fun `normalizeStrategyPlans passes through v30 backup unchanged`() {
+        val plan = StrategyPlanEntity(
+            id = "s1", stockCode = "sh.510880", stockName = "红利ETF",
+            maPeriod = 120, sellHalfPercent = 5.0, sellAllPercent = 10.0,
+            dcaAmount = 2000.0, notifyEnabled = false, lastNotifiedSellTier = "HALF"
+        )
+        val plans = normalizeStrategyPlans(listOf(plan), dbVersion = 30)
+        assertThat(plans[0]).isEqualTo(plan)
     }
 }

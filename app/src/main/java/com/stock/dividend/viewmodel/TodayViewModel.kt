@@ -3,23 +3,28 @@ package com.stock.dividend.viewmodel
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DCA
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.DividendIncomeRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.GridPlanRepository
+import com.stock.dividend.data.repository.HoldingCalculator
 import com.stock.dividend.data.repository.IndexQuote
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.MarketDataRepository
 import com.stock.dividend.data.repository.MarketListItem
 import com.stock.dividend.data.repository.MarketMood
 import com.stock.dividend.data.repository.MarketMoodCalculator
+import com.stock.dividend.data.repository.MaDcaEvaluation
+import com.stock.dividend.data.repository.MaDcaStrategyCalculator
 import com.stock.dividend.data.repository.PortfolioDiagnosisAssembler
 import com.stock.dividend.data.repository.PortfolioHealthGrade
 import com.stock.dividend.data.repository.PortfolioRiskDiagnosis
 import com.stock.dividend.data.repository.PortfolioRiskDiagnoser
 import com.stock.dividend.data.repository.QuoteSnapshot
+import com.stock.dividend.data.repository.StrategyPlanRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import com.stock.dividend.data.repository.TodayBriefingCoordinator
 import com.stock.dividend.data.repository.TodaySignal
@@ -96,6 +101,7 @@ data class TodayUiState(
 class TodayViewModel @Inject constructor(
     private val marketDataPlane: MarketDataPlane,
     private val gridPlanRepository: GridPlanRepository,
+    private val strategyPlanRepository: StrategyPlanRepository,
     private val briefingCoordinator: TodayBriefingCoordinator,
     private val diagnosisAssembler: PortfolioDiagnosisAssembler,
     private val dividendIncomeRepository: DividendIncomeRepository,
@@ -217,6 +223,33 @@ class TodayViewModel @Inject constructor(
         val dividends = runCatching { marketDataPlane.getAllDividendsWithExDate() }.getOrDefault(emptyList())
         val gridPlans = runCatching { gridPlanRepository.observeAll().first() }
             .getOrDefault(emptyList())
+        val strategyPlans = runCatching { strategyPlanRepository.observeAll().first() }
+            .getOrDefault(emptyList())
+            .filter { it.strategyType == STRATEGY_TYPE_MA_DCA }
+        val transactions = runCatching { transactionRepository.getAll() }.getOrDefault(emptyList())
+        // 策略评估：每股拉足该股计划所需最大均线周期的日线（kline_cache 兜底；失败 → 空 → 跳过）
+        val strategyEvaluations: Map<String, MaDcaEvaluation> =
+            if (strategyPlans.isEmpty()) emptyMap()
+            else coroutineScope {
+                val closesByCode = strategyPlans.map { it.stockCode }.toSet().map { code ->
+                    val bars = strategyPlans.filter { it.stockCode == code }.maxOf { it.maPeriod }
+                    code to async {
+                        runCatching {
+                            marketDataPlane.getKlines(code, KlinePeriod.DAILY, bars).map { it.close }
+                        }.getOrDefault(emptyList())
+                    }
+                }.toMap()
+                strategyPlans.mapNotNull { plan ->
+                    val price = snapshots[plan.stockCode]?.price ?: return@mapNotNull null
+                    MaDcaStrategyCalculator.evaluate(
+                        closes = closesByCode[plan.stockCode]?.await().orEmpty(),
+                        currentPrice = price,
+                        maPeriod = plan.maPeriod,
+                        sellHalfPercent = plan.sellHalfPercent,
+                        sellAllPercent = plan.sellAllPercent
+                    )?.let { plan.id to it }
+                }.toMap()
+            }
         val divByCode = dividends.groupBy { it.stockCode }
         // 并发拉周线 BOLL（数据平面内置 Semaphore(3) 限流 + 60s 内存缓存，红线 #5）
         val bollByCode: Map<String, BollBand?> = if (stocks.isEmpty()) emptyMap()
@@ -247,8 +280,13 @@ class TodayViewModel @Inject constructor(
             dividends = dividends,
             today = LocalDate.now(),
             // 已买档不再出现在「网格下一档」信号里（每档只买一次）
-            gridTransactionsByStock = runCatching { transactionRepository.getAll() }
-                .getOrDefault(emptyList()).groupBy { it.stockCode },
+            gridTransactionsByStock = transactions.groupBy { it.stockCode },
+            // 策略信号（年线定投窗口 / 卖出阈值），持仓股数从交易流水推（摊薄口径）
+            strategyPlans = strategyPlans,
+            strategyEvaluations = strategyEvaluations,
+            strategyHoldings = transactions
+                .groupBy { it.stockCode }
+                .mapValues { (_, list) -> HoldingCalculator.calculate(list).totalShares },
         )
         val signals = runCatching { TodaySignalAggregator.aggregate(input) }.getOrDefault(emptyList())
         _uiState.update { it.copy(signals = signals) }

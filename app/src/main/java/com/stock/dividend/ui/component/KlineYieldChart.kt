@@ -19,7 +19,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -54,18 +56,26 @@ import com.stock.dividend.ui.theme.tabularNumberStyle
  * @param bars K 线（升序），取末 [VISIBLE_BARS] 根展示
  * @param dps 年度每股现金分红（null/≤0 → 不画股息率线）
  * @param currentPrice 现价（股息率档位锚定参考；缺失时由计算器退到区间中点）
+ * @param maSeries 均线序列（与 [bars] 等长对齐、前 period−1 个为 null；由调用方按全量
+ *   收盘价滚动计算后传入，如年线定投策略的 MA250）。空表不画。
+ * @param maLabel 均线图例名（如 "MA250"）；非空且序列有效时追加到图例与线端标签。
  */
 @Composable
 fun KlineYieldChart(
     bars: List<KlineBar>,
     dps: Double?,
     currentPrice: Double?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    maSeries: List<Double?> = emptyList(),
+    maLabel: String? = null,
 ) {
     if (bars.isEmpty()) return
     val ext = LocalExtendedColors.current
     val textMeasurer = rememberTextMeasurer()
     val display = remember(bars) { bars.takeLast(VISIBLE_BARS) }
+    // 均线切片：与可见蜡烛同长度对齐（序列与全量 bars 等长，取末段；多余/缺失安全截断）
+    val maDisplay = remember(bars, maSeries) { maSeries.takeLast(display.size) }
+    val hasMa = maDisplay.isNotEmpty() && maDisplay.any { it != null }
 
     // 入场动画：蜡烛自左向右浮现（绘制进度 0→1，动画结束 = 完整数据集，数值不变）
     val reveal = remember { Animatable(0f) }
@@ -99,20 +109,34 @@ fun KlineYieldChart(
 
     // 绘制用颜色/样式（Compose 侧取主题，传入 Canvas）
     val yieldColor = MaterialTheme.colorScheme.tertiary
+    val maColor = MaterialTheme.colorScheme.primary
     val upColor = ext.positive
     val downColor = ext.negative
     val yieldLabelStyle = MaterialTheme.typography.labelSmall
         .merge(tabularNumberStyle)
         .copy(fontSize = 10.sp, color = yieldColor)
+    val maLabelStyle = MaterialTheme.typography.labelSmall
+        .merge(tabularNumberStyle)
+        .copy(fontSize = 10.sp, color = maColor)
     val dateStyle = MaterialTheme.typography.labelSmall
         .merge(tabularNumberStyle)
         .copy(fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     val dateBaseColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     // 图例：dps 有效时计算器保证 ≥3 档（窄区间也不缩水），无需「无档位」降级文案
-    val legendText = when {
-        dps == null || dps <= 0.0 -> "暂无分红数据，未画股息率线 · 底部柱为成交量（手）"
-        else -> "虚线 = 股息率价位（年分红 ${MoneyFormatter.withSymbol(dps, decimals = 4)} ÷ 股息率） · 底部柱为成交量（手）"
+    val legendText = buildString {
+        append(
+            when {
+                dps == null || dps <= 0.0 -> "暂无分红数据，未画股息率线"
+                else -> "虚线 = 股息率价位（年分红 ${MoneyFormatter.withSymbol(dps, decimals = 4)} ÷ 股息率）"
+            }
+        )
+        if (hasMa && maLabel != null) {
+            maDisplay.lastNotNullOrNull()?.let { latest ->
+                append(" · 实线 = $maLabel ${MoneyFormatter.amount(latest)}")
+            }
+        }
+        append(" · 底部柱为成交量（手）")
     }
 
     AppCard(modifier = modifier.fillMaxWidth()) {
@@ -167,12 +191,13 @@ fun KlineYieldChart(
                 val volH = VOLUME_PANEL_HEIGHT.toPx()
                 val dateY = volTop + volH + 2.dp.toPx()
 
-                // Y 轴范围：蜡烛区间 ∪ 股息线价（最低 3 档保证可能落在蜡烛区间外，扩轴容纳），
+                // Y 轴范围：蜡烛区间 ∪ 股息线价 ∪ 均线值（最低 3 档保证可能落在蜡烛区间外，扩轴容纳），
                 // 各留 6% 余量防贴边；退化区间给 2% 防除零
                 val lineLowest = yieldLines.minOfOrNull { it.price }
                 val lineHighest = yieldLines.maxOfOrNull { it.price }
-                val rangeLow = minOf(low, lineLowest ?: low)
-                val rangeHigh = maxOf(high, lineHighest ?: high)
+                val maValues = maDisplay.mapNotNull { it }
+                val rangeLow = minOf(low, lineLowest ?: low, maValues.minOrNull() ?: low)
+                val rangeHigh = maxOf(high, lineHighest ?: high, maValues.maxOrNull() ?: high)
                 var range = rangeHigh - rangeLow
                 if (range <= 0.0) range = rangeHigh.coerceAtLeast(1.0) * 0.02
                 val yMax = rangeHigh + range * 0.06
@@ -180,11 +205,17 @@ fun KlineYieldChart(
 
                 fun yFor(price: Double): Float = ((yMax - price) / (yMax - yMin) * priceH).toFloat()
 
-                // 右侧 gutter：按最宽股息率标签自适应（无档位时为 0，蜡烛占满全宽）
+                // 右侧 gutter：按最宽标签自适应（股息率档位 / 均线值；两者皆无时为 0，蜡烛占满全宽）
+                val maEndLabel = if (hasMa && maLabel != null) {
+                    maDisplay.lastNotNullOrNull()
+                        ?.let { v -> textMeasurer.measure(maLineLabelText(maLabel, v), maLabelStyle) }
+                } else null
                 val measuredLabels = yieldLines.map {
                     textMeasurer.measure(yieldLineLabelText(it), yieldLabelStyle)
                 }
-                val gutter = measuredLabels.maxOfOrNull { it.size.width }?.plus(8.dp.roundToPx()) ?: 0
+                val gutter = (measuredLabels.maxOfOrNull { it.size.width } ?: 0)
+                    .coerceAtLeast(maEndLabel?.size?.width ?: 0)
+                    .takeIf { it > 0 }?.plus(8.dp.roundToPx()) ?: 0
                 val plotW = (size.width - gutter).coerceAtLeast(40.dp.toPx())
 
                 // 逐根浮现的透明度：progress*n - i（最右一根渐入，其余 0/1）
@@ -237,7 +268,43 @@ fun KlineYieldChart(
                     )
                 }
 
-                // 3) 成交量面条：高度归一化，按当日涨跌着色（减淡），与蜡烛同步浮现
+                // 3) 均线：实线折线（null 断开），与蜡烛同步浮现——年线定投策略的锚定基准
+                if (hasMa) {
+                    val slotMa = plotW / n
+                    val path = Path()
+                    var started = false
+                    maDisplay.forEachIndexed { i, v ->
+                        if (v != null) {
+                            val x = slotMa * i + slotMa / 2f
+                            val y = yFor(v)
+                            if (started) path.lineTo(x, y) else {
+                                path.moveTo(x, y)
+                                started = true
+                            }
+                        } else {
+                            started = false
+                        }
+                    }
+                    drawPath(
+                        path = path,
+                        color = maColor.copy(alpha = progress),
+                        style = Stroke(width = 1.5.dp.toPx())
+                    )
+                    if (maEndLabel != null) {
+                        maDisplay.indexOfLast { it != null }.takeIf { it >= 0 }?.let { lastIdx ->
+                            val y = yFor(maDisplay[lastIdx]!!)
+                            val labelY = (y - maEndLabel.size.height / 2f)
+                                .coerceIn(0f, (priceH - maEndLabel.size.height).coerceAtLeast(0f))
+                            drawText(
+                                maEndLabel,
+                                color = maColor.copy(alpha = progress),
+                                topLeft = Offset(plotW + 4.dp.toPx(), labelY),
+                            )
+                        }
+                    }
+                }
+
+                // 4) 成交量面条：高度归一化，按当日涨跌着色（减淡），与蜡烛同步浮现
                 val maxVol = display.maxOf { it.volume }.coerceAtLeast(1.0)
                 display.forEachIndexed { i, bar ->
                     val alpha = alphaAt(i)
@@ -254,7 +321,7 @@ fun KlineYieldChart(
                     }
                 }
 
-                // 4) 首末日期标签（MM-dd，对齐绘图区两端；入场尾声淡入）
+                // 5) 首末日期标签（MM-dd，对齐绘图区两端；入场尾声淡入）
                 val dateAlpha = ((progress - 0.6f) / 0.4f).coerceIn(0f, 1f)
                 if (dateAlpha > 0f) {
                     val firstLabel = textMeasurer.measure(klineDateLabel(display.first().date), dateStyle)
@@ -299,3 +366,11 @@ internal fun yieldLineLabelText(line: DividendYieldLine): String =
  */
 internal fun klineDateLabel(date: String): String =
     date.takeIf { it.length >= 6 }?.substring(5) ?: "—"
+
+/** 序列末尾最近的非空值（均线标签用）。 */
+private fun List<Double?>.lastNotNullOrNull(): Double? =
+    asReversed().firstOrNull { it != null }
+
+/** 均线线端标签文本：`"MA250 3.46"`。internal 纯函数，无 Android 依赖，便于单测。 */
+internal fun maLineLabelText(label: String, value: Double): String =
+    "$label ${MoneyFormatter.amount(value)}"
