@@ -38,6 +38,15 @@ const val GRID_TYPE_YIELD = "YIELD"
  * - [notifyEnabled] 到档提醒开关：价格到达下一买入档时推送本地通知。
  * - [lastNotifiedLevelPrice] 上次已提醒的档位价（去重用；现价回升超过该档后清空，
  *   再次跌破可重新提醒）。仅通知检查回写，**不随 updatedAt 变动**。
+ * - [swingMode] 波段模式开关（2026-08-23，DB v29）：每档买入拆为**底仓 + 波段**——
+ *   底仓只买不卖收息；波段部分（[swingRatioPercent]，默认 30%）涨到**股息率卖出锚**
+ *   （卖出锚价 = DPS ÷ (买入股息率 − [swingStepPercent] 百分点)）减仓、跌回档位再买回，
+ *   回合滚动；false = 纯买入收息（默认，行为不变）。
+ * - [swingStepPercent] 波段步长（**股息率百分点**，卖出锚 = 买入股息率 − 步长）；
+ *   null/非正 = 默认取网格等效股息率档距（「回落一档」）。仅波段模式生效。
+ * - [swingRatioPercent] 波段仓位比例（%，该档股数中做波段的部分；其余为底仓）。默认 30。
+ * - [lastNotifiedSellLevelPrice] 上次已提醒的**卖出锚**价（波段模式到档提醒去重用；
+ *   现价回落到该价之下后清空，再次涨到可重新提醒）。
  */
 @Stable
 @Entity(
@@ -74,6 +83,14 @@ data class GridPlanEntity(
     val notifyEnabled: Boolean = true,
     /** 上次已提醒的档位价（每档只提醒一次；现价回升超过该档后清空）。 */
     val lastNotifiedLevelPrice: Double? = null,
+    /** 波段模式开关：每档买入附带配对卖出档（涨到提示减仓、卖出后重挂）。 */
+    val swingMode: Boolean = false,
+    /** 波段步长（股息率百分点，卖出锚 = 买入股息率 − 步长）；null = 默认回落一档。 */
+    val swingStepPercent: Double? = null,
+    /** 波段仓位比例（%，该档股数中做波段的部分；其余为底仓只买不卖）。 */
+    val swingRatioPercent: Double = 30.0,
+    /** 上次已提醒的卖出档配对价（波段模式去重；现价回落到其下后清空）。 */
+    val lastNotifiedSellLevelPrice: Double? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

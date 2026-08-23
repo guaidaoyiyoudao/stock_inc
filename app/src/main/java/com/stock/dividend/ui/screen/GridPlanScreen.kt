@@ -94,7 +94,7 @@ import com.stock.dividend.viewmodel.ReanchorDiff
 @Composable
 fun GridPlanScreen(
     onBack: () -> Unit,
-    onAddTransaction: (stockCode: String, price: Double, shares: Int) -> Unit = { _, _, _ -> },
+    onAddTransaction: (stockCode: String, price: Double, shares: Int, isBuy: Boolean) -> Unit = { _, _, _, _ -> },
     viewModel: GridPlanViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -134,7 +134,8 @@ fun GridPlanScreen(
         ) {
             item {
                 Text(
-                    text = "纯买入网格：从买入起点分档买入到资金用完位，不设卖出档，不会自动下单。请在券商端手动执行。",
+                    text = "默认纯买入：从买入起点分档买到资金用完位、持有收息；可开「波段模式」：" +
+                        "每档拆底仓+波段（默认 30% 做波段），波段部分涨到股息率卖出锚减仓、跌回档位买回，底仓不动。请在券商端手动执行。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
@@ -174,9 +175,10 @@ fun GridPlanScreen(
     }
 }
 
-/** 弹药库汇总卡：全部网格计划的合计总资金/已投入/剩余/加权进度。 */
+/** 弹药库汇总卡：全部网格计划的合计总资金/已投入/剩余/加权进度（波段计划含回合与落袋）。 */
 @Composable
 private fun AmmoSummaryCard(ammo: com.stock.dividend.data.repository.GridAmmoSummary) {
+    val extendedColors = LocalExtendedColors.current
     AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
             Row(
@@ -213,6 +215,17 @@ private fun AmmoSummaryCard(ammo: com.stock.dividend.data.repository.GridAmmoSum
                     value = MoneyFormatter.withSymbol(ammo.remainingCapital),
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.End
+                )
+            }
+            // 波段回合合计（有波段计划且回合数 > 0 才展示）
+            if (ammo.roundTrips > 0) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "波段回合 ${ammo.roundTrips} 次 · 累计落袋 " +
+                        "${if (ammo.swingProfit >= 0) "+" else ""}${MoneyFormatter.amount(ammo.swingProfit)} 元" +
+                        "（计划口径，卖出回款已回流剩余可投）",
+                    style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                    color = if (ammo.swingProfit >= 0) extendedColors.positive else extendedColors.negative
                 )
             }
         }
@@ -277,7 +290,7 @@ private fun GridPlanCard(
     onToggleNotify: () -> Unit,
     onReanchor: () -> Unit,
     onBacktest: () -> Unit,
-    onAddTransaction: (stockCode: String, price: Double, shares: Int) -> Unit
+    onAddTransaction: (stockCode: String, price: Double, shares: Int, isBuy: Boolean) -> Unit
 ) {
     val plan = item.plan
     val result = item.result
@@ -308,6 +321,7 @@ private fun GridPlanCard(
                         text = "基准 ${MoneyFormatter.withSymbol(plan.basePrice)} · " +
                             "${plan.lowPrice}–${plan.highPrice} · ${plan.grids} 档" +
                             gridTypeLabel(plan) +
+                            (if (plan.swingMode) " · 波段" else "") +
                             " · 资金 ${MoneyFormatter.withSymbol(plan.totalCapital)}",
                         style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -443,7 +457,7 @@ private fun GridPlanCard(
                     }
                 }
 
-                // 「下一档」提示 + 一键记账
+                // 「下一档」提示 + 一键记账（波段模式另给「下一卖/已到卖出档」与一键卖出记账）
                 if (item.currentPrice != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
@@ -461,8 +475,14 @@ private fun GridPlanCard(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         result.nextBuyHint?.let { buy ->
-                            // 找到该档对应的建议股数（用于预填交易表单）
+                            // 找到该档对应的建议股数（用于预填交易表单）；
+                            // 波段模式：底仓已建的档只补波段股数
                             val level = result.levels.firstOrNull { it.price == buy }
+                            val pendingShares = if (result.swingMode && level?.baseHeld == true) {
+                                level.swingShares
+                            } else {
+                                level?.shares ?: 100
+                            }
                             Text(
                                 text = "下一买 ${MoneyFormatter.withSymbol(buy)}",
                                 style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
@@ -471,7 +491,7 @@ private fun GridPlanCard(
                             // 一键记账：跳到加交易页，预填该档价格/股数
                             AppTextButton(
                                 onClick = {
-                                    onAddTransaction(plan.stockCode, buy, level?.shares ?: 100)
+                                    onAddTransaction(plan.stockCode, buy, pendingShares, true)
                                 },
                                 text = "记账"
                             )
@@ -487,6 +507,15 @@ private fun GridPlanCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                    // 波段卖出侧：已到卖出档（即时可减仓，含一键卖出记账）或下一卖预警
+                    if (result.swingMode) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        SwingSellRow(
+                            result = result,
+                            stockCode = plan.stockCode,
+                            onAddTransaction = onAddTransaction
+                        )
                     }
                 }
 
@@ -598,6 +627,32 @@ private fun BacktestResultRows(r: GridBacktestResult) {
             helpText = "回测窗口内，同样资金首日一次性买入 vs 网格分档买入的成本节省比例"
         )
     }
+    // 波段模式专属：回合数 / 净落袋（含费用）/ 费用——波段网格的核心答案
+    if (r.roundTrips > 0 || r.swingProfitPct != null) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FinanceMetric(
+                label = "波段回合",
+                value = "${r.roundTrips} 次",
+                modifier = Modifier.weight(1f)
+            )
+            FinanceMetric(
+                label = "波段净落袋",
+                value = "${if (r.swingProfit >= 0) "+" else ""}${MoneyFormatter.amount(r.swingProfit)} 元" +
+                    (r.swingProfitPct?.let { "（${"%.2f".format(it)}%）" } ?: ""),
+                valueColor = if (r.swingProfit >= 0) extendedColors.positive else extendedColors.negative,
+                modifier = Modifier.weight(1.4f),
+                textAlign = TextAlign.Center,
+                helpText = "窗口内完成的买卖回合净收益（已扣费用假设：佣金万2.5，卖出另计印花税0.05%）"
+            )
+            FinanceMetric(
+                label = "费用",
+                value = MoneyFormatter.withSymbol(r.feesPaid),
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.End
+            )
+        }
+    }
     Spacer(modifier = Modifier.height(4.dp))
     Text(
         text = "窗口 ${r.windowStart} ~ ${r.windowEnd}（${r.tradingDays} 日，最低 ${"%.2f".format(r.minClose)}）" +
@@ -607,7 +662,8 @@ private fun BacktestResultRows(r: GridBacktestResult) {
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     Text(
-        text = "口径：按日收盘价回放（盘中触及未还原），成交按档位价假设。",
+        text = "口径：按日收盘价回放（盘中触及未还原），成交按档位价假设" +
+            (if (r.roundTrips > 0) "；波段卖出受 T+1 约束" else "") + "。",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
     )
@@ -668,10 +724,13 @@ private fun CollapsedSummaryRow(item: GridPlanItem, result: GridResult) {
     }
 }
 
-/** 资金执行跟踪摘要：进度条 + 已投入/剩余 + 浮盈 + 持仓口径。有买入才展示，否则隐藏（返回空）。 */
+/** 资金执行跟踪摘要：进度条 + 已投入/剩余 + 浮盈 + 持仓口径。有持仓或回合才展示。 */
 @Composable
 private fun ExecutionSummary(execution: GridExecution, holdingShares: Int = 0) {
-    if (execution.triggeredCount == 0) return  // 无买入，不展示，避免噪音
+    // 波段模式：卖出释放后 triggeredCount 可为 0，但底仓在持/有回合时仍需展示
+    if (execution.triggeredCount == 0 && execution.investedAmount == 0.0 && execution.roundTrips == 0) {
+        return
+    }
     val extendedColors = LocalExtendedColors.current
     Spacer(modifier = Modifier.height(8.dp))
     Row(
@@ -743,6 +802,19 @@ private fun ExecutionSummary(execution: GridExecution, holdingShares: Int = 0) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+    // 波段回合统计：完成回合数 + 计划口径落袋利润（波段模式且已有回合时才展示）
+    if (execution.roundTrips > 0) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "波段回合 ${execution.roundTrips} 次 · 已落袋 " +
+                (execution.swingProfit?.let { profit ->
+                    "${if (profit >= 0) "+" else ""}${MoneyFormatter.amount(profit)} 元"
+                } ?: "—") +
+                "（计划口径，不含费用；底仓不动，波段卖出回款已计入剩余可投）",
+            style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
+            color = if ((execution.swingProfit ?: 0.0) >= 0) extendedColors.positive else extendedColors.negative
+        )
+    }
     // 执行偏差（实际成交价 vs 档位价）：检验手动执行有没有跟上网格（正=买贵了）
     execution.avgDeviationPercent?.let { avg ->
         val worst = execution.worstDeviationPercent
@@ -762,6 +834,73 @@ private fun ExecutionSummary(execution: GridExecution, holdingShares: Int = 0) {
     }
 }
 
+/**
+ * 波段卖出侧行：优先展示「已到卖出锚」（即时减仓波段部分 + 一键卖出记账，取已到达
+ * 目标中最高的一档，附卖出时股息率）；未到达时给「下一卖」预警；无可卖档（尚无买入
+ * 成交）时提示等待建仓。底仓部分始终不动。
+ */
+@Composable
+private fun SwingSellRow(
+    result: GridResult,
+    stockCode: String,
+    onAddTransaction: (String, Double, Int, Boolean) -> Unit
+) {
+    val extendedColors = LocalExtendedColors.current
+    val price = result.currentPrice ?: return
+    val reached = result.levels
+        .filter { it.triggered && it.pairedSellPrice != null && price >= it.pairedSellPrice!! }
+        .maxByOrNull { it.pairedSellPrice!! }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (reached != null) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "已到卖出锚 ${MoneyFormatter.withSymbol(reached.pairedSellPrice!!)}" +
+                        (reached.pairedSellYieldPercent?.let { "（息 ${"%.2f".format(it)}%）" } ?: ""),
+                    style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
+                    color = extendedColors.negative,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "配对买价 ${MoneyFormatter.withSymbol(reached.price)} · 减仓波段 " +
+                        "${reached.swingShares} 股（底仓不动）",
+                    style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            AppTextButton(
+                onClick = {
+                    onAddTransaction(stockCode, reached.pairedSellPrice!!, reached.swingShares, false)
+                },
+                text = "卖出记账"
+            )
+        } else {
+            val next = result.nextSellHint
+            if (next != null && price > 0.0) {
+                val gapPct = (next - price) / price * 100.0
+                Text(
+                    text = "下一卖 ${MoneyFormatter.withSymbol(next)}（还差 ${"%.1f".format(gapPct)}%）",
+                    style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    text = "尚无可卖档（等买入档成交后自动配对）",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun GridLevelRow(level: GridLevel, currentPrice: Double?, fill: GridLevelFill? = null) {
     // 当前价恰好落在该档附近（误差 < 0.5%）时高亮
@@ -777,27 +916,42 @@ private fun GridLevelRow(level: GridLevel, currentPrice: Double?, fill: GridLeve
             text = MoneyFormatter.withSymbol(level.price),
             style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
             fontWeight = if (near) FontWeight.Bold else FontWeight.Normal,
-            // 已触发档位价格淡化（已被实际买入执行）
+            // 已触发档位价格淡化（已被实际买入执行；波段模式卖出重挂后恢复常态）
             color = when {
                 level.triggered -> MaterialTheme.colorScheme.outline
                 near -> MaterialTheme.colorScheme.primary
                 else -> MaterialTheme.colorScheme.onSurface
             }
         )
-        // 纯买入模型：所有档位均为「买」；已触发档标 ✓ 并尾注最近成交（MM/dd ×累计股数，多笔标笔数）
+        // 纯买入：所有档位均为「买」；已触发档标 ✓ 并尾注最近成交（MM/dd ×累计股数，多笔标笔数）。
+        // 波段三态：持✓=满持仓待卖（到卖出锚减仓波段）；底✓=底仓已建、波段待补；买=全新档。
+        // 卖出锚附卖出时股息率（息 X% = 买入股息率 − 步长）。
+        val fillNote = fill?.let { f ->
+            val date = f.lastDate?.takeLast(5)?.replace("-", "/") ?: ""
+            (if (f.fills > 1) "×${f.fills} " else " ") + "$date ×${f.shares}"
+        } ?: ""
         Text(
-            text = if (level.triggered) {
-                "买✓" + (fill?.let { f ->
-                    val date = f.lastDate?.takeLast(5)?.replace("-", "/") ?: ""
-                    (if (f.fills > 1) "×${f.fills} " else " ") + "$date ×${f.shares}"
-                } ?: "")
+            text = if (level.pairedSellPrice != null) {
+                val sellNote = "卖${MoneyFormatter.withSymbol(level.pairedSellPrice!!)}" +
+                    (level.pairedSellYieldPercent?.let { "·息${"%.2f".format(it)}%" } ?: "")
+                when {
+                    level.triggered -> "持✓→$sellNote$fillNote"
+                    level.baseHeld -> "底✓·补波${level.swingShares}→$sellNote"
+                    else -> "买→$sellNote"
+                }
+            } else if (level.triggered) {
+                "买✓$fillNote"
             } else "买",
             style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-            color = extendedColors.positive,
+            color = if (level.pairedSellPrice != null && level.triggered) {
+                extendedColors.negative  // 波段在持：到卖出锚即减仓
+            } else extendedColors.positive,
             modifier = Modifier.weight(1.4f).padding(horizontal = 8.dp)
         )
         Text(
-            text = "${level.shares} 股",
+            text = if (level.swingShares > 0) {
+                "${level.shares}·波${level.swingShares} 股"
+            } else "${level.shares} 股",
             style = MaterialTheme.typography.bodySmall.merge(tabularNumberStyle),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.End,
@@ -926,6 +1080,10 @@ private fun GridGeneratorSheet(
             Spacer(modifier = Modifier.height(14.dp))
             AllocationSection(state, viewModel)
 
+            // ── 运行模式：纯买入收息（默认）/ 波段（配对卖出档）──
+            Spacer(modifier = Modifier.height(14.dp))
+            SwingSection(state, viewModel)
+
             // 预览
             state.preview?.let { preview ->
                 Spacer(modifier = Modifier.height(16.dp))
@@ -955,6 +1113,75 @@ private fun GridGeneratorSheet(
                     text = "保存"
                 )
             }
+        }
+    }
+}
+
+/** 运行模式区：纯买入收息（默认）/ 波段（底仓不动 + 波段部分按股息率卖出锚高抛低吸）。 */
+@Composable
+private fun SwingSection(state: GridPlanUiState, viewModel: GridPlanViewModel) {
+    Column {
+        Text(
+            text = "运行模式",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = !state.swingModeInput,
+                onClick = { viewModel.onSwingModeChanged(false) },
+                label = { Text("纯买入（收息）") }
+            )
+            FilterChip(
+                selected = state.swingModeInput,
+                onClick = { viewModel.onSwingModeChanged(true) },
+                label = { Text("波段（底仓+高抛低吸）") }
+            )
+        }
+        Text(
+            text = if (state.swingModeInput) {
+                "每档买入拆为底仓与波段两部分：底仓只买不卖、永续收息；波段部分涨到「卖出锚」" +
+                    "（该档股息率回落一个步长的价格）减仓，跌回档位再买回——底仓股数始终不变。T+1 口径，不自动下单。"
+            } else {
+                "只跌买不涨卖：越跌越买、持有吃股息（经典收息网格）"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp)
+        )
+        if (state.swingModeInput) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                AppTextField(
+                    value = state.swingRatioInput,
+                    onValueChange = viewModel::onSwingRatioChanged,
+                    label = { Text("波段仓位") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    suffix = { Text("%") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+                AppTextField(
+                    value = state.swingStepInput,
+                    onValueChange = viewModel::onSwingStepChanged,
+                    label = { Text("步长（股息率pp）") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    suffix = { Text("pp") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+            }
+            Text(
+                text = "波段仓位 = 该档股数中做高抛低吸的比例（其余为底仓，默认 30%）；" +
+                    "步长 = 卖出锚较买入股息率回落多少个百分点（留空 = 回落一档）",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         }
     }
 }
@@ -1240,7 +1467,14 @@ private fun PreviewBlock(result: GridResult, customWeights: Boolean = false) {
                 return@AppCard
             }
             Text(
-                text = "预览：${result.levels.size} 档全部为买入（资金用完位前分批建仓）",
+                text = if (result.swingMode) {
+                    "预览：${result.levels.size} 档买入 · 波段 " +
+                        (result.swingRatioPercent?.let { "${"%.0f".format(it)}%" } ?: "—") +
+                        "（底仓只买不卖）· 卖出锚 = 股息率回落 " +
+                        (result.swingStepPercent?.let { "${"%.2f".format(it)}pp" } ?: "—")
+                } else {
+                    "预览：${result.levels.size} 档全部为买入（资金用完位前分批建仓）"
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1318,7 +1552,7 @@ private fun EmptyGridPlans(modifier: Modifier = Modifier, onCreate: () -> Unit) 
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "用 BOLL + 目标股息率智能锚定买入区间，生成纯买入档位表，\n越跌越买、持有收息，到档自动提醒。仅计划与提示，不自动下单。",
+            text = "用 BOLL + 目标股息率智能锚定买入区间，生成档位表：\n纯买入收息，或开波段模式每档配对卖出档高抛低吸。到档自动提醒，不自动下单。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center

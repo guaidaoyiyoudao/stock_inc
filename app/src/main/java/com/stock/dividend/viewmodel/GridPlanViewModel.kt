@@ -99,6 +99,12 @@ data class GridPlanUiState(
     val customWeights: Boolean = false,
     /** 自定义逐档资金比例输入（与档位同序、从最便宜档起；相对值，无需合计 100）。 */
     val levelWeightInputs: List<String> = emptyList(),
+    /** 波段模式开关（false = 纯买入收息，默认）：每档拆底仓+波段，波段涨到卖出锚减仓。 */
+    val swingModeInput: Boolean = false,
+    /** 波段步长输入（股息率百分点，卖出锚 = 买入股息率 − 步长）；空 = 默认回落一档。 */
+    val swingStepInput: String = "",
+    /** 波段仓位比例输入（%，该档股数中做波段的部分；其余为底仓只买不卖）。 */
+    val swingRatioInput: String = "30",
     /** 当前选中标的的年度每股分红（元，Room 本地缓存）；按股息率模式的档位价换算基准。
      *  null = 未选标的或该股无分红数据（UI 提示无法按股息率分档）。 */
     val generatorDps: Double? = null,
@@ -141,6 +147,12 @@ class GridPlanViewModel @Inject constructor(
     /** 从个股详情页跳转时携带的 stockCode（gridPlanFor/{code} 路由参数）；全局入口为空。 */
     private val initialStockCode: String = savedStateHandle["code"] ?: ""
 
+    /** 回测费用假设（%）：A 股股票口径——买入佣金万 2.5；卖出佣金万 2.5 + 印花税 0.05%。 */
+    companion object {
+        const val BACKTEST_BUY_FEE_PERCENT = 0.025
+        const val BACKTEST_SELL_FEE_PERCENT = 0.075
+    }
+
     private val _uiState = MutableStateFlow(GridPlanUiState())
     val uiState: StateFlow<GridPlanUiState> = _uiState.asStateFlow()
 
@@ -179,11 +191,14 @@ class GridPlanViewModel @Inject constructor(
                             totalCapital = plan.totalCapital,
                             currentPrice = price,
                             gridType = GridType.fromRaw(plan.gridType),
-                            dps = plan.dpsPerShare,
-                            levelWeights = GridLevelWeights.parse(plan.levelWeights)
-                        ),
-                        planTxs
-                    )
+                    dps = plan.dpsPerShare,
+                    levelWeights = GridLevelWeights.parse(plan.levelWeights),
+                    swingMode = plan.swingMode,
+                    swingStepPercent = plan.swingStepPercent,
+                    swingRatioPercent = plan.swingRatioPercent
+                ),
+                planTxs
+            )
                     GridPlanItem(
                         plan = plan,
                         currentPrice = price,
@@ -299,6 +314,9 @@ class GridPlanViewModel @Inject constructor(
             yieldEndInput = "6.5",
             customWeights = false,
             levelWeightInputs = emptyList(),
+            swingModeInput = false,
+            swingStepInput = "",
+            swingRatioInput = "30",
             generatorDps = null,
             anchorInfo = null,
             isAnchoring = false,
@@ -362,6 +380,15 @@ class GridPlanViewModel @Inject constructor(
     fun onYieldStartChanged(v: String) = update { copy(yieldStartInput = v) }
     fun onYieldEndChanged(v: String) = update { copy(yieldEndInput = v) }
     fun onGridTypeChanged(v: GridType) = update { copy(gridTypeInput = v) }
+
+    /** 切换波段/纯买入模式。波段 = 每档拆底仓+波段（底仓只买不卖，波段涨到卖出锚减仓）。 */
+    fun onSwingModeChanged(enabled: Boolean) = update { copy(swingModeInput = enabled) }
+
+    /** 波段步长（股息率百分点，卖出锚 = 买入股息率 − 步长）；空 = 默认回落一档。 */
+    fun onSwingStepChanged(v: String) = update { copy(swingStepInput = v) }
+
+    /** 波段仓位比例（%，该档股数中做波段的部分；其余为底仓）。 */
+    fun onSwingRatioChanged(v: String) = update { copy(swingRatioInput = v) }
 
     /**
      * 切换资金分配模式。切到自定义时以**当前预览的反比权重百分比**预填——
@@ -487,7 +514,11 @@ class GridPlanViewModel @Inject constructor(
             val low = dps / (end / 100.0)
             _uiState.value = _uiState.value.copy(
                 preview = GridCalculator.generate(
-                    base, low, base, grids, capital, price, GridType.YIELD, dps, weights
+                    base, low, base, grids, capital, price, GridType.YIELD, dps, weights,
+                    swingMode = s.swingModeInput,
+                    swingStepPercent = s.swingStepInput.toDoubleOrNull(),
+                    swingRatioPercent = s.swingRatioInput.toDoubleOrNull()
+                        ?: GridCalculator.DEFAULT_SWING_RATIO_PERCENT
                 )
             )
             return
@@ -502,7 +533,12 @@ class GridPlanViewModel @Inject constructor(
         }
         _uiState.value = _uiState.value.copy(
             preview = GridCalculator.generate(
-                base, low, high, grids, capital, price, s.gridTypeInput, null, weights
+                // 波段模式的卖出锚按股息率换算，DPS 随预览传入（无分红数据时预览报参数错）
+                base, low, high, grids, capital, price, s.gridTypeInput, s.generatorDps, weights,
+                swingMode = s.swingModeInput,
+                swingStepPercent = s.swingStepInput.toDoubleOrNull(),
+                swingRatioPercent = s.swingRatioInput.toDoubleOrNull()
+                    ?: GridCalculator.DEFAULT_SWING_RATIO_PERCENT
             )
         )
     }
@@ -518,7 +554,17 @@ class GridPlanViewModel @Inject constructor(
         }
 
         // 按股息率模式：三价由 DPS+股息率区间换算；DPS 存快照（分红变化不使档位漂移）。
+        // 波段模式同样需要 DPS 快照（卖出锚按股息率换算，重锚定同理）。
         val isYield = s.gridTypeInput == GridType.YIELD
+        val isSwing = s.swingModeInput
+        if (isSwing && !isYield && (s.generatorDps == null || s.generatorDps <= 0.0)) {
+            return setSaveError("波段模式需要该股分红数据（卖出锚按股息率换算，请先在详情页刷新分红）")
+        }
+        val swingRatio = s.swingRatioInput.toDoubleOrNull()
+            ?: return setSaveError("请输入有效的波段仓位比例")
+        if (isSwing && (swingRatio <= 0.0 || swingRatio > 100.0)) {
+            return setSaveError("波段仓位比例须在 0~100 之间")
+        }
         val dps: Double?
         val startYield: Double?
         val endYield: Double?
@@ -536,7 +582,11 @@ class GridPlanViewModel @Inject constructor(
             low = round2(dps / (endYield / 100.0))
             high = base  // 参考上界 = 买入起点（股息率低于起始%即不追买）
         } else {
-            dps = null
+            // 波段模式：DPS 快照随计划入库（卖出锚换算基准，防分红变化使卖出锚漂移）
+            dps = if (isSwing) {
+                s.generatorDps?.takeIf { it > 0.0 }
+                    ?: return setSaveError("波段模式需要该股分红数据（卖出锚按股息率换算）")
+            } else null
             startYield = null
             endYield = null
             base = s.basePriceInput.toDoubleOrNull()
@@ -561,6 +611,8 @@ class GridPlanViewModel @Inject constructor(
         val stockName = s.stocks.firstOrNull { it.code == s.selectedStockCode }?.name
             ?: s.selectedStockCode
         val now = System.currentTimeMillis()
+        // 波段步长（股息率百分点）：空/非法 → null（计算层默认回落一档）
+        val swingStep = s.swingStepInput.toDoubleOrNull()?.takeIf { it > 0.0 }
         val plan = GridPlanEntity(
             id = s.editingId ?: UUID.randomUUID().toString(),
             stockCode = s.selectedStockCode,
@@ -576,9 +628,13 @@ class GridPlanViewModel @Inject constructor(
                 ?: s.targetYieldInput.toDoubleOrNull()?.takeIf { it > 0.0 },
             dpsPerShare = dps,
             levelWeights = levelWeightsJson,
+            swingMode = s.swingModeInput,
+            swingStepPercent = swingStep,
+            swingRatioPercent = swingRatio,
             // 编辑时保留原创建时间；档位参数可能已变，旧的到档提醒状态作废
             createdAt = s.editingCreatedAt ?: now,
             lastNotifiedLevelPrice = null,
+            lastNotifiedSellLevelPrice = null,
             updatedAt = now
         )
         viewModelScope.launch {
@@ -631,6 +687,12 @@ class GridPlanViewModel @Inject constructor(
             levelWeightInputs = if (custom) {
                 storedWeights!!.map { String.format(java.util.Locale.US, "%.1f", it) }
             } else emptyList(),
+            // 波段模式回填（步长空 = 自动回落一档；仓位比例默认 30，存档非法值回退默认）
+            swingModeInput = plan.swingMode,
+            swingStepInput = plan.swingStepPercent
+                ?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "",
+            swingRatioInput = plan.swingRatioPercent.takeIf { it > 0.0 && it <= 100.0 }
+                ?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "30",
             // 编辑 YIELD 计划沿用存档 DPS（不重拉），档位不漂移；切换标的时会重拉
             generatorDps = dps,
             anchorInfo = null,
@@ -781,7 +843,13 @@ class GridPlanViewModel @Inject constructor(
                 totalCapital = plan.totalCapital,
                 gridType = GridType.fromRaw(plan.gridType),
                 dps = plan.dpsPerShare,
-                levelWeights = GridLevelWeights.parse(plan.levelWeights)
+                levelWeights = GridLevelWeights.parse(plan.levelWeights),
+                swingMode = plan.swingMode,
+                swingStepPercent = plan.swingStepPercent,
+                // 费用假设（A 股股票口径，ETF 无印花税会略高估）：佣金万 2.5 + 卖出印花税 0.05%
+                buyFeePercent = BACKTEST_BUY_FEE_PERCENT,
+                sellFeePercent = BACKTEST_SELL_FEE_PERCENT,
+                swingRatioPercent = plan.swingRatioPercent
             )
             _uiState.value = _uiState.value.copy(
                 backtestingIds = _uiState.value.backtestingIds - plan.id,

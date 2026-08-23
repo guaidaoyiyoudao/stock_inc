@@ -8,9 +8,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
  * 把「计划档位」和「实际成交」对照，回答收息投资者最关心的执行问题：
  * **已经投了多少、还剩多少、这套网格跑得怎么样**。
  *
- * - [investedAmount]  已投入金额（元）= 命中档位的实际买入金额之和。
- * - [remainingCapital] 剩余可投资金（元）= 计划总资金 − 已投入。
- * - [boughtShares]     已买入股数（命中档位实际成交股数之和）。
+ * - [investedAmount]  已投入金额（元）。纯买入 = 命中档位的实际买入金额之和；
+ *   **波段模式 = 净投入**（命中买入 − 命中卖出，卖出回款释放弹药）。
+ * - [remainingCapital] 剩余可投资金（元）= 计划总资金 − 已投入（波段模式随回合滚动回升）。
+ * - [boughtShares]     已买入股数（命中档位实际成交股数之和；波段模式 = 净持股）。
  * - [triggeredCount]   已触发档位数。
  * - [totalLevels]      总档位数。
  * - [avgBuyPrice]      已买入部分的加权均价（元/股）；无成交为 null。
@@ -19,6 +20,9 @@ import com.stock.dividend.data.local.entity.TransactionEntity
  * - [avgDeviationPercent] 执行偏差：实际成交价 vs 命中档位价的金额加权平均偏离（%，
  *   正=成交价高于档位价/买贵了，负=买得更便宜）；无成交为 null。
  * - [worstDeviationPercent] 最差一次执行的偏离（%，最大值；正=买得最贵的一次幅度）。
+ * - [roundTrips]       已完成波段回合数（买→涨到配对卖出价→卖）；纯买入模式恒 0。
+ * - [swingProfit]      已完成回合的波段利润（元，**计划口径** = (配对卖出价 − 档位价) ×
+ *   该档计划股数，不含费用）；纯买入模式为 null。
  *
  * **匹配口径**：与 [GridCalculator.markTriggeredLevels] 一致——某档位被「触发」即该股存在
  * 一笔 BUY 成交价落在该档触发区间（档位价 ± 半步长）。本函数在 [GridResult] 已标记
@@ -45,7 +49,9 @@ data class GridExecution(
     val unrealizedPnl: Double?,
     val unrealizedPnlRate: Double?,
     val avgDeviationPercent: Double? = null,
-    val worstDeviationPercent: Double? = null
+    val worstDeviationPercent: Double? = null,
+    val roundTrips: Int = 0,
+    val swingProfit: Double? = null
 ) {
     /** 执行进度（%，已触发档 / 总档）；无档位为 0。 */
     val progressPercent: Int get() = if (totalLevels > 0) (triggeredCount * 100 / totalLevels) else 0
@@ -77,10 +83,12 @@ data class GridLevelFill(
  *
  * @property planCount        计划数。
  * @property totalCapital     合计总资金（元）。
- * @property investedAmount   合计已投入（元）。
+ * @property investedAmount   合计已投入（元；波段计划为净投入，卖出回款已回流）。
  * @property remainingCapital 合计剩余可投（元）。
  * @property triggeredLevels  合计已触发档数。
  * @property totalLevels      合计总档数。
+ * @property roundTrips       合计已完成波段回合数（纯买入计划不计）。
+ * @property swingProfit      合计波段利润（元，计划口径；纯买入计划不计入）。
  */
 data class GridAmmoSummary(
     val planCount: Int,
@@ -88,7 +96,9 @@ data class GridAmmoSummary(
     val investedAmount: Double,
     val remainingCapital: Double,
     val triggeredLevels: Int,
-    val totalLevels: Int
+    val totalLevels: Int,
+    val roundTrips: Int = 0,
+    val swingProfit: Double = 0.0
 ) {
     /** 加权执行进度（%，已触发档/总档）；无档位为 0。 */
     val progressPercent: Int get() = if (totalLevels > 0) triggeredLevels * 100 / totalLevels else 0
@@ -101,33 +111,48 @@ object GridExecutionCalculator {
      *
      * 匹配口径与 [calculate] 的偏差统计一致：BUY 成交价落入某已触发档位的触发区间
      * （档位价 ± 半步长），就近归到价差最小的档位。未触发档位不出现在结果里。
+     *
+     * 波段模式：直接汇总 [markTriggeredLevels][GridCalculator.markTriggeredLevels] 重放产出
+     * 的 [GridResult.buyFills]（含已释放档的历史买入，档位归属在重放时已定，无需再匹配）。
      */
     fun levelFills(
         result: GridResult,
         transactions: List<TransactionEntity>
     ): Map<Double, GridLevelFill> {
         if (result.levels.isEmpty()) return emptyMap()
-        val levelPrices = result.levels.map { it.price }
-        val halfStep = levelPrices.zipWithNext().minOfOrNull { (a, b) -> (b - a) / 2.0 }
-            ?: return emptyMap()
-        val triggeredPrices = result.levels.filter { it.triggered }.map { it.price }
 
         data class Acc(var price: Double, var shares: Int, var fills: Int, var lastDate: String?)
         val byLevel = mutableMapOf<Double, Acc>()
-        transactions
-            .filter { it.type == "BUY" && it.price > 0.0 }
-            .sortedBy { it.date }
-            .forEach { tx ->
-                val level = triggeredPrices
-                    .filter { p -> kotlin.math.abs(tx.price - p) <= halfStep }
-                    .minByOrNull { p -> kotlin.math.abs(tx.price - p) }
-                    ?: return@forEach
-                val acc = byLevel.getOrPut(level) { Acc(tx.price, 0, 0, null) }
-                acc.price = tx.price
-                acc.shares += tx.shares
+
+        if (result.swingMode) {
+            // 波段模式：mark 重放已给出每笔买入的档位归属（按日期序），逐笔累计即可
+            result.buyFills.forEach { fill ->
+                val acc = byLevel.getOrPut(fill.levelPrice) { Acc(fill.price, 0, 0, null) }
+                acc.price = fill.price
+                acc.shares += fill.shares
                 acc.fills += 1
-                acc.lastDate = tx.date
+                acc.lastDate = fill.date
             }
+        } else {
+            val levelPrices = result.levels.map { it.price }
+            val halfStep = levelPrices.zipWithNext().minOfOrNull { (a, b) -> (b - a) / 2.0 }
+                ?: return emptyMap()
+            val triggeredPrices = result.levels.filter { it.triggered }.map { it.price }
+            transactions
+                .filter { it.type == "BUY" && it.price > 0.0 }
+                .sortedBy { it.date }
+                .forEach { tx ->
+                    val level = triggeredPrices
+                        .filter { p -> kotlin.math.abs(tx.price - p) <= halfStep }
+                        .minByOrNull { p -> kotlin.math.abs(tx.price - p) }
+                        ?: return@forEach
+                    val acc = byLevel.getOrPut(level) { Acc(tx.price, 0, 0, null) }
+                    acc.price = tx.price
+                    acc.shares += tx.shares
+                    acc.fills += 1
+                    acc.lastDate = tx.date
+                }
+        }
         return byLevel.mapValues { (level, acc) ->
             GridLevelFill(
                 levelPrice = level,
@@ -157,16 +182,20 @@ object GridExecutionCalculator {
             investedAmount = round2(invested),
             remainingCapital = round2(totalCapital - invested),
             triggeredLevels = executions.sumOf { it.triggeredCount },
-            totalLevels = executions.sumOf { it.totalLevels }
+            totalLevels = executions.sumOf { it.totalLevels },
+            roundTrips = executions.sumOf { it.roundTrips },
+            swingProfit = round2(executions.sumOf { it.swingProfit ?: 0.0 })
         )
     }
 
     /**
      * 计算网格执行跟踪。
      *
-     * @param result       网格计算结果（应已调用 [GridCalculator.markTriggeredLevels] 标记 triggered）。
+     * @param result       网格计算结果（应已调用 [GridCalculator.markTriggeredLevels] 标记 triggered；
+     *   **波段模式必须先 mark**——净投入/回合统计依赖重放产出的 buyFills/sellFills）。
      * @param totalCapital 计划总资金（元，> 0）。
-     * @param transactions 该股票的全部交易记录（内部只取命中触发区间的 BUY）。
+     * @param transactions 该股票的全部交易记录（纯买入模式内部只取命中触发区间的 BUY；
+     *   波段模式不重扫交易流，以 result 的成交事件为准）。
      * @param currentPrice 当前价（元），可选；用于浮盈。
      */
     fun calculate(
@@ -177,6 +206,48 @@ object GridExecutionCalculator {
     ): GridExecution {
         if (result.levels.isEmpty() || totalCapital <= 0.0) return GridExecution.EMPTY
 
+        // 波段模式：净投入口径（买入 − 卖出），弹药随回合滚动
+        if (result.swingMode) {
+            val buys = result.buyFills
+            val sells = result.sellFills
+            val buyAmount = buys.sumOf { it.price * it.shares }
+            val sellAmount = sells.sumOf { it.price * it.shares }
+            val invested = buyAmount - sellAmount
+            val shares = buys.sumOf { it.shares } - sells.sumOf { it.shares }
+            val triggeredCount = result.levels.count { it.triggered }
+            val avg = if (shares > 0) invested / shares else null
+            val currentVal =
+                if (shares > 0 && currentPrice != null && currentPrice > 0.0) shares * currentPrice else null
+            val pnl = if (currentVal != null) currentVal - invested else null
+            val pnlRate = if (pnl != null && invested > 0.0) pnl / invested * 100.0 else null
+
+            // 执行偏差（买入侧）：每笔命中买入 vs 其档位价（+ = 买贵了），金额加权
+            val deviationAmountSum = buys.sumOf { it.price * it.shares }
+            val avgDeviation = if (deviationAmountSum > 0.0) {
+                buys.sumOf { (it.price - it.levelPrice) / it.levelPrice * 100.0 * it.price * it.shares } /
+                    deviationAmountSum
+            } else null
+            val worstDeviation = buys
+                .maxOfOrNull { (it.price - it.levelPrice) / it.levelPrice * 100.0 }
+
+            return GridExecution(
+                investedAmount = round2(invested),
+                remainingCapital = round2(totalCapital - invested),
+                boughtShares = shares,
+                triggeredCount = triggeredCount,
+                totalLevels = result.levels.size,
+                avgBuyPrice = avg?.let(::round2),
+                currentValue = currentVal?.let(::round2),
+                unrealizedPnl = pnl?.let(::round2),
+                unrealizedPnlRate = pnlRate?.let(::round2),
+                avgDeviationPercent = avgDeviation?.let(::round2),
+                worstDeviationPercent = worstDeviation?.let(::round2),
+                roundTrips = result.roundTrips,
+                swingProfit = result.swingProfit
+            )
+        }
+
+        // 纯买入模式：沿用命中交易扫描口径（行为与历史版本一致）
         // 半步长（与 markTriggeredLevels 同口径）
         val levelPrices = result.levels.map { it.price }
         val halfStep = levelPrices.zipWithNext().minOfOrNull { (a, b) -> (b - a) / 2.0 }

@@ -166,4 +166,56 @@ class TodaySignalAggregatorTest {
         assertThat(grid.detail).contains("8.00")
         assertThat(grid.detail).doesNotContain("9.00")
     }
+
+    // ── 波段网格卖出到档信号（SELL_TRIGGER）──
+
+    /** 波段计划：在持档的卖出锚被现价触及 → SELL_TRIGGER（减仓波段股数，底仓不动）。 */
+    @Test
+    fun swingGridSellTrigger_emitsSellSignal() {
+        val plan = GridPlanEntity(
+            id = "g9", stockCode = "sh.600009", stockName = "Swing",
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 11.0, grids = 2,
+            totalCapital = 9000.0, swingMode = true, dpsPerShare = 0.5
+        )
+        // 两档 8/10、DPS 0.5：8.00 档卖出锚 = 10.00（息 6.25%−1.25pp = 5%）；
+        // BUY 8.1 建仓该档，现价 10.0 ≥ 10.00 触发
+        val txs = mapOf(
+            "sh.600009" to listOf(
+                TransactionEntity(
+                    id = 0L, stockCode = "sh.600009", type = "BUY",
+                    shares = 100, price = 8.1, date = "2026-08-01"
+                )
+            )
+        )
+        val prices = mapOf("sh.600009" to 10.0)
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(emptyList(), listOf(plan), prices, emptyList(), today, gridTransactionsByStock = txs)
+        )
+        val sell = result.first { it.type == TodaySignalType.SELL_TRIGGER }
+        assertThat(sell.key).isEqualTo("gridsell-g9")
+        assertThat(sell.sortPriority).isEqualTo(1)
+        assertThat(sell.detail).contains("10.00")
+        assertThat(sell.detail).contains("底仓不动")
+    }
+
+    /** 纯买入计划即使价格高于持有档也不产生卖出信号。 */
+    @Test
+    fun pureBuyPlan_neverEmitsSellSignal() {
+        val plan = GridPlanEntity(
+            id = "g10", stockCode = "sh.600010", stockName = "Pure",
+            basePrice = 10.0, lowPrice = 8.0, highPrice = 11.0, grids = 2, totalCapital = 9000.0
+        )
+        val txs = mapOf(
+            "sh.600010" to listOf(
+                TransactionEntity(
+                    id = 0L, stockCode = "sh.600010", type = "BUY",
+                    shares = 100, price = 8.1, date = "2026-08-01"
+                )
+            )
+        )
+        val result = TodaySignalAggregator.aggregate(
+            TodaySignalInput(emptyList(), listOf(plan), mapOf("sh.600010" to 9.6), emptyList(), today, gridTransactionsByStock = txs)
+        )
+        assertThat(result.none { it.type == TodaySignalType.SELL_TRIGGER }).isTrue()
+    }
 }

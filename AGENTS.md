@@ -23,7 +23,7 @@
 | 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.1.20-1.0.32 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 28** |
+| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 29** |
 | AI Agent | Google ADK Kotlin（AI Tab，OpenAI 兼容协议适配） | 0.6.0 |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
@@ -133,10 +133,10 @@ docs/                                   # 设计文档 + audit/（数据一致�
 | `HoldingCalculator` | 摊薄成本法持仓成本（已实现盈亏藏入成本） |
 | `RealizedPnlCalculator` | FIFO 已实现盈亏（A 股法定口径，与摊薄法并存各表各的） |
 | `DividendMetricsCalculator` | 分红深度（连续年数/CAGR/稳定性） |
-| `GridCalculator` | 网格档位表：等差/等比/按股息率（YIELD，档位价=DPS÷股息率）三模式；资金默认 1/price 反比，可传 `levelWeights` 逐档自定义相对权重；`markTriggeredLevels` 按成交价 ± 半步长标记已触发档；**「下一买」提示跳过已触发档（计算属性，消费方需先 mark 再读）** |
+| `GridCalculator` | 网格档位表：等差/等比/按股息率（YIELD，档位价=DPS÷股息率）三模式；资金默认 1/price 反比，可传 `levelWeights` 逐档自定义相对权重；`markTriggeredLevels` 按成交价 ± 半步长**时序重放**标记占用档；**「下一买」提示跳过在持档（计算属性，消费方需先 mark 再读）**；**波段模式（swingMode，DB v29）**：每档拆底仓+波段（`swingRatioPercent` 默认 30%，底仓只买不卖），波段卖出锚按**股息率**定义（卖出价 = DPS÷(买入息−步长pp)，默认回落一档），SELL 命中锚释放波段并计回合（roundTrips/swingProfit 计划口径×波段股数），buyFills/sellFills 供执行层净投入核算 |
 | `GridAnchorCalculator` | 三周期 BOLL 智能锚定：买入起点=min(日/周下轨, 月中轨)、资金用完位=min(三周期下轨, 目标股息率底)、参考上界=月上轨 |
-| `GridExecutionCalculator` | 网格资金执行跟踪（已投/剩余/加权均价/浮盈/执行偏差/逐档成交明细） |
-| `GridBacktestCalculator` | 网格历史回测（250 日收盘回放，对照首日一次性买入） |
+| `GridExecutionCalculator` | 网格资金执行跟踪（已投/剩余/加权均价/浮盈/执行偏差/逐档成交明细）；**波段模式净投入口径**（买入−卖出，卖出回款回流弹药库）+ 回合数/波段利润 |
+| `GridBacktestCalculator` | 网格历史回测（250 日收盘回放，对照首日一次性买入）；**波段模式双向回合模拟**（跌破买/涨回配对价卖+重挂，T+1 守卫，可传费率假设，回合数/净落袋/费用） |
 | `DividendYieldGridCalculator` | 股息率网格线（P=DPS÷股息率，0.5% 整档，最低保证最近档 ±1 档） |
 | `LlmPromptBuilder` 系列 / `*Parser` | 评估数据 → LLM prompt / LLM 响应 → 结构化（含容错 JSON 提取） |
 | `mergeByReportDate` | 不可变历史按报告期合并：远端覆盖同期、缓存独有旧期永续保留（`repairRemote` 支持字段级保底） |
@@ -158,7 +158,7 @@ docs/                                   # 设计文档 + audit/（数据一致�
 
 ### 4.6 数据库（Room）纪律 —— 关键
 
-- **DB version = 28**（21 张表 / `MIGRATION_1_2` … `MIGRATION_27_28`），`exportSchema = false`。
+- **DB version = 29**（21 张表 / `MIGRATION_1_2` … `MIGRATION_28_29`），`exportSchema = false`。
 - 改 schema 必须三件事同步：① `AppDatabase` 的 entities/version；② 新增 `MIGRATION_N_(N+1)` 并在 `DatabaseModule` 注册；③ version +1。历史迁移全部手写 `ALTER`/`CREATE`。
 - 表名/列名下划线，实体字段驼峰，Room 注解映射。
 - **备份恢复注意**：恢复旧版本备份时 Gson 会给缺失字段填 null，可能撞 Room NOT NULL 约束使整个事务失败——`BackupData.normalizeXxx` 按 `dbVersion` 分支修补（先例：normalizeGridPlans）。
@@ -304,3 +304,4 @@ CI 用 JDK 17 temurin，显式 `USE_CHINA_MIRROR=false` 直连官方仓库；本
 - 2026-08-20：数据一致性审计（真实接口交叉验证）+ 全量修复；已排期未除权分红计入 TTM；失败日志页（DB v26）。
 - 2026-08-22：ETF/LOF 场内基金全链路（搜索/行情/K线/分红）；AI 聊天多模态图片导入；缓存管理页重构为「存储空间」样式并全库修复卡片内边距。
 - 2026-08-23：接入同花顺扶摇官方金融数据 API 为**权威第一数据源**（行情/指数/搜索/股票+ETF·LOF 分红/股票日K+周月线聚合/财务三表/财务指标），东财/腾讯降为候补并行补齐缺失字段（`supplementedFrom` 字段级合并范式）；key 走设置页运行时填写（`FuyaoConfig`）；K 线换源全量重建机制（DB v26→27，`kline_cache_meta.source`）。同日**全量接入**扶摇独有能力：估值/交易日历/龙虎榜（小数分数陷阱）/涨跌停·连板天梯/热股榜/异动/竞价/同花顺指数目录·成分·指数日K/代码表 + 基金域 24 端点（`FundDataRepository`），数据平面新增 ~50 个方法。随后落地**永久缓存层**（DB v27→28）：`fuyao_cache` 表 + `FuyaoCacheStore`（合并式/覆盖式/按日缓存优先三语义），同花顺独有数据全部离线可读。同日**横向验证**（三方同刻对比，31 PASS/0 FAIL，见 docs/audit/2026-08-23）：修复 M1 营业总收入口径（扶摇=营业收入口径，该字段由东财回填）与 M2 K线成交量 股→手 ÷100；记录 PB 归母/含少数口径差与龙虎榜小数分数；腾讯科创板前复权缺失缺陷随主源切换自愈。
+- 2026-08-23（二）：**网格波段模式**补齐股息波段交易闭环（DB v28→29）：每档买入拆**底仓 + 波段**（`swingRatioPercent` 默认 30%——底仓只买不卖永续收息，波段部分做高抛低吸）；卖出锚按**股息率**定义（卖出价 = DPS÷(该档买入股息率 − 步长百分点)，默认步长 = 网格等效股息率档距即「回落一档」，波段计划强制存 DPS 快照防锚漂移）；`GridCalculator` 重放改**三态机**（底仓在持/波段在持/待买），执行跟踪**净投入**口径（卖出回款回流弹药库、底仓成本恒在），回测 v2 三态模拟（T+1 守卫 + 佣金/印花税费率假设 + 回合数/净落袋/期末底仓持仓）；到档提醒增卖出方向（迟滞/去重独立状态）；今日页新增 `SELL_TRIGGER` 信号；一键记账支持卖出预填（`sellPrice`/`sellShares`，波段档买入预填只补波段股数）。纯买入行为完全不变（swingMode 默认 false）。

@@ -61,9 +61,16 @@ class EditHoldingViewModel @Inject constructor(
     val uiState: StateFlow<EditHoldingUiState> = _uiState.asStateFlow()
 
     /** 解析 query 参数 buyPrice/buyShares；任一缺失返回 null（不预填）。 */
-    private val prefilledTransaction: Pair<String, String>? by lazy {
+    private val prefilledBuy: Pair<String, String>? by lazy {
         val price = savedStateHandle.get<String>("buyPrice")
         val shares = savedStateHandle.get<String>("buyShares")
+        if (!price.isNullOrBlank() && !shares.isNullOrBlank()) price to shares else null
+    }
+
+    /** 解析 query 参数 sellPrice/sellShares（波段网格「一键卖出记账」）；任一缺失返回 null。 */
+    private val prefilledSell: Pair<String, String>? by lazy {
+        val price = savedStateHandle.get<String>("sellPrice")
+        val shares = savedStateHandle.get<String>("sellShares")
         if (!price.isNullOrBlank() && !shares.isNullOrBlank()) price to shares else null
     }
 
@@ -84,13 +91,23 @@ class EditHoldingViewModel @Inject constructor(
                 }
             }
         }
-        // 从个股详情/网格页跳转携带的预填参数（query string）：buyPrice / buyShares
-        // 命中时自动打开买入表单并预填，实现「下一档一键记账」闭环。
-        // 仅首次进入生效（query 参数一次性），避免每次订阅都重开表单。
-        prefilledTransaction?.let { (price, shares) ->
+        // 从个股详情/网格页跳转携带的预填参数（query string）：buyPrice / buyShares 或
+        // sellPrice / sellShares，命中时自动打开对应方向表单并预填，实现「下一档/卖出档
+        // 一键记账」闭环。仅首次进入生效（query 参数一次性），避免每次订阅都重开表单。
+        prefilledBuy?.let { (price, shares) ->
             _uiState.value = _uiState.value.copy(
                 showTransactionSheet = true,
                 isBuyInput = true,
+                addPriceInput = price,
+                addSharesInput = shares,
+                addDateInput = LocalDate.now().toString(),
+                addSharesError = null,
+                addPriceError = null
+            )
+        } ?: prefilledSell?.let { (price, shares) ->
+            _uiState.value = _uiState.value.copy(
+                showTransactionSheet = true,
+                isBuyInput = false,
                 addPriceInput = price,
                 addSharesInput = shares,
                 addDateInput = LocalDate.now().toString(),

@@ -37,3 +37,9 @@ fun channelFor(ruleType: String): String = when (ruleType) {
  * 文案/渠道路由。
  */
 const val GRID_NEXT_LEVEL_ALERT = "GRID_NEXT_LEVEL"
+
+/**
+ * 网格**卖出档**到档提醒的「规则类型」标识（波段模式）。同样不落表——去重状态存
+ * grid_plans.lastNotifiedSellLevelPrice。仅用于文案/渠道路由。
+ */
+const val GRID_SELL_LEVEL_ALERT = "GRID_SELL_LEVEL"

@@ -21,7 +21,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
@@ -46,6 +55,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.AlertDialog
@@ -81,6 +91,7 @@ import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.AppOutlinedButton
 import com.stock.dividend.ui.component.BollPriceScale
 import com.stock.dividend.ui.component.CompanyIcon
+import com.stock.dividend.ui.component.CostPriceScale
 import com.stock.dividend.ui.component.DividendPriceScale
 import com.stock.dividend.ui.component.DividendSummaryCard
 import com.stock.dividend.ui.component.EmptyStateView
@@ -90,8 +101,8 @@ import com.stock.dividend.ui.component.SkeletonList
 import com.stock.dividend.ui.component.StockCard
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
-import com.stock.dividend.ui.navigation.stockCardSharedBounds
 import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.Motion
 import com.stock.dividend.ui.theme.tabularNumberStyle
 import nl.dionsegijn.konfetti.compose.KonfettiView
 import nl.dionsegijn.konfetti.core.Party
@@ -620,15 +631,16 @@ private fun PortfolioHoldingCard(
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
-    // 每张卡片独立切换「股息率 ↔ BOLL」，仅内存状态（不持久化）。
-    var showBoll by remember(item.code) { mutableStateOf(false) }
-    LaunchedEffect(showBoll) {
-        if (showBoll) onLoadBoll()
+    // 每张卡片独立循环切换「股息率 ↔ BOLL ↔ 成本现价」，仅内存状态（不持久化）。
+    // ⚠️ 不挂 sharedBounds：共享元素的 approachMeasure 会用转场时刻的 bounds 固定约束
+    // 钳制内容（Constraints.fixed），BOLL 懒加载两段变高时底部会被锁在外面。
+    var axisMode by remember(item.code) { mutableStateOf(0) }
+    LaunchedEffect(axisMode) {
+        if (axisMode == AXIS_BOLL) onLoadBoll()
     }
     AppCard(
         modifier = modifier
             .fillMaxWidth()
-            .stockCardSharedBounds(item.code)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = {
@@ -638,7 +650,13 @@ private fun PortfolioHoldingCard(
             ),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+        // animateContentSize：BOLL 懒加载二段变高（占位 54dp → 数据 ~150dp）时整卡平滑展开
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize(tween(Motion.DurationMedium, easing = Motion.Standard))
+                .padding(14.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -702,124 +720,98 @@ private fun PortfolioHoldingCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            // 权重/目标信息常驻行（成本/现价/PE/已实现明细已并入第三视图 CostPriceScale）
+            Spacer(modifier = Modifier.height(10.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text(
-                        text = "成本 ${MoneyFormatter.withSymbol(item.costPerShare)}",
-                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "现价 ${item.currentPrice?.let { MoneyFormatter.withSymbol(it) } ?: "—"}",
-                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        // 涨跌幅（紧跟现价，A股惯例红涨绿跌）；null 或 0 不展示，避免噪音
-                        quote?.changePct?.takeIf { it != 0.0 }?.let { pct ->
-                            Text(
-                                text = " ${if (pct > 0) "▲" else "▼"}${"%.2f".format(kotlin.math.abs(pct))}%",
-                                style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                                color = pnlColor(pct)
-                            )
-                        }
-                    }
-                    // PE / PB / 换手（缺失显示「—」）；三者全缺则不展示此行，保持留白干净
-                    val hasValuation = quote?.pe != null || quote?.pb != null || quote?.turnoverRate != null
-                    if (hasValuation) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = buildString {
-                                append("PE ")
-                                append(quote?.pe?.let { "%.2f".format(it) } ?: "—")
-                                append("  PB ")
-                                append(quote?.pb?.let { "%.2f".format(it) } ?: "—")
-                                append("  换手 ")
-                                append(quote?.turnoverRate?.let { "${"%.2f".format(it)}%" } ?: "—")
-                            },
-                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    // 已实现盈亏（FIFO）：仅在该股有过卖出时展示，区分于头部浮动盈亏。
-                    item.realizedPnl?.let { realized ->
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "已实现 ${portfolioFormatSignedPnl(realized)}",
-                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                            fontWeight = FontWeight.SemiBold,
-                            color = pnlColor(realized)
-                        )
-                    }
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = weightRow(item),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "目标占行业 ${portfolioFormatPercent(item.targetWeight)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    item.targetValue?.let { tv ->
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "目标金额 ${portfolioFormatMoney(tv)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Text(
+                    text = weightRow(item),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "目标占行业 ${portfolioFormatPercent(item.targetWeight)}" +
+                        item.targetValue?.let { " · 目标金额 ${portfolioFormatMoney(it)}" }.orEmpty(),
+                    style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
-            // 坐标轴切换按钮 + 横轴主体（与自选股卡片一致）。
-            // showBoll=false → 股息率横轴；showBoll=true → 周线 BOLL 横轴（切换时按需懒加载）。
+            // 坐标轴切换按钮：循环 股息率 → BOLL → 成本现价
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                IconButton(onClick = { showBoll = !showBoll }, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = { axisMode = (axisMode + 1) % 3 }, modifier = Modifier.size(32.dp)) {
                     Icon(
-                        imageVector = if (showBoll) Icons.Default.ShowChart else Icons.Default.TrendingUp,
-                        contentDescription = if (showBoll) "切换到股息率横轴" else "切换到 BOLL 横轴",
+                        imageVector = when (axisMode) {
+                            AXIS_BOLL -> Icons.Default.ShowChart
+                            AXIS_COST -> Icons.Default.Paid
+                            else -> Icons.Default.TrendingUp
+                        },
+                        contentDescription = when (axisMode) {
+                            AXIS_DIVIDEND -> "切换到 BOLL 横轴"
+                            AXIS_BOLL -> "切换到成本现价横轴"
+                            else -> "切换到股息率横轴"
+                        },
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
                 }
             }
-            if (showBoll) {
-                BollPriceScale(
-                    currentPrice = item.currentPrice,
-                    band = bollBand,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            } else {
-                // 股息率→目标价横轴（与自选股卡片一致）。
-                // 仅当现价与最新年度股息都有效时渲染（DividendPriceScale 内部已做空值/非正数短路）。
-                DividendPriceScale(
-                    currentPrice = item.currentPrice,
-                    latestYearlyDividend = latestYearlyDividend,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
+
+            // 横轴主体三选一（滑动+淡入切换；clip=false 防 BOLL 懒加载两段高度时底部被裁）
+            AnimatedContent(
+                targetState = axisMode,
+                label = "axisSwitch",
+                transitionSpec = {
+                    ContentTransform(
+                        targetContentEnter = slideInHorizontally(
+                            animationSpec = tween(Motion.DurationShort, easing = Motion.EmphasizedDecelerate),
+                            initialOffsetX = { it / 4 },
+                        ) + fadeIn(tween(Motion.DurationShort)),
+                        initialContentExit = slideOutHorizontally(
+                            animationSpec = tween(Motion.DurationShort, easing = Motion.EmphasizedAccelerate),
+                            targetOffsetX = { -it / 4 },
+                        ) + fadeOut(tween(Motion.DurationShort)),
+                        sizeTransform = SizeTransform(clip = false),
+                    )
+                },
+            ) { mode ->
+                when (mode) {
+                    AXIS_BOLL -> BollPriceScale(
+                        currentPrice = item.currentPrice,
+                        band = bollBand,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                    AXIS_COST -> CostPriceScale(
+                        costPrice = item.costPerShare,
+                        currentPrice = item.currentPrice,
+                        unrealizedPnl = item.unrealizedPnl,
+                        unrealizedPnlRate = item.unrealizedPnlRate,
+                        realizedPnl = item.realizedPnl,
+                        quote = quote,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                    else -> DividendPriceScale(
+                        currentPrice = item.currentPrice,
+                        latestYearlyDividend = latestYearlyDividend,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
             }
         }
     }
 }
+
+/** 持仓卡横轴模式：0=股息率 1=周线BOLL 2=成本现价。 */
+private const val AXIS_DIVIDEND = 0
+private const val AXIS_BOLL = 1
+private const val AXIS_COST = 2
 
 @Composable
 private fun SummaryMetric(

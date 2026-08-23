@@ -329,19 +329,24 @@ fun MainScaffold(
             ) {
                 GridPlanScreen(
                     onBack = { tabNavController.popBackStack() },
-                    onAddTransaction = { code, price, shares ->
+                    onAddTransaction = { code, price, shares, isBuy ->
+                        // 波段卖出档与买入档共用「一键记账」闭环：按方向拼对应预填参数
+                        val direction = if (isBuy) "buy" else "sell"
                         tabNavController.navigate(
-                            "editHolding/$code?buyPrice=${"%.2f".format(price)}&buyShares=$shares"
+                            "editHolding/$code?${direction}Price=${"%.2f".format(price)}&${direction}Shares=$shares"
                         )
                     }
                 )
             }
             composable(
-                route = "editHolding/{code}?buyPrice={buyPrice}&buyShares={buyShares}",
+                route = "editHolding/{code}?buyPrice={buyPrice}&buyShares={buyShares}" +
+                    "&sellPrice={sellPrice}&sellShares={sellShares}",
                 arguments = listOf(
                     navArgument("code") { type = NavType.StringType },
                     navArgument("buyPrice") { type = NavType.StringType; defaultValue = "" },
-                    navArgument("buyShares") { type = NavType.StringType; defaultValue = "" }
+                    navArgument("buyShares") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("sellPrice") { type = NavType.StringType; defaultValue = "" },
+                    navArgument("sellShares") { type = NavType.StringType; defaultValue = "" }
                 )
             ) {
                 EditHoldingScreen(onBack = { tabNavController.popBackStack() })

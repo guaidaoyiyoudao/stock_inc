@@ -109,6 +109,42 @@ class GridPlanViewModelTest {
         assertThat(vm.uiState.value.showGenerator).isFalse()
     }
 
+    /** 波段模式保存：swingMode/波段步长/仓位比例/DPS 快照随计划入库（默认纯买入 false/null/30）。 */
+    @Test
+    fun `savePlan persists swing mode entity`() = runTest {
+        val gridRepo = mockk<GridPlanRepository>(relaxed = true)
+        val plane = mockk<MarketDataPlane>(relaxed = true)
+        val txRepo = mockk<TransactionRepository>(relaxed = true)
+        val notifier = mockk<DividendAlertNotifier>(relaxed = true)
+        coEvery { gridRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.observeAllStocks() } returns flowOf(listOf(stock()))
+        coEvery { txRepo.observeAll() } returns flowOf(emptyList())
+        coEvery { plane.getPricesForCodes(any()) } returns emptyMap()
+        // 波段模式必须有 DPS（卖出锚按股息率换算）；选标的时 VM 会异步拉取
+        coEvery { plane.getDps("sh.600036") } returns 0.5
+
+        val vm = GridPlanViewModel(savedStateHandle(), gridRepo, plane, txRepo, notifier)
+        vm.showGenerator()
+        vm.onStockSelected("sh.600036")
+        advanceUntilIdle()  // 等 DPS 异步回填完成（波段保存校验依赖）
+        vm.onBasePriceChanged("10")
+        vm.onLowPriceChanged("8")
+        vm.onHighPriceChanged("12")
+        vm.onGridsChanged("2")
+        vm.onTotalCapitalChanged("100000")
+        vm.onSwingModeChanged(true)
+        vm.onSwingStepChanged("1.5")
+        vm.savePlan()
+        advanceUntilIdle()
+
+        coVerify {
+            gridRepo.upsert(match {
+                it.swingMode && it.swingStepPercent == 1.5 && it.swingRatioPercent == 30.0 &&
+                    it.dpsPerShare == 0.5
+            })
+        }
+    }
+
     @Test
     fun `savePlan ignores when stock not selected`() = runTest {
         val gridRepo = mockk<GridPlanRepository>(relaxed = true)

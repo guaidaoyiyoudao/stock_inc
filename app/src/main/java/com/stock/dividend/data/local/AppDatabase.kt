@@ -69,7 +69,7 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         ErrorLogEntity::class,
         FuyaoCacheEntity::class
     ],
-    version = 28,
+    version = 29,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -462,6 +462,23 @@ abstract class AppDatabase : RoomDatabase() {
                         "`key` TEXT NOT NULL, `payload` TEXT NOT NULL, " +
                         "`fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`key`))"
                 )
+            }
+        }
+
+        val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 网格波段模式（股息率卖出锚 + 底仓/波段拆分 + 弹药回流，2026-08-23）：
+                // swingMode 波段开关（默认关 = 纯买入，旧行为不变）、swingStepPercent 波段步长
+                // （股息率百分点，null = 回落一档）、swingRatioPercent 波段仓位比例（默认 30，
+                // 其余为底仓只买不卖）、lastNotifiedSellLevelPrice 卖出档提醒去重状态
+                db.execSQL(
+                    "ALTER TABLE grid_plans ADD COLUMN swingMode INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL("ALTER TABLE grid_plans ADD COLUMN swingStepPercent REAL")
+                db.execSQL(
+                    "ALTER TABLE grid_plans ADD COLUMN swingRatioPercent REAL NOT NULL DEFAULT 30"
+                )
+                db.execSQL("ALTER TABLE grid_plans ADD COLUMN lastNotifiedSellLevelPrice REAL")
             }
         }
     }

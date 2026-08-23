@@ -8,12 +8,12 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
 /** 今日信号类型。 */
-enum class TodaySignalType { BUY_TRIGGER, GRID_NEXT_LEVEL, DIVIDEND_COUNTDOWN }
+enum class TodaySignalType { BUY_TRIGGER, SELL_TRIGGER, GRID_NEXT_LEVEL, DIVIDEND_COUNTDOWN }
 
 /**
  * 单条今日信号（纯数据，UI 据此渲染一行）。
- * @param sortPriority 排序权重，小者在前（BUY=0 / GRID=1 / DIVIDEND=2）。
- * @param key LazyColumn 稳定唯一键（buy-{code} / grid-{planId} / div-{code}）。
+ * @param sortPriority 排序权重，小者在前（BUY=0 / SELL=1 / GRID=1 / DIVIDEND=2）。
+ * @param key LazyColumn 稳定唯一键（buy-{code} / gridsell-{planId} / grid-{planId} / div-{code}）。
  *   ⚠️ 不可用 stockCode+type 组合——同股多套网格计划会产生多条 GRID 信号，
  *   key 撞车会在今日页滚动到信号区时抛「Key was already used」闪退（2026-08-16 修复）。
  */
@@ -59,6 +59,7 @@ object TodaySignalAggregator {
     fun aggregate(input: TodaySignalInput): List<TodaySignal> {
         val signals = mutableListOf<TodaySignal>()
         buyTriggers(input.stocks, signals)
+        gridSellTriggers(input, signals)
         gridNextLevels(input, signals)
         dividendCountdowns(input, signals)
         // key 兜底去重：即使未来新增信号源破坏唯一约定，也不让今日页因 LazyColumn
@@ -148,7 +149,10 @@ object TodaySignalAggregator {
                     currentPrice = current,
                     gridType = GridType.fromRaw(plan.gridType),
                     dps = plan.dpsPerShare,
-                    levelWeights = GridLevelWeights.parse(plan.levelWeights)
+                    levelWeights = GridLevelWeights.parse(plan.levelWeights),
+                    swingMode = plan.swingMode,
+                    swingStepPercent = plan.swingStepPercent,
+                    swingRatioPercent = plan.swingRatioPercent
                 ),
                 input.gridTransactionsByStock[plan.stockCode].orEmpty()
             )
@@ -165,6 +169,54 @@ object TodaySignalAggregator {
                     key = "grid-${plan.id}",
                 )
             }
+        }
+    }
+
+    /**
+     * 波段网格卖出到档信号：现价 ≥ 某在持档的**卖出锚**（股息率锚）→ 「现在就该减仓
+     * 波段部分」(区别于「下一档买入」的预警视角，这是即时可执行信号；底仓不动）。
+     * 取已到达目标中最高的一档；纯买入计划不产生本类信号。
+     */
+    private fun gridSellTriggers(input: TodaySignalInput, out: MutableList<TodaySignal>) {
+        for (plan in input.gridPlans) {
+            if (!plan.swingMode) continue
+            val current = input.gridCurrentPrices[plan.stockCode]
+                ?: input.stocks.firstOrNull { it.code == plan.stockCode }?.price
+                ?: continue
+            val result = GridCalculator.markTriggeredLevels(
+                GridCalculator.generate(
+                    basePrice = plan.basePrice,
+                    lowPrice = plan.lowPrice,
+                    highPrice = plan.highPrice,
+                    grids = plan.grids,
+                    totalCapital = plan.totalCapital,
+                    currentPrice = current,
+                    gridType = GridType.fromRaw(plan.gridType),
+                    dps = plan.dpsPerShare,
+                    levelWeights = GridLevelWeights.parse(plan.levelWeights),
+                    swingMode = plan.swingMode,
+                    swingStepPercent = plan.swingStepPercent,
+                    swingRatioPercent = plan.swingRatioPercent
+                ),
+                input.gridTransactionsByStock[plan.stockCode].orEmpty()
+            )
+            if (result.validationError != null) continue
+            // 已到达（现价 ≥ 卖出锚）的在持档中最高的一档
+            val reached = result.levels
+                .filter { it.triggered && it.pairedSellPrice != null && current >= it.pairedSellPrice!! }
+                .maxByOrNull { it.pairedSellPrice!! }
+                ?: continue
+            out += TodaySignal(
+                type = TodaySignalType.SELL_TRIGGER,
+                stockCode = plan.stockCode,
+                stockName = plan.stockName,
+                title = "波段网格到卖出档",
+                detail = "现价 %.2f ≥ 卖出锚 %.2f，减仓波段 %d 股（底仓不动）".format(
+                    current, reached.pairedSellPrice!!, reached.swingShares
+                ),
+                sortPriority = 1,
+                key = "gridsell-${plan.id}",  // 与买入侧信号（grid-）分键，互不顶替
+            )
         }
     }
 

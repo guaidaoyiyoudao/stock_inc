@@ -32,6 +32,9 @@ data class BackupMetadata(
  * gridType 的 null 兜底对任何版本都生效（防御损坏数据）。
  * - 自定义档位资金比例（v25 起可空列）：损坏 JSON / 档数与 grids 不匹配 → 置 null
  *   （回退反比默认），避免脏数据让档位计算报「须与档数一致」导致整个计划不可用。
+ * - 波段模式四列（v29 起）：swingMode 缺失被置 false（=纯买入，语义默认一致，无需修补）；
+ *   swingStepPercent / lastNotifiedSellLevelPrice 可空，缺失为 null 即正确；
+ *   swingRatioPercent 为基本类型，缺失被置 0.0（非法）→ 恢复为 30（默认波段仓位比例）。
  */
 fun normalizeGridPlans(plans: List<GridPlanEntity>?, dbVersion: Int): List<GridPlanEntity> {
     val list = plans.orEmpty()
@@ -44,7 +47,13 @@ fun normalizeGridPlans(plans: List<GridPlanEntity>?, dbVersion: Int): List<GridP
         val weights = plan.levelWeights?.takeIf { raw ->
             GridLevelWeights.parse(raw)?.size == plan.grids
         }
-        val fixed = plan.copy(gridType = type, levelWeights = weights)
+        // 波段仓位比例：Gson 缺字段 → 0.0（非法定值）→ 恢复默认 30
+        val swingRatio = plan.swingRatioPercent.takeIf { it > 0.0 && it <= 100.0 } ?: 30.0
+        val fixed = plan.copy(
+            gridType = type,
+            levelWeights = weights,
+            swingRatioPercent = swingRatio
+        )
         if (dbVersion < 21) fixed.copy(notifyEnabled = true) else fixed
     }
 }

@@ -304,9 +304,11 @@ fun TodayScreen(
         } else {
             items(items = state.signals, key = { it.key }) { signal ->
                 AppCard(
-                    // 网格信号直达网格计划页（改参数/看档位/记账都在那里），其余跳个股详情
+                    // 网格信号（买入下一档/波段到卖出档）直达网格计划页（改参数/看档位/记账都在那里），其余跳个股详情
                     onClick = {
-                        if (signal.type == TodaySignalType.GRID_NEXT_LEVEL) {
+                        if (signal.type == TodaySignalType.GRID_NEXT_LEVEL ||
+                            signal.type == TodaySignalType.SELL_TRIGGER
+                        ) {
                             onOpenGridPlan(signal.stockCode)
                         } else {
                             onOpenStock(signal.stockCode)
@@ -651,13 +653,15 @@ private fun arrow(v: Double): String = when {
 /** 信号类型 → StatusPill 短标签。 */
 private fun signalLabel(type: TodaySignalType): String = when (type) {
     TodaySignalType.BUY_TRIGGER -> "买入"
+    TodaySignalType.SELL_TRIGGER -> "波段"
     TodaySignalType.GRID_NEXT_LEVEL -> "网格"
     TodaySignalType.DIVIDEND_COUNTDOWN -> "分红"
 }
 
-/** 信号类型 → 财务语义色：买入(Positive 绿) / 网格(Warning 黄) / 分红(Neutral 灰)。 */
+/** 信号类型 → 财务语义色：买入(Positive 绿) / 波段卖出(Warning 黄·即时可执行) / 网格(Warning 黄) / 分红(Neutral 灰)。 */
 private fun signalTone(type: TodaySignalType): FinanceStatusTone = when (type) {
     TodaySignalType.BUY_TRIGGER -> FinanceStatusTone.Positive
+    TodaySignalType.SELL_TRIGGER -> FinanceStatusTone.Warning
     TodaySignalType.GRID_NEXT_LEVEL -> FinanceStatusTone.Warning
     TodaySignalType.DIVIDEND_COUNTDOWN -> FinanceStatusTone.Neutral
 }

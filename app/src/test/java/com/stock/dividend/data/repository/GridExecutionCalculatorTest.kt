@@ -235,4 +235,65 @@ class GridExecutionCalculatorTest {
         assertThat(summary.totalCapital).isEqualTo(0.0)
         assertThat(summary.progressPercent).isEqualTo(0)
     }
+
+    // ── 波段模式：净投入（买入 − 卖出）/ 弹药回流 / 底仓不变 / 回合与波段利润 ──
+    // 两档网格 8/10、DPS=0.5：默认步长 1.25pp → 8 档卖出锚 10.00、10 档 13.33；
+    // 资金 100000 → 8 档 6900 股、10 档 4400 股；30% 波段 → 2000/1300，底仓 4900/3100。
+
+    private fun txAt(date: String, type: String, price: Double, shares: Int) = TransactionEntity(
+        id = 0L, stockCode = "sh.600000", type = type, shares = shares, price = price, date = date
+    )
+
+    private fun swingBase(ratio: Double = 100.0, currentPrice: Double? = null) = GridCalculator.generate(
+        10.0, 8.0, 12.0, 2, 100000.0, currentPrice = currentPrice,
+        swingMode = true, dps = 0.5, swingRatioPercent = ratio
+    )
+
+    /** 完整回合（无底仓口径，买 8.1 × 卖 10.0）：净投入为负（落袋利润回流弹药库），持股归零。 */
+    @Test
+    fun `swing round trip nets sell proceeds into ammo`() {
+        val marked = GridCalculator.markTriggeredLevels(
+            swingBase(),
+            listOf(txAt("2026-01-01", "BUY", 8.1, 6900), txAt("2026-01-02", "SELL", 10.0, 6900))
+        )
+        val exec = GridExecutionCalculator.calculate(marked, 100000.0, emptyList(), currentPrice = 8.0)
+        // 净投入 = 8.1×6900 − 10.0×6900 = −13110（利润已落袋）
+        assertThat(exec.investedAmount).isEqualTo(-13110.0)
+        // 剩余弹药 = 100000 + 13150 → 113110（卖出回款回流）
+        assertThat(exec.remainingCapital).isEqualTo(113110.0)
+        assertThat(exec.boughtShares).isEqualTo(0)
+        assertThat(exec.avgBuyPrice).isNull()
+        assertThat(exec.roundTrips).isEqualTo(1)
+        assertThat(exec.swingProfit).isWithin(0.01).of((10.0 - 8.0) * 6900)
+    }
+
+    /** 底仓不变（30% 波段）：卖 2000 股回款，底仓 4900 股仍持有 → 净投入只含底仓。 */
+    @Test
+    fun `swing partial sell keeps base position invested`() {
+        val marked = GridCalculator.markTriggeredLevels(
+            swingBase(ratio = 30.0),
+            listOf(txAt("2026-01-01", "BUY", 8.1, 6900), txAt("2026-01-02", "SELL", 10.0, 2000))
+        )
+        val exec = GridExecutionCalculator.calculate(marked, 100000.0, emptyList(), currentPrice = 8.0)
+        // 净投入 = 8.1×6900 − 10.0×2000 = 55890 − 20000 = 35890（底仓 4900 股的摊薄成本）
+        assertThat(exec.investedAmount).isEqualTo(35890.0)
+        assertThat(exec.remainingCapital).isEqualTo(64110.0)
+        assertThat(exec.boughtShares).isEqualTo(4900)
+        assertThat(exec.avgBuyPrice).isWithin(0.01).of(35890.0 / 4900)
+        assertThat(exec.roundTrips).isEqualTo(1)
+        assertThat(exec.swingProfit).isWithin(0.01).of((10.0 - 8.0) * 2000)
+    }
+
+    /** 弹药库汇总聚合波段回合与计划口径利润。 */
+    @Test
+    fun `summarizeAmmo aggregates swing round trips`() {
+        val marked = GridCalculator.markTriggeredLevels(
+            swingBase(),
+            listOf(txAt("2026-01-01", "BUY", 8.1, 6900), txAt("2026-01-02", "SELL", 10.0, 6900))
+        )
+        val exec = GridExecutionCalculator.calculate(marked, 100000.0, emptyList(), currentPrice = null)
+        val summary = GridExecutionCalculator.summarizeAmmo(listOf(100000.0), listOf(exec))
+        assertThat(summary.roundTrips).isEqualTo(1)
+        assertThat(summary.swingProfit).isWithin(0.01).of((10.0 - 8.0) * 6900)
+    }
 }

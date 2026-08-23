@@ -25,6 +25,10 @@ interface GridPlanDao {
     @Query("UPDATE grid_plans SET lastNotifiedLevelPrice = :lastNotifiedLevelPrice WHERE id = :id")
     suspend fun updateNotifiedLevel(id: String, lastNotifiedLevelPrice: Double?)
 
+    /** 回写卖出档提醒状态（波段模式）。同样不更新 updatedAt。 */
+    @Query("UPDATE grid_plans SET lastNotifiedSellLevelPrice = :lastNotifiedSellLevelPrice WHERE id = :id")
+    suspend fun updateNotifiedSellLevel(id: String, lastNotifiedSellLevelPrice: Double?)
+
     @Query("SELECT * FROM grid_plans")
     suspend fun getAllForBackup(): List<GridPlanEntity>
 

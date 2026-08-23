@@ -109,4 +109,121 @@ class GridBacktestCalculatorTest {
         assertThat(custom.avgBuyPrice!!).isGreaterThan(inverse.avgBuyPrice!!)
         assertThat(custom.avgBuyPrice).isWithin(0.01).of(9.42)
     }
+
+    // ── 波段模式回测（底仓 + 波段拆分 / 股息率卖出锚 / T+1）──
+    // 两档网格 8/10、DPS=0.5：默认步长 1.25pp → 卖出锚 8 档 10.00、10 档 13.33；
+    // 资金 100000 → 8 档 6900 股、10 档 4400 股；30% 波段 → 2000/1300 股，底仓 4900/3100。
+
+    /** 震荡窗口两个回合（100% 波段无底仓）：8 档买→10.5 卖、10 档买→13.5 卖；期末空仓。 */
+    @Test
+    fun `swing backtest completes round trips in oscillating window`() {
+        val klines = listOf(
+            bar("2026-01-02", 9.5),   // 买 10.00 档
+            bar("2026-01-05", 8.0),   // 买 8.00 档（收盘 8.0 = 档位价）
+            bar("2026-01-06", 10.5),  // 8.00 档到卖出锚 10.00 → 卖出（回合 1）
+            bar("2026-01-07", 11.0),  // 无动作（10.00 档卖出锚 13.33 未到）
+            bar("2026-01-08", 13.5)   // 10.00 档到卖出锚 13.33 → 卖出（回合 2）
+        )
+        val r = GridBacktestCalculator.backtest(
+            klines, 10.0, 8.0, 12.0, 2, 100000.0,
+            dps = 0.5, swingMode = true, swingRatioPercent = 100.0
+        )!!
+        assertThat(r.roundTrips).isEqualTo(2)
+        assertThat(r.heldLevelCount).isEqualTo(0)
+        assertThat(r.triggeredCount).isEqualTo(2)
+        assertThat(r.boughtShares).isEqualTo(0)
+        assertThat(r.investedAmount).isEqualTo(0.0)
+        // 计划口径毛利 = (10.0−8.0)×6900 + (13.33−10.0)×4400 = 13800 + 14652 = 28452（未计费）
+        assertThat(r.swingProfit).isWithin(0.01).of(28452.0)
+        assertThat(r.swingProfitPct).isWithin(0.001).of(28.45)
+        assertThat(r.feesPaid).isEqualTo(0.0)
+    }
+
+    /** 底仓不变（默认 30% 波段）：回合后底仓全部保留，期末净持仓 = 底仓 + 未卖波段。 */
+    @Test
+    fun `swing backtest keeps base position after round trip`() {
+        val klines = listOf(
+            bar("2026-01-02", 9.5),   // 买 10.00 档（底仓3100+波段1300）
+            bar("2026-01-05", 8.0),   // 买 8.00 档（底仓4900+波段2000）
+            bar("2026-01-06", 10.5),  // 8.00 档波段 2000 股卖出（回合 1，底仓 4900 不动）
+            bar("2026-01-07", 11.0)   // 收盘
+        )
+        val r = GridBacktestCalculator.backtest(
+            klines, 10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5, swingMode = true
+        )!!
+        assertThat(r.roundTrips).isEqualTo(1)
+        assertThat(r.swingProfit).isWithin(0.01).of((10.0 - 8.0) * 2000)
+        // 底仓两档全部保留；10.00 档波段 1300 未到卖出锚仍在持
+        assertThat(r.heldLevelCount).isEqualTo(2)
+        assertThat(r.boughtShares).isEqualTo(4900 + 3100 + 1300)
+        assertThat(r.investedAmount).isWithin(0.01).of(4900 * 8.0 + 3100 * 10.0 + 1300 * 10.0)
+    }
+
+    /** 费用假设：佣金/印花税逐笔计提，波段利润为扣除费用后的净额。 */
+    @Test
+    fun `swing backtest subtracts fees from round trip profit`() {
+        val klines = listOf(
+            bar("2026-01-02", 9.5), bar("2026-01-05", 8.0),
+            bar("2026-01-06", 10.5), bar("2026-01-08", 13.5)
+        )
+        val r = GridBacktestCalculator.backtest(
+            klines, 10.0, 8.0, 12.0, 2, 100000.0,
+            dps = 0.5, swingMode = true, swingRatioPercent = 100.0,
+            buyFeePercent = 0.025, sellFeePercent = 0.075
+        )!!
+        // 买入费 = (10×4400 + 8×6900) × 0.025% = 99200×0.00025 = 24.8
+        // 卖出费 = (10.0×6900 + 13.33×4400) × 0.075% = (69000+58652)×0.00075 = 95.739
+        assertThat(r.feesPaid).isWithin(0.01).of(120.54)
+        assertThat(r.swingProfit).isWithin(0.01).of(28452.0 - 120.539)
+    }
+
+    /** 单边下跌窗口（波段模式）：无回合，底仓+波段全部建立——与纯买入持有行为一致。 */
+    @Test
+    fun `swing backtest monotonic down holds all levels`() {
+        val klines = listOf(bar("2026-01-02", 9.5), bar("2026-01-05", 7.9))
+        val r = GridBacktestCalculator.backtest(
+            klines, 10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5, swingMode = true
+        )!!
+        assertThat(r.roundTrips).isEqualTo(0)
+        assertThat(r.heldLevelCount).isEqualTo(2)
+        assertThat(r.triggeredCount).isEqualTo(2)
+        assertThat(r.boughtShares).isEqualTo(6900 + 4400)
+        assertThat(r.swingProfit).isEqualTo(0.0)
+        assertThat(r.swingProfitPct).isEqualTo(0.0)
+    }
+
+    /** 回合后跌回档位：只补买波段股数（底仓不重复建），资金循环使用。 */
+    @Test
+    fun `swing backtest re-buys only swing shares on fall back`() {
+        val klines = listOf(
+            bar("2026-01-02", 9.5),   // 买 10.00 档全量
+            bar("2026-01-05", 8.0),   // 买 8.00 档全量
+            bar("2026-01-06", 10.5),  // 8.00 档波段 2000 卖出（回合 1）
+            bar("2026-01-07", 8.0)    // 跌回 8.00 档 → 只补波段 2000
+        )
+        val r = GridBacktestCalculator.backtest(
+            klines, 10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5, swingMode = true
+        )!!
+        assertThat(r.roundTrips).isEqualTo(1)
+        assertThat(r.heldLevelCount).isEqualTo(2)
+        // 期末满持仓：两档底仓 + 两档波段（8 档波段已补回）
+        assertThat(r.boughtShares).isEqualTo(6900 + 4400)
+        assertThat(r.investedAmount).isWithin(0.01).of(8.0 * 6900 + 10.0 * 4400)
+    }
+
+    /** 纯买入模式回测（不开波段）：回合指标恒零，行为与历史版本一致。 */
+    @Test
+    fun `pure buy backtest keeps zero round trips`() {
+        val klines = listOf(
+            bar("2026-01-02", 9.5), bar("2026-01-05", 8.0),
+            bar("2026-01-06", 10.5), bar("2026-01-08", 13.5)
+        )
+        val r = GridBacktestCalculator.backtest(klines, 10.0, 8.0, 12.0, 2, 100000.0)!!
+        assertThat(r.roundTrips).isEqualTo(0)
+        assertThat(r.swingProfit).isEqualTo(0.0)
+        assertThat(r.swingProfitPct).isNull()
+        // 纯买入：涨回也不卖，两档期末仍持有
+        assertThat(r.triggeredCount).isEqualTo(2)
+        assertThat(r.boughtShares).isEqualTo(6900 + 4400)
+    }
 }

@@ -143,6 +143,10 @@ class AndroidDividendAlertNotifier @Inject constructor(
                 "%s 当前股息率 %.2f%% 已低于 %.2f%%".format(Locale.US, stockName, metricValue, thresholdValue)
             GRID_NEXT_LEVEL_ALERT -> "网格到达买入档" to
                 "%s 现价 %.2f 已到买入档 %.2f，可按网格计划执行".format(Locale.US, stockName, metricValue, thresholdValue)
+            GRID_SELL_LEVEL_ALERT -> "网格到达卖出锚" to
+                "%s 现价 %.2f 已到波段卖出锚 %.2f，可减仓波段部分（底仓不动）".format(
+                    Locale.US, stockName, metricValue, thresholdValue
+                )
             else -> "股息率达到目标" to
                 "%s 当前股息率 %.2f%% 已达到 %.2f%% 阈值".format(Locale.US, stockName, metricValue, thresholdValue)
         }

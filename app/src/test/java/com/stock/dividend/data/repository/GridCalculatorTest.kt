@@ -536,4 +536,179 @@ class GridCalculatorTest {
         assertThat(GridCalculator.dividendOutlook(r, dps = null, totalCapital = 100000.0)).isNull()
         assertThat(GridCalculator.dividendOutlook(r, dps = 0.0, totalCapital = 100000.0)).isNull()
     }
+
+    // ── 波段模式（底仓 + 波段拆分 + 股息率卖出锚）──
+    // 两档网格 8/10、DPS=0.5：买入股息率 6.25%/5.0%，默认波段步长 = 等效股息率档距 1.25pp，
+    // 卖出锚 = DPS ÷ (买入股息率 − 步长) → 8 档卖 10.00（息5.0%）、10 档卖 13.33（息3.75%）。
+
+    private fun txAt(date: String, type: String, price: Double, shares: Int = 100) =
+        com.stock.dividend.data.local.entity.TransactionEntity(
+            id = 0L, stockCode = "sh.600000", type = type, shares = shares, price = price, date = date
+        )
+
+    /** 波段模式：每档填充股息率卖出锚与波段股数；纯买入模式恒 null/0。 */
+    @Test
+    fun `swing mode populates yield anchored sell prices`() {
+        val swing = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5,
+            swingMode = true, swingRatioPercent = 100.0
+        )
+        assertThat(swing.swingMode).isTrue()
+        assertThat(swing.swingStepPercent).isEqualTo(1.25)
+        val low = swing.levels.first { it.price == 8.0 }
+        val top = swing.levels.first { it.price == 10.0 }
+        // 卖出锚：息 6.25%−1.25pp = 5.0% → 0.5/0.05 = 10.00；息 5.0%−1.25pp = 3.75% → 13.33
+        assertThat(low.pairedSellPrice).isEqualTo(10.0)
+        assertThat(low.pairedSellYieldPercent).isEqualTo(5.0)
+        assertThat(top.pairedSellPrice).isEqualTo(13.33)
+        assertThat(top.pairedSellYieldPercent).isEqualTo(3.75)
+        // 仓位 100%：波段股数 = 全量股数，无底仓
+        assertThat(low.swingShares).isEqualTo(low.shares)
+        assertThat(low.baseShares).isEqualTo(0)
+
+        val pure = GridCalculator.generate(10.0, 8.0, 12.0, 2, 100000.0)
+        assertThat(pure.levels.all { it.pairedSellPrice == null && it.swingShares == 0 }).isTrue()
+        assertThat(pure.swingStepPercent).isNull()
+        assertThat(pure.swingRatioPercent).isNull()
+        assertThat(pure.nextSellHint).isNull()
+    }
+
+    /** 显式波段步长（股息率百分点）优先于默认档距。 */
+    @Test
+    fun `custom swing step overrides default`() {
+        val swing = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5,
+            swingMode = true, swingStepPercent = 1.0, swingRatioPercent = 100.0
+        )
+        assertThat(swing.swingStepPercent).isEqualTo(1.0)
+        // 息 6.25%−1pp = 5.25% → 9.52；息 5%−1pp = 4% → 12.5
+        assertThat(swing.levels.first { it.price == 8.0 }.pairedSellPrice).isEqualTo(9.52)
+        assertThat(swing.levels.first { it.price == 10.0 }.pairedSellPrice).isEqualTo(12.5)
+    }
+
+    /** 波段模式无分红数据 → 参数错误（卖出锚按股息率换算，DPS 必需）。 */
+    @Test
+    fun `swing without dps returns error`() {
+        val r = GridCalculator.generate(10.0, 8.0, 12.0, 2, 100000.0, swingMode = true)
+        assertThat(r.validationError).contains("分红数据")
+        assertThat(r.levels).isEmpty()
+    }
+
+    /** 波段仓位比例非法（≤0 或 >100）→ 参数错误；步长过大使卖出股息率 ≤0 同样报错。 */
+    @Test
+    fun `swing ratio and step validation`() {
+        assertThat(
+            GridCalculator.generate(10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5, swingMode = true, swingRatioPercent = 0.0).validationError
+        ).isNotNull()
+        assertThat(
+            GridCalculator.generate(10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5, swingMode = true, swingRatioPercent = 150.0).validationError
+        ).isNotNull()
+        // 最贵档买入息 5.0%，步长 5.1pp → 卖出息 ≤ 0 → 报错
+        assertThat(
+            GridCalculator.generate(10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5, swingMode = true, swingStepPercent = 5.1, swingRatioPercent = 100.0).validationError
+        ).isNotNull()
+    }
+
+    /** 仓位拆分（默认 30%）：8 档 6900 股 → 波段 2000 + 底仓 4900；10 档 4400 → 1300/3100。 */
+    @Test
+    fun `swing ratio splits base and swing shares`() {
+        val swing = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, dps = 0.5, swingMode = true
+        )
+        assertThat(swing.swingRatioPercent).isEqualTo(30.0)
+        val low = swing.levels.first { it.price == 8.0 }
+        val top = swing.levels.first { it.price == 10.0 }
+        assertThat(low.shares).isEqualTo(6900)
+        assertThat(low.swingShares).isEqualTo(2000)
+        assertThat(low.baseShares).isEqualTo(4900)
+        assertThat(top.shares).isEqualTo(4400)
+        assertThat(top.swingShares).isEqualTo(1300)
+        assertThat(top.baseShares).isEqualTo(3100)
+    }
+
+    /** 波段回合（无底仓口径）：BUY 占用 → SELL 命中卖出锚释放，计回合与计划口径利润。 */
+    @Test
+    fun `swing sell re-arms level and counts round trip`() {
+        val base = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, swingMode = true, dps = 0.5, swingRatioPercent = 100.0
+        )
+        val shares = base.levels.first { it.price == 8.0 }.shares
+        val marked = GridCalculator.markTriggeredLevels(
+            base,
+            listOf(txAt("2026-01-01", "BUY", 8.1, shares), txAt("2026-01-02", "SELL", 10.0, shares))
+        )
+        assertThat(marked.levels.first { it.price == 8.0 }.triggered).isFalse()  // 波段已释放
+        assertThat(marked.roundTrips).isEqualTo(1)
+        assertThat(marked.swingProfit).isWithin(0.01).of((10.0 - 8.0) * shares)
+        assertThat(marked.buyFills).hasSize(1)
+        assertThat(marked.sellFills).hasSize(1)
+        assertThat(marked.sellFills[0].levelPrice).isEqualTo(8.0)
+    }
+
+    /** 底仓不变（30% 波段）：卖出只释放波段部分，底仓标记保留；跌回档位可再买回波段。 */
+    @Test
+    fun `base position survives sell and swing re-buys`() {
+        val base = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, swingMode = true, dps = 0.5
+        )
+        val level = base.levels.first { it.price == 8.0 }
+        val marked = GridCalculator.markTriggeredLevels(
+            base,
+            listOf(
+                txAt("2026-01-01", "BUY", 8.1, level.shares),   // 全量建仓（底仓4900+波段2000）
+                txAt("2026-01-02", "SELL", 10.0, level.swingShares),  // 只卖波段 2000
+                txAt("2026-01-03", "BUY", 8.05, level.swingShares)    // 跌回补波段 2000
+            )
+        )
+        val marked8 = marked.levels.first { it.price == 8.0 }
+        assertThat(marked8.baseHeld).isTrue()     // 底仓永续
+        assertThat(marked8.triggered).isTrue()    // 波段重新在持
+        assertThat(marked.roundTrips).isEqualTo(1)
+        // 计划口径利润 = (卖出锚 10.0 − 档位 8.0) × 波段股数 2000
+        assertThat(marked.swingProfit).isWithin(0.01).of((10.0 - 8.0) * 2000)
+
+        // 卖出后、未补波段前的中间态也验证一次：底仓在、波段可再买
+        val mid = GridCalculator.markTriggeredLevels(
+            base,
+            listOf(txAt("2026-01-01", "BUY", 8.1, level.shares), txAt("2026-01-02", "SELL", 10.0, level.swingShares))
+        )
+        val mid8 = mid.levels.first { it.price == 8.0 }
+        assertThat(mid8.baseHeld).isTrue()
+        assertThat(mid8.triggered).isFalse()
+    }
+
+    /** 未买入先卖出：不命中任何在持档 → 忽略，无回合。 */
+    @Test
+    fun `swing sell without prior buy is ignored`() {
+        val base = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, swingMode = true, dps = 0.5, swingRatioPercent = 100.0
+        )
+        val marked = GridCalculator.markTriggeredLevels(base, listOf(txAt("2026-01-01", "SELL", 7.0)))
+        assertThat(marked.roundTrips).isEqualTo(0)
+        assertThat(marked.sellFills).isEmpty()
+        assertThat(marked.levels.all { !it.triggered }).isTrue()
+    }
+
+    /** 下一卖提示：现价上方最近的在持档卖出锚；越过全部目标/无在持档为 null。 */
+    @Test
+    fun `next sell hint from held levels only`() {
+        val base = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, swingMode = true, dps = 0.5, swingRatioPercent = 100.0
+        )
+        val held = GridCalculator.markTriggeredLevels(
+            base.copy(currentPrice = 8.5), listOf(txAt("2026-01-01", "BUY", 8.1))
+        )
+        assertThat(held.nextSellHint).isEqualTo(10.0)
+
+        // 现价 10.5 已越过卖出锚 10.0：无「上方目标」为 null，但已达成卖出档计数为 1
+        val reached = GridCalculator.markTriggeredLevels(
+            base.copy(currentPrice = 10.5), listOf(txAt("2026-01-01", "BUY", 8.1))
+        )
+        assertThat(reached.nextSellHint).isNull()
+        assertThat(reached.reachedSellCount).isEqualTo(1)
+
+        // 无在持档 → 无下一卖
+        val empty = base.copy(currentPrice = 8.5)
+        assertThat(empty.nextSellHint).isNull()
+    }
 }
