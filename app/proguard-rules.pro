@@ -25,10 +25,12 @@
     <fields>;
 }
 
-# 交易策略 params JSON 载体（Gson 反射读写嵌套数据类字段名；混淆会把
-# halfGainPercent 等变成 a/b，存库键名随 R8 mapping 变化 → 跨版本升级丢参数）
--keep class com.stock.dividend.data.repository.StrategyParams { *; }
--keep class com.stock.dividend.data.repository.StrategyParams$* { *; }
+# 交易策略 params JSON 载体 + 其余 Gson 反射模型（Fundamentals/FinancialStatements/
+# LlmAnalysis/KlineBar 等：字段名即 JSON 键，混淆后缓存跨版本解析失败=数据丢失）。
+# data.repository 是 Gson 模型最后的聚集地（dto/backup/entity/agent 已各自 keep），
+# 整包 keep 杜绝「新增模型忘 keep」这类 release 专属数据缺陷（体积代价可接受：纯 Kotlin，
+# 无裁剪收益）。⚠️ 新增 Gson 反射模型若放在其他包，必须同步在本文件加 keep。
+-keep class com.stock.dividend.data.repository.** { *; }
 
 # AI Agent 协议层（OpenAiDtos/DeepSeekResponsesProtocol/OpenAiSse 的全部 DTO 经 Gson
 # 序列化请求/反序列化响应：字段被混淆后请求变 {"a":"deepseek-v4-flash"}，
