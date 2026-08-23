@@ -6,8 +6,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,22 +60,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.data.scan.bitmapToJpegDataUrl
 import com.stock.dividend.data.scan.loadSampledBitmap
 import com.stock.dividend.ui.component.AppCard
-import com.stock.dividend.ui.theme.Motion
 import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.viewmodel.AiChatUiState
 import com.stock.dividend.viewmodel.AiChatViewModel
@@ -441,19 +433,13 @@ private fun MessageBubble(message: ChatMessageUi) {
         ) {
             // 思考过程（联网搜索/推理时，先于答案流式到达；让用户知道没卡住）
             message.thinking?.let { ThinkingSection(it, message.thinkingStreaming) }
-            // 最终回复：ChatGPT 式无气泡全宽排版（正文即界面）
+            // 最终回复：ChatGPT 式无气泡全宽排版（正文即界面），长文完整展示不折叠
             if (message.text.isNotEmpty()) {
                 // 流式半成品或语法不完整的 Markdown 只显示纯文本，完整后再渲染；
                 // 流式期间文本尾部带 ▍ 光标，示意正在生成
                 val displayText = if (message.streaming) message.text + " ▍" else message.text
                 if (!message.streaming && canRenderMarkdown(message.text)) {
-                    // 长回答折叠（ExpandableTextView 模式）：估计超 22 行折叠为 16 行 + 渐隐 + 展开按钮
-                    val estimatedLines = message.text.count { it == '\n' } + message.text.length / 30
-                    if (estimatedLines <= 22) {
-                        MarkdownText(markdown = message.text)
-                    } else {
-                        CollapsibleAnswer(message.text)
-                    }
+                    MarkdownText(markdown = message.text)
                 } else {
                     Text(
                         text = displayText,
@@ -475,51 +461,6 @@ private fun MessageBubble(message: ChatMessageUi) {
             modifier = Modifier.fillMaxWidth()
         )
         ChatRole.TOOL -> message.toolCall?.let { ToolCallPill(it) }
-    }
-}
-
-/**
- * 长回答折叠（借鉴 ExpandableTextView 模式）：折叠为 ~16 行高 + 底部渐隐遮罩 +「展开全文」。
- * 内容原样渲染 Markdown，仅裁剪绘制区域；展开/收起用 animateContentSize 平滑过渡。
- */
-@Composable
-private fun CollapsibleAnswer(text: String) {
-    var expanded by remember(text) { mutableStateOf(false) }
-    val density = LocalDensity.current
-    val lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
-    val collapsedMax = with(density) { (lineHeight * 16).toDp() }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(tween(Motion.DurationMedium, easing = Motion.Standard))
-    ) {
-        Box {
-            Box(
-                modifier = Modifier
-                    .heightIn(max = if (expanded) Dp.Unspecified else collapsedMax)
-                    .clipToBounds()
-            ) {
-                MarkdownText(markdown = text)
-            }
-            if (!expanded) {
-                // 底部渐隐遮罩：提示下方还有内容（AI 回复已无气泡，渐隐到页面背景色）
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(36.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, MaterialTheme.colorScheme.surface)
-                            )
-                        )
-                )
-            }
-        }
-        AppTextButton(
-            onClick = { expanded = !expanded },
-            text = if (expanded) "收起" else "展开全文",
-        )
     }
 }
 
