@@ -3,6 +3,7 @@ package com.stock.dividend.viewmodel
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.local.dao.StockYearlyIncome
 import com.stock.dividend.data.local.dao.YearlyTotal
 import com.stock.dividend.data.local.entity.AchievementEntity
@@ -11,7 +12,6 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.AchievementRepository
 import com.stock.dividend.data.repository.DividendIncomeRepository
 import com.stock.dividend.data.repository.FireGoalRepository
-import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -42,7 +42,7 @@ data class AchievementUiState(
 @HiltViewModel
 class AchievementViewModel @Inject constructor(
     private val achievementRepository: AchievementRepository,
-    stockRepository: StockRepository,
+    private val marketDataPlane: MarketDataPlane,
     incomeRepository: DividendIncomeRepository,
     private val fireGoalRepository: FireGoalRepository
 ) : ViewModel() {
@@ -52,7 +52,7 @@ class AchievementViewModel @Inject constructor(
     /** 上一帧已解锁 id 集合；null = 尚未完成首次加载（首次不庆祝历史成就）。 */
     private var previousUnlockedIds: Set<String>? = null
 
-    private val stocksFlow = stockRepository.observeAllStocks()
+    private val stocksFlow = marketDataPlane.observeAllStocks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {

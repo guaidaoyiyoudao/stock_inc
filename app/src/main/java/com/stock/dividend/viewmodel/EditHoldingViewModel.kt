@@ -3,6 +3,7 @@ package com.stock.dividend.viewmodel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.local.entity.TransactionEntity
 import com.stock.dividend.data.repository.HoldingCalculator
 import com.stock.dividend.data.repository.StockRepository
@@ -51,6 +52,7 @@ data class EditHoldingUiState(
 @HiltViewModel
 class EditHoldingViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
+    private val marketDataPlane: MarketDataPlane,
     private val stockRepository: StockRepository,
     private val transactionRepository: TransactionRepository
 ) : ViewModel() {
@@ -76,7 +78,7 @@ class EditHoldingViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            stockRepository.observeStock(stockCode).collect { stock ->
+            marketDataPlane.observeStock(stockCode).collect { stock ->
                 if (stock != null) {
                     val transactions = transactionRepository.getByStock(stockCode)
                     val holding = calculateHolding(transactions)

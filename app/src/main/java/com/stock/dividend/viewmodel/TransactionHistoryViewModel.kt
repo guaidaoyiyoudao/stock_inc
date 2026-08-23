@@ -2,8 +2,8 @@ package com.stock.dividend.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.local.entity.TransactionEntity
-import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,7 +48,7 @@ data class TransactionHistoryUiState(
 @HiltViewModel
 class TransactionHistoryViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
-    private val stockRepository: StockRepository
+    private val marketDataPlane: MarketDataPlane
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransactionHistoryUiState())
@@ -59,7 +59,7 @@ class TransactionHistoryViewModel @Inject constructor(
         // 交易流水不大（个人投资记录），combine 一次即可，无需拆多 collector。
         viewModelScope.launch {
             transactionRepository.observeAll()
-                .combine(stockRepository.observeAllStocks()) { txs, stocks ->
+                .combine(marketDataPlane.observeAllStocks()) { txs, stocks ->
                     val nameByCode = stocks.associate { it.code to it.name }
                     txs.map { tx ->
                         TransactionHistoryItem(

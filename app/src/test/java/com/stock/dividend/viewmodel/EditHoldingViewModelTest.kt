@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import io.mockk.coEvery
@@ -25,6 +26,7 @@ class EditHoldingViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
     private val stockRepository: StockRepository = mockk()
+    private val plane: MarketDataPlane = mockk()
     private val transactionRepository: TransactionRepository = mockk()
     private val stockFlow = MutableStateFlow<StockEntity?>(null)
     private val transactions = mutableListOf<TransactionEntity>()
@@ -32,7 +34,7 @@ class EditHoldingViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        every { stockRepository.observeStock("sz.000001") } returns stockFlow
+        every { plane.observeStock("sz.000001") } returns stockFlow
         every { stockRepository.observeTagsForStock("sz.000001") } returns MutableStateFlow(emptyList())
         every { stockRepository.observeAllTags() } returns MutableStateFlow(emptyList())
         coEvery { transactionRepository.getByStock("sz.000001") } answers { transactions.toList() }
@@ -71,6 +73,7 @@ class EditHoldingViewModelTest {
 
         val viewModel = EditHoldingViewModel(
             SavedStateHandle(mapOf("code" to "sz.000001")),
+            plane,
             stockRepository,
             transactionRepository
         )
@@ -107,6 +110,7 @@ class EditHoldingViewModelTest {
                     "buyShares" to "300"
                 )
             ),
+            plane,
             stockRepository,
             transactionRepository
         )
@@ -125,6 +129,7 @@ class EditHoldingViewModelTest {
     fun `no query params keeps sheet closed`() = runTest {
         val viewModel = EditHoldingViewModel(
             SavedStateHandle(mapOf("code" to "sz.000001")),
+            plane,
             stockRepository,
             transactionRepository
         )

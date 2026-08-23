@@ -3,10 +3,10 @@ package com.stock.dividend.viewmodel
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.DividendIncomeRepository
-import com.stock.dividend.data.repository.StockRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,14 +48,14 @@ data class DividendIncomeRecordWithStock(
 @HiltViewModel
 class DividendIncomeViewModel @Inject constructor(
     private val incomeRepository: DividendIncomeRepository,
-    private val stockRepository: StockRepository
+    private val marketDataPlane: MarketDataPlane
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(DividendIncomeUiState())
     val uiState: StateFlow<DividendIncomeUiState> = _uiState.asStateFlow()
 
     private val _selectedYear = MutableStateFlow(LocalDate.now().year)
 
-    private val stocksFlow = stockRepository.observeAllStocks()
+    private val stocksFlow = marketDataPlane.observeAllStocks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {

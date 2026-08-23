@@ -4,7 +4,7 @@ import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.local.entity.TransactionEntity
-import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.TransactionRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -46,7 +46,7 @@ class TransactionHistoryViewModelTest {
     @Test
     fun `combines transactions with stock names and sorts by date desc`() = runTest {
         val txRepo = mockk<TransactionRepository>()
-        val stockRepo = mockk<StockRepository>()
+        val planeMock = mockk<MarketDataPlane>()
         coEvery { txRepo.observeAll() } returns flowOf(
             listOf(
                 tx(1, "sh.600036", "BUY", 100, 10.0, "2026-01-01"),
@@ -54,11 +54,11 @@ class TransactionHistoryViewModelTest {
                 tx(3, "sz.000001", "BUY", 200, 8.0, "2026-02-01")
             )
         )
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(
+        coEvery { planeMock.observeAllStocks() } returns flowOf(
             listOf(stock("sh.600036", "招商银行"), stock("sz.000001", "平安银行"))
         )
 
-        val vm = TransactionHistoryViewModel(txRepo, stockRepo)
+        val vm = TransactionHistoryViewModel(txRepo, planeMock)
         vm.uiState.test {
             // 跳过初始空态，等到含数据的发射
             var state = awaitItem()
@@ -81,11 +81,11 @@ class TransactionHistoryViewModelTest {
     @Test
     fun `empty transactions shows loading then empty with zero totals`() = runTest {
         val txRepo = mockk<TransactionRepository>()
-        val stockRepo = mockk<StockRepository>()
+        val planeMock = mockk<MarketDataPlane>()
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { planeMock.observeAllStocks() } returns flowOf(emptyList())
 
-        val vm = TransactionHistoryViewModel(txRepo, stockRepo)
+        val vm = TransactionHistoryViewModel(txRepo, planeMock)
         vm.uiState.test {
             var state = awaitItem()
             // 第一帧 isLoading=true；随后 observeAll 发空列表 → isLoading=false
@@ -101,12 +101,12 @@ class TransactionHistoryViewModelTest {
     @Test
     fun `confirmNote persists trimmed note and clears dialog`() = runTest {
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
+        val planeMock = mockk<MarketDataPlane>(relaxed = true)
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { planeMock.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.updateTransaction(any()) } returns Unit
 
-        val vm = TransactionHistoryViewModel(txRepo, stockRepo)
+        val vm = TransactionHistoryViewModel(txRepo, planeMock)
         val original = tx(1, "sh.600036", "BUY", 100, 10.0, "2026-01-01")
         vm.showNoteDialog(original)
         vm.onNoteChanged("  贪婪追高  ")
@@ -122,12 +122,12 @@ class TransactionHistoryViewModelTest {
     @Test
     fun `confirmNote stores null for blank note`() = runTest {
         val txRepo = mockk<TransactionRepository>(relaxed = true)
-        val stockRepo = mockk<StockRepository>(relaxed = true)
+        val planeMock = mockk<MarketDataPlane>(relaxed = true)
         coEvery { txRepo.observeAll() } returns flowOf(emptyList())
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(emptyList())
+        coEvery { planeMock.observeAllStocks() } returns flowOf(emptyList())
         coEvery { txRepo.updateTransaction(any()) } returns Unit
 
-        val vm = TransactionHistoryViewModel(txRepo, stockRepo)
+        val vm = TransactionHistoryViewModel(txRepo, planeMock)
         val original = tx(1, "sh.600036", "BUY", 100, 10.0, "2026-01-01", note = "旧备注")
         vm.showNoteDialog(original)
         vm.onNoteChanged("   ") // 纯空白
@@ -142,13 +142,13 @@ class TransactionHistoryViewModelTest {
     @Test
     fun `note renders on item when present`() = runTest {
         val txRepo = mockk<TransactionRepository>()
-        val stockRepo = mockk<StockRepository>()
+        val planeMock = mockk<MarketDataPlane>()
         coEvery { txRepo.observeAll() } returns flowOf(
             listOf(tx(1, "sh.600036", "BUY", 100, 10.0, "2026-01-01", note = "首次建仓"))
         )
-        coEvery { stockRepo.observeAllStocks() } returns flowOf(listOf(stock("sh.600036", "招商银行")))
+        coEvery { planeMock.observeAllStocks() } returns flowOf(listOf(stock("sh.600036", "招商银行")))
 
-        val vm = TransactionHistoryViewModel(txRepo, stockRepo)
+        val vm = TransactionHistoryViewModel(txRepo, planeMock)
         vm.uiState.test {
             var state = awaitItem()
             if (state.items.isEmpty()) state = awaitItem()

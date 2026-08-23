@@ -4,7 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.DividendIncomeRepository
-import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.plane.MarketDataPlane
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -25,7 +25,7 @@ import org.junit.Test
 class DividendIncomeViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
     private val incomeRepository: DividendIncomeRepository = mockk(relaxed = true)
-    private val stockRepository: StockRepository = mockk(relaxed = true)
+    private val plane: MarketDataPlane = mockk(relaxed = true)
 
     private val recordsFlow = MutableStateFlow<List<DividendIncomeRecordEntity>>(emptyList())
     private val yearsFlow = MutableStateFlow<List<Int>>(emptyList())
@@ -38,7 +38,7 @@ class DividendIncomeViewModelTest {
         every { incomeRepository.observeByYear(any()) } returns recordsFlow
         every { incomeRepository.observeAvailableYears() } returns yearsFlow
         every { incomeRepository.observeTotalByYear(any()) } returns totalFlow
-        every { stockRepository.observeAllStocks() } returns stocksFlow
+        every { plane.observeAllStocks() } returns stocksFlow
     }
 
     @After
@@ -48,7 +48,7 @@ class DividendIncomeViewModelTest {
 
     @Test
     fun `init triggers auto-regeneration`() = runTest {
-        val viewModel = DividendIncomeViewModel(incomeRepository, stockRepository)
+        val viewModel = DividendIncomeViewModel(incomeRepository, plane)
         advanceUntilIdle()
 
         coVerify { incomeRepository.regenerateAutoRecords() }
@@ -56,7 +56,7 @@ class DividendIncomeViewModelTest {
 
     @Test
     fun `selectYear updates selected year`() = runTest {
-        val viewModel = DividendIncomeViewModel(incomeRepository, stockRepository)
+        val viewModel = DividendIncomeViewModel(incomeRepository, plane)
         advanceUntilIdle()
 
         viewModel.selectYear(2024)
@@ -69,7 +69,7 @@ class DividendIncomeViewModelTest {
     fun `addManualRecord calls repository and clears dialog`() = runTest {
         coEvery { incomeRepository.addManualRecord(any(), any(), any(), any()) } returns Unit
 
-        val viewModel = DividendIncomeViewModel(incomeRepository, stockRepository)
+        val viewModel = DividendIncomeViewModel(incomeRepository, plane)
         advanceUntilIdle()
 
         viewModel.showAddDialog()
@@ -86,7 +86,7 @@ class DividendIncomeViewModelTest {
     fun `correctRecord calls repository and clears dialog`() = runTest {
         coEvery { incomeRepository.correctRecord(any(), any(), any()) } returns Unit
 
-        val viewModel = DividendIncomeViewModel(incomeRepository, stockRepository)
+        val viewModel = DividendIncomeViewModel(incomeRepository, plane)
         advanceUntilIdle()
 
         viewModel.showCorrectDialog("auto_sh.600000_2024-07-10", 246.0)
@@ -103,7 +103,7 @@ class DividendIncomeViewModelTest {
     fun `deleteManualRecord calls repository`() = runTest {
         coEvery { incomeRepository.deleteManualRecord(any()) } returns Unit
 
-        val viewModel = DividendIncomeViewModel(incomeRepository, stockRepository)
+        val viewModel = DividendIncomeViewModel(incomeRepository, plane)
         advanceUntilIdle()
 
         viewModel.deleteManualRecord("manual_12345")
