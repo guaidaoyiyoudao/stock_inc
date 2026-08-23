@@ -25,6 +25,11 @@
     <fields>;
 }
 
+# 交易策略 params JSON 载体（Gson 反射读写嵌套数据类字段名；混淆会把
+# halfGainPercent 等变成 a/b，存库键名随 R8 mapping 变化 → 跨版本升级丢参数）
+-keep class com.stock.dividend.data.repository.StrategyParams { *; }
+-keep class com.stock.dividend.data.repository.StrategyParams$* { *; }
+
 # Gson
 -keepattributes *Annotation*
 -keep class com.google.gson.** { *; }
