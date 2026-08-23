@@ -226,70 +226,73 @@ private fun IncomeTabContent(
     onAddIncomeClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.fillMaxSize()) {
-        YearSelector(
-            years = state.availableYears.ifEmpty { listOf(state.selectedYear) },
-            selectedYear = state.selectedYear,
-            onYearSelected = { viewModel.selectYear(it) },
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        IncomeTrendChart(
-            yearlyTotals = state.yearlyTotals,
-            selectedYear = state.selectedYear,
-            onYearClick = { viewModel.selectYear(it) },
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        IncomeSummaryCard(
-            year = state.selectedYear,
-            totalAmount = state.yearlyTotal,
-            prevYearTotal = state.prevYearTotal,
-            manualCount = state.manualCount,
-            autoCount = state.autoCount,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 占比图默认收起：饼图+图例约一屏高，展开后严重挤压收入记录列表
-        //（用户反馈一屏只显示两条记录的另一半原因）；点标题行按需展开
-        var breakdownExpanded by remember { mutableStateOf(false) }
-        SectionHeader(
-            title = "股票占比",
-            actionText = if (breakdownExpanded) "收起" else "展开",
-            onActionClick = { breakdownExpanded = !breakdownExpanded },
-            modifier = Modifier.padding(horizontal = AppCardDefaults.PageHorizontalPadding)
-        )
-        androidx.compose.animation.AnimatedVisibility(visible = breakdownExpanded) {
-            IncomeBreakdownChart(
-                records = state.records,
-                modifier = Modifier.padding(horizontal = 16.dp)
+    // 整页单列表滚动：头部（年份/趋势/汇总/占比）与收入记录一起下拉，
+    // 而非头部固定、仅记录区滚动（用户反馈希望整 tab 页直接下拉）
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 8.dp,
+            bottom = AppCardDefaults.BottomNavigationPadding
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item(key = "year") {
+            YearSelector(
+                years = state.availableYears.ifEmpty { listOf(state.selectedYear) },
+                selectedYear = state.selectedYear,
+                onYearSelected = { viewModel.selectYear(it) },
             )
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        SectionHeader(
-            title = stringResource(R.string.income_section_records),
-            actionText = stringResource(R.string.income_action_add),
-            actionIcon = Icons.Default.Add,
-            onActionClick = onAddIncomeClick,
-            modifier = Modifier.padding(horizontal = AppCardDefaults.PageHorizontalPadding)
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
+        item(key = "trend") {
+            IncomeTrendChart(
+                yearlyTotals = state.yearlyTotals,
+                selectedYear = state.selectedYear,
+                onYearClick = { viewModel.selectYear(it) },
+            )
+        }
+        item(key = "summary") {
+            IncomeSummaryCard(
+                year = state.selectedYear,
+                totalAmount = state.yearlyTotal,
+                prevYearTotal = state.prevYearTotal,
+                manualCount = state.manualCount,
+                autoCount = state.autoCount,
+            )
+        }
+        item(key = "breakdown") {
+            // 占比图默认收起：饼图+图例约一屏高，展开即占满视口；点标题行按需展开
+            var breakdownExpanded by remember { mutableStateOf(false) }
+            Column {
+                SectionHeader(
+                    title = "股票占比",
+                    actionText = if (breakdownExpanded) "收起" else "展开",
+                    onActionClick = { breakdownExpanded = !breakdownExpanded },
+                    modifier = Modifier.padding(horizontal = 0.dp)
+                )
+                androidx.compose.animation.AnimatedVisibility(visible = breakdownExpanded) {
+                    IncomeBreakdownChart(records = state.records)
+                }
+            }
+        }
+        item(key = "records_header") {
+            SectionHeader(
+                title = stringResource(R.string.income_section_records),
+                actionText = stringResource(R.string.income_action_add),
+                actionIcon = Icons.Default.Add,
+                onActionClick = onAddIncomeClick,
+                modifier = Modifier.padding(horizontal = 0.dp)
+            )
+        }
         if (state.records.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            item(key = "empty") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 40.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text(
                         "暂无股息收入记录",
                         style = MaterialTheme.typography.bodyLarge,
@@ -304,29 +307,24 @@ private fun IncomeTabContent(
                 }
             }
         } else {
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(items = state.records, key = { it.record.id }) { item ->
-                    IncomeTimelineCard(
-                        date = item.record.date,
-                        stockName = item.stockName,
-                        amount = item.record.amount,
-                        source = item.record.source,
-                        exDividendDate = item.record.exDividendDate,
-                        note = item.record.note,
-                        onCorrect = {
-                            viewModel.showCorrectDialog(item.record.id, item.record.amount)
-                        },
-                        onEdit = {
-                            viewModel.showCorrectDialog(item.record.id, item.record.amount)
-                        },
-                        onDelete = {
-                            viewModel.deleteManualRecord(item.record.id)
-                        }
-                    )
-                }
+            items(items = state.records, key = { it.record.id }) { item ->
+                IncomeTimelineCard(
+                    date = item.record.date,
+                    stockName = item.stockName,
+                    amount = item.record.amount,
+                    source = item.record.source,
+                    exDividendDate = item.record.exDividendDate,
+                    note = item.record.note,
+                    onCorrect = {
+                        viewModel.showCorrectDialog(item.record.id, item.record.amount)
+                    },
+                    onEdit = {
+                        viewModel.showCorrectDialog(item.record.id, item.record.amount)
+                    },
+                    onDelete = {
+                        viewModel.deleteManualRecord(item.record.id)
+                    }
+                )
             }
         }
     }
