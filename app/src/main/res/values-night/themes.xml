@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 夜间模式：父主题换深色 Material，窗口背景跟随系统深色——
+     冷启动首帧前的 starting window 不再恒白（日间仍用 values/themes.xml 的 Light）。 -->
+<resources>
+    <style name="Theme.StockDividend" parent="android:Theme.Material.NoActionBar" />
+</resources>

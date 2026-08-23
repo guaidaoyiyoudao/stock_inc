@@ -5,6 +5,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -26,10 +30,19 @@ class MainActivity : ComponentActivity() {
         consumeDeepLink(intent)   // 冷启动：从启动 Intent 取 stockCode
         setContent {
             StockDividendTheme {
-                AppNavigation(
-                    pendingDeepLink = pendingDeepLink,
-                    onDeepLinkConsumed = { pendingDeepLink = null }
-                )
+                // 根级不透明背景：外层 NavHost 转场（生活支出/网格交易等 rootNavController
+                // 目的地）滑动+fade 中点两页均半透明，若无背景会透出 XML 主题恒白的
+                // windowBackground，夜间模式下表现为切页白闪。内层 Tab NavHost 已由
+                // MainScaffold 的 Scaffold 垫底，此处为外层补齐同一层。
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    AppNavigation(
+                        pendingDeepLink = pendingDeepLink,
+                        onDeepLinkConsumed = { pendingDeepLink = null }
+                    )
+                }
             }
         }
     }
