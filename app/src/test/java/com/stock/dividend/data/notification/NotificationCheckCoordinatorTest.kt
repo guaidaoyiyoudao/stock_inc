@@ -17,6 +17,7 @@ import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
 import com.stock.dividend.data.repository.NotificationRuleRepository
 import com.stock.dividend.data.repository.StockRepository
+import com.stock.dividend.data.repository.StrategyInputAssembler
 import com.stock.dividend.data.repository.StrategyPlanRepository
 import com.stock.dividend.data.repository.TransactionRepository
 import io.mockk.coEvery
@@ -35,6 +36,8 @@ class NotificationCheckCoordinatorTest {
     private val gridPlanRepository: GridPlanRepository = mockk(relaxed = true)
     private val transactionRepository: TransactionRepository = mockk(relaxed = true)
     private val strategyPlanRepository: StrategyPlanRepository = mockk(relaxed = true)
+    // 装配器用真实实现 + 上述 mock 依赖（纯编排，无本地状态，真实例比 mock 更接近生产行为）
+    private val strategyInputAssembler = StrategyInputAssembler(marketDataPlane, transactionRepository)
     private val coordinator = NotificationCheckCoordinator(
         marketDataPlane = marketDataPlane,
         ruleRepository = ruleRepository,
@@ -42,7 +45,8 @@ class NotificationCheckCoordinatorTest {
         notifier = notifier,
         gridPlanRepository = gridPlanRepository,
         transactionRepository = transactionRepository,
-        strategyPlanRepository = strategyPlanRepository
+        strategyPlanRepository = strategyPlanRepository,
+        strategyInputAssembler = strategyInputAssembler
     ).apply {
         clock = { 1000L }
     }
@@ -311,7 +315,8 @@ class NotificationCheckCoordinatorTest {
             notifier.sendStrategySellAlert(
                 match { signal ->
                     signal.planId == "s1" && signal.tier == STRATEGY_SELL_TIER_HALF &&
-                        signal.sellShares == 200 && signal.deviationPercent > 7.5
+                        signal.sellShares == 200 && signal.strategyTypeName == "年线定投" &&
+                        signal.headline.contains("卖出一半")
                 }
             )
             strategyPlanRepository.updateNotifiedSellTier("s1", STRATEGY_SELL_TIER_HALF)

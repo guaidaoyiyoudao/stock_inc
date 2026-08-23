@@ -128,14 +128,14 @@ class AndroidDividendAlertNotifier @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val isAll = signal.tier == STRATEGY_SELL_TIER_ALL
-        val title = if (isAll) "策略到达清仓阈值" else "策略到达卖出一半阈值"
+        val title = if (isAll) "策略到达清仓信号" else "策略到达减仓信号"
         val action = if (isAll) {
             "全部卖出"
         } else {
-            if (signal.sellShares > 0) "卖出一半（约 ${signal.sellShares} 股）" else "卖出一半"
+            if (signal.sellShares > 0) "卖出约 ${signal.sellShares} 股" else "部分减仓"
         }
-        val body = "%s 现价高于年线 %.2f%%（阈值 %.2f%%），按策略 %s".format(
-            Locale.US, signal.stockName, signal.deviationPercent, signal.thresholdPercent, action
+        val body = "%s（%s）：%s，按策略 %s".format(
+            Locale.US, signal.stockName, signal.strategyTypeName, signal.headline, action
         )
         val notification = NotificationCompat.Builder(context, channelFor(STRATEGY_SELL_ALERT))
             .setSmallIcon(R.mipmap.ic_launcher)

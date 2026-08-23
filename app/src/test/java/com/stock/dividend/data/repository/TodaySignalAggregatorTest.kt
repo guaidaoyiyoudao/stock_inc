@@ -233,42 +233,53 @@ class TodaySignalAggregatorTest {
     )
 
     private fun strategyEval(
-        signal: MaDcaSignal,
-        dev: Double,
-        ma: Double = 10.0,
-        halfPrice: Double = 10.75,
-        allPrice: Double = 11.5
-    ) = MaDcaEvaluation(
-        maValue = ma, deviationPercent = dev, signal = signal,
-        sellHalfTriggerPrice = halfPrice, sellAllTriggerPrice = allPrice
+        action: StrategyAction,
+        sellShares: Int = 0,
+        notifyTier: String? = null
+    ) = StrategyEvaluation(
+        action = action,
+        headline = when (action) {
+            StrategyAction.BUY -> "年线定投窗口"
+            StrategyAction.SELL_HALF -> "高于年线 7.5% 卖出一半"
+            StrategyAction.SELL_ALL -> "高于年线 15% 清仓"
+            else -> "持有"
+        },
+        metrics = listOf(
+            StrategyMetric("现价", "10.00"),
+            StrategyMetric("偏离度", "8.00%")
+        ),
+        sellShares = sellShares,
+        notifyTier = notifyTier
     )
 
-    /** 低于年线 → 定投窗口信号（key 用 planId，同股多策略互不顶替）。 */
+    /** 买入方向 → 买点信号（key 用 planId，同股多策略互不顶替）。 */
     @Test
-    fun strategyDcaWindow_triggersStrategyDcaSignal() {
+    fun strategyBuy_triggersStrategyDcaSignal() {
         val result = TodaySignalAggregator.aggregate(
             TodaySignalInput(
                 emptyList(), emptyList(), emptyMap(), emptyList(), today,
                 strategyPlans = listOf(strategyPlan()),
-                strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.DCA_WINDOW, -5.0))
+                strategyEvaluations = mapOf("s1" to strategyEval(StrategyAction.BUY))
             )
         )
         val s = result.single()
         assertThat(s.type).isEqualTo(TodaySignalType.STRATEGY_DCA)
         assertThat(s.key).isEqualTo("strategydca-s1")
         assertThat(s.sortPriority).isEqualTo(0)
-        assertThat(s.detail).contains("10.00")   // 年线值
+        assertThat(s.title).contains("年线定投")
+        assertThat(s.detail).contains("10.00")   // 指标行
     }
 
-    /** 高于年线卖半阈值 → 卖出信号，detail 带整手折算后的卖出股数。 */
+    /** 卖出方向 → 卖出信号，detail 带整手折算后的卖出股数。 */
     @Test
     fun strategySellHalf_triggersStrategySellSignal() {
         val result = TodaySignalAggregator.aggregate(
             TodaySignalInput(
                 emptyList(), emptyList(), emptyMap(), emptyList(), today,
                 strategyPlans = listOf(strategyPlan()),
-                strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.SELL_HALF, 8.0)),
-                strategyHoldings = mapOf("sh.510880" to 500)
+                strategyEvaluations = mapOf(
+                    "s1" to strategyEval(StrategyAction.SELL_HALF, sellShares = 200, notifyTier = "HALF")
+                )
             )
         )
         val s = result.single()
@@ -276,18 +287,19 @@ class TodaySignalAggregatorTest {
         assertThat(s.key).isEqualTo("strategysell-s1")
         assertThat(s.sortPriority).isEqualTo(1)
         assertThat(s.detail).contains("200")
-        assertThat(s.detail).contains("7.5")
+        assertThat(s.title).contains("7.5")   // 阈值在 headline（title）里
     }
 
-    /** 清仓档 → 卖出信号，股数为全部持仓。 */
+    /** 清仓方向 → 卖出信号，股数为全部持仓。 */
     @Test
     fun strategySellAll_triggersStrategySellSignalWithAllShares() {
         val result = TodaySignalAggregator.aggregate(
             TodaySignalInput(
                 emptyList(), emptyList(), emptyMap(), emptyList(), today,
                 strategyPlans = listOf(strategyPlan()),
-                strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.SELL_ALL, 16.0)),
-                strategyHoldings = mapOf("sh.510880" to 600)
+                strategyEvaluations = mapOf(
+                    "s1" to strategyEval(StrategyAction.SELL_ALL, sellShares = 600, notifyTier = "ALL")
+                )
             )
         )
         val s = result.single()
@@ -295,7 +307,7 @@ class TodaySignalAggregatorTest {
         assertThat(s.detail).contains("600")
     }
 
-    /** 年线与阈值之间 → 无信号；评估缺失（数据不足）→ 无信号。 */
+    /** 持有 → 无信号；评估缺失（数据不足）→ 无信号。 */
     @Test
     fun strategyHoldOrMissingEvaluation_noSignal() {
         assertThat(
@@ -303,7 +315,7 @@ class TodaySignalAggregatorTest {
                 TodaySignalInput(
                     emptyList(), emptyList(), emptyMap(), emptyList(), today,
                     strategyPlans = listOf(strategyPlan()),
-                    strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.HOLD, 3.0))
+                    strategyEvaluations = mapOf("s1" to strategyEval(StrategyAction.HOLD))
                 )
             )
         ).isEmpty()
@@ -329,7 +341,7 @@ class TodaySignalAggregatorTest {
             TodaySignalInput(
                 emptyList(), listOf(grid), mapOf("sh.510880" to 9.6), emptyList(), today,
                 strategyPlans = listOf(strategyPlan()),
-                strategyEvaluations = mapOf("s1" to strategyEval(MaDcaSignal.DCA_WINDOW, -5.0))
+                strategyEvaluations = mapOf("s1" to strategyEval(StrategyAction.BUY))
             )
         )
         assertThat(result).hasSize(2)

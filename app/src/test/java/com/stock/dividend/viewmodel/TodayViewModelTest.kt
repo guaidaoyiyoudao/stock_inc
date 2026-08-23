@@ -43,6 +43,7 @@ class TodayViewModelTest {
     private val dividendIncomeRepository = mockk<DividendIncomeRepository>(relaxed = true)
     private val transactionRepository: com.stock.dividend.data.repository.TransactionRepository = mockk(relaxed = true)
     private val strategyPlanRepository = mockk<com.stock.dividend.data.repository.StrategyPlanRepository>(relaxed = true)
+    private val strategyInputAssembler = com.stock.dividend.data.repository.StrategyInputAssembler(marketDataPlane, transactionRepository)
 
     @Before
     fun setUp() {
@@ -66,8 +67,8 @@ class TodayViewModelTest {
     fun tearDown() = Dispatchers.resetMain()
 
     private fun makeVm() = TodayViewModel(
-        marketDataPlane, gridPlanRepository, strategyPlanRepository, briefingCoordinator,
-        diagnosisAssembler, dividendIncomeRepository, transactionRepository,
+        marketDataPlane, gridPlanRepository, strategyPlanRepository, strategyInputAssembler,
+        briefingCoordinator, diagnosisAssembler, dividendIncomeRepository, transactionRepository,
     )
 
     @Test

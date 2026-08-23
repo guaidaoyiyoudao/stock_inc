@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -21,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,10 +41,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.stock.dividend.data.local.entity.StrategyPlanEntity
-import com.stock.dividend.data.repository.MaDcaEvaluation
-import com.stock.dividend.data.repository.MaDcaSignal
-import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.data.repository.StrategyAction
+import com.stock.dividend.data.repository.StrategyEvaluator
 import com.stock.dividend.ui.component.AppButton
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
@@ -61,9 +59,8 @@ import com.stock.dividend.viewmodel.StrategyPlanUiState
 import com.stock.dividend.viewmodel.StrategyPlanViewModel
 
 /**
- * 交易策略页：展示已保存的策略计划（首版：年线定投——250 日线下定投买入，
- * 高于年线 7.5% 卖一半、15% 全卖，参数可调），FAB 唤起编辑器（参数实时预览）。
- * **仅信号提示与记账辅助，不联网下单**。
+ * 交易策略页：展示已保存的全部类型策略（统一评估卡片），FAB 唤起编辑器
+ * （类型选择 + 参数表单 + 实时预览）。**仅信号提示与记账辅助，不联网下单**。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +95,9 @@ fun StrategyPlanScreen(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "为股票/ETF 配置年线定投策略：\n低于年线定投买入，高于阈值卖出一半/全部\n（仅提示与记账辅助，不下单）",
+                    text = "8 种内置策略可选：年线定投 / 目标止盈 / 股息率带 /\n" +
+                        "双均线 / 均线偏离回归 / 价值平均 / 估值带 / 分红再投\n" +
+                        "（仅提示与记账辅助，不下单）",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 16.dp)
@@ -120,8 +119,8 @@ fun StrategyPlanScreen(
             ) {
                 item {
                     Text(
-                        text = "年线定投：现价低于均线开启定投窗口；高于均线「卖出一半阈值」卖一半、" +
-                            "「清仓阈值」全部卖出。仅在 App 内提示与辅助记账，请在券商端手动执行。",
+                        text = "买入方向信号只在策略页与今日页展示；卖出方向信号额外推送通知" +
+                            "（每档一次、回落复位，可在卡片上关闭）。请结合自身判断，在券商端手动执行。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
@@ -150,7 +149,9 @@ fun StrategyPlanScreen(
             AlertDialog(
                 onDismissRequest = viewModel::dismissDelete,
                 title = { Text("删除策略") },
-                text = { Text("确定删除「${plan.stockName}」的年线定投策略？") },
+                text = {
+                    Text("确定删除「${plan.stockName}」的${StrategyEvaluator.displayName(plan.strategyType)}策略？")
+                },
                 confirmButton = {
                     AppTextButton(text = "删除", onClick = viewModel::confirmDelete)
                 },
@@ -162,20 +163,20 @@ fun StrategyPlanScreen(
     }
 }
 
-/** 策略信号 → StatusPill 短标签。 */
-private fun signalLabel(signal: MaDcaSignal): String = when (signal) {
-    MaDcaSignal.DCA_WINDOW -> "定投窗口"
-    MaDcaSignal.HOLD -> "持有"
-    MaDcaSignal.SELL_HALF -> "卖出一半"
-    MaDcaSignal.SELL_ALL -> "全部卖出"
+/** 策略动作 → StatusPill 短标签。 */
+private fun actionLabel(action: StrategyAction): String = when (action) {
+    StrategyAction.BUY -> "买点"
+    StrategyAction.HOLD -> "持有"
+    StrategyAction.SELL_HALF -> "减仓"
+    StrategyAction.SELL_ALL -> "清仓"
 }
 
-/** 策略信号 → 财务语义色：定投窗口(绿) / 持有(灰) / 卖一半(黄) / 清仓(红)。 */
-private fun signalTone(signal: MaDcaSignal): FinanceStatusTone = when (signal) {
-    MaDcaSignal.DCA_WINDOW -> FinanceStatusTone.Positive
-    MaDcaSignal.HOLD -> FinanceStatusTone.Neutral
-    MaDcaSignal.SELL_HALF -> FinanceStatusTone.Warning
-    MaDcaSignal.SELL_ALL -> FinanceStatusTone.Negative
+/** 策略动作 → 财务语义色：买点(绿) / 持有(灰) / 减仓(黄) / 清仓(红)。 */
+private fun actionTone(action: StrategyAction): FinanceStatusTone = when (action) {
+    StrategyAction.BUY -> FinanceStatusTone.Positive
+    StrategyAction.HOLD -> FinanceStatusTone.Neutral
+    StrategyAction.SELL_HALF -> FinanceStatusTone.Warning
+    StrategyAction.SELL_ALL -> FinanceStatusTone.Negative
 }
 
 @Composable
@@ -188,7 +189,6 @@ private fun StrategyPlanCard(
 ) {
     val plan = item.plan
     val evaluation = item.evaluation
-    val ext = LocalExtendedColors.current
 
     AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -204,14 +204,14 @@ private fun StrategyPlanCard(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "MA${plan.maPeriod} 年线定投 · 每期 ${MoneyFormatter.withSymbol(plan.dcaAmount)}",
+                        text = StrategyEvaluator.displayName(plan.strategyType),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 when (evaluation) {
                     null -> StatusPill(text = "数据不足", tone = FinanceStatusTone.Neutral)
-                    else -> StatusPill(text = signalLabel(evaluation.signal), tone = signalTone(evaluation.signal))
+                    else -> StatusPill(text = actionLabel(evaluation.action), tone = actionTone(evaluation.action))
                 }
             }
 
@@ -219,76 +219,62 @@ private fun StrategyPlanCard(
 
             if (evaluation == null) {
                 Text(
-                    text = "日线数据不足 ${plan.maPeriod} 根（上市不足周期长度或未缓存），下拉刷新重试",
+                    text = "评估数据不足（现价/日线/估值或分红缺失），下拉刷新或稍后重试",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                FinanceMetricRow(label = "现价", value = MoneyFormatter.amount(item.currentPrice ?: 0.0))
-                FinanceMetricRow(label = "年线 MA${plan.maPeriod}", value = MoneyFormatter.amount(evaluation.maValue))
-                FinanceMetricRow(
-                    label = "偏离度",
-                    value = (if (evaluation.deviationPercent >= 0) "+" else "") +
-                        MoneyFormatter.amount(evaluation.deviationPercent) + "%",
-                    valueColor = if (evaluation.deviationPercent >= 0) ext.negative else ext.positive
+                Text(
+                    text = evaluation.headline,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium
                 )
-                FinanceMetricRow(
-                    label = "卖出一半触发价（+${trimPercent(plan.sellHalfPercent)}%）",
-                    value = MoneyFormatter.amount(evaluation.sellHalfTriggerPrice)
-                )
-                FinanceMetricRow(
-                    label = "清仓触发价（+${trimPercent(plan.sellAllPercent)}%）",
-                    value = MoneyFormatter.amount(evaluation.sellAllTriggerPrice)
-                )
-                FinanceMetricRow(label = "当前持仓", value = "${item.holdingShares} 股")
+                Spacer(modifier = Modifier.height(6.dp))
+                evaluation.metrics.forEach { metric ->
+                    FinanceMetricRow(label = metric.label, value = metric.value)
+                }
 
-                // 信号对应的可执行动作（一键记账预填，仅提示不下单）
-                when (evaluation.signal) {
-                    MaDcaSignal.DCA_WINDOW -> {
-                        if (item.dcaBuyShares > 0) {
+                // 可执行动作（一键记账预填，仅提示不下单）
+                when (evaluation.action) {
+                    StrategyAction.BUY -> {
+                        if (evaluation.buyShares > 0) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val amountText = evaluation.buyAmount?.let {
+                                "（${com.stock.dividend.data.repository.MoneyFormatter.withSymbol(it)}）"
+                            } ?: ""
+                            AppButton(
+                                text = "买入 ${evaluation.buyShares} 股$amountText",
+                                onClick = {
+                                    item.currentPrice?.let { price ->
+                                        onAddTransaction(plan.stockCode, price, evaluation.buyShares, true)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                    StrategyAction.SELL_HALF, StrategyAction.SELL_ALL -> {
+                        if (evaluation.sellShares > 0) {
                             Spacer(modifier = Modifier.height(8.dp))
                             AppButton(
-                                text = "定投买入 ${item.dcaBuyShares} 股（${MoneyFormatter.withSymbol(plan.dcaAmount)}）",
+                                text = "卖出 ${evaluation.sellShares} 股（一键记账）",
                                 onClick = {
                                     item.currentPrice?.let { price ->
-                                        onAddTransaction(plan.stockCode, price, item.dcaBuyShares, true)
+                                        onAddTransaction(plan.stockCode, price, evaluation.sellShares, false)
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         } else {
                             Text(
-                                text = "定投金额不足一手（100 股），可调大每期金额",
+                                text = "无可卖出的整手股数（持仓不足一手）",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                    MaDcaSignal.SELL_HALF, MaDcaSignal.SELL_ALL -> {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        if (item.sellTargetShares > 0) {
-                            AppButton(
-                                text = "卖出 ${item.sellTargetShares} 股（一键记账）",
-                                onClick = {
-                                    item.currentPrice?.let { price ->
-                                        onAddTransaction(plan.stockCode, price, item.sellTargetShares, false)
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        } else {
-                            Text(
-                                text = if (evaluation.signal == MaDcaSignal.SELL_HALF) {
-                                    "持仓不足一手，无可卖出的整手股数"
-                                } else {
-                                    "当前无持仓，清仓信号仅作提示"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    MaDcaSignal.HOLD -> Unit
+                    StrategyAction.HOLD -> Unit
                 }
             }
 
@@ -324,11 +310,7 @@ private fun StrategyPlanCard(
     }
 }
 
-/** 7.5 → "7.5"；15.0 → "15"（展示用，去掉无意义尾零）。 */
-private fun trimPercent(v: Double): String =
-    if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
-
-/** 新建/编辑策略 BottomSheet：选标的 + 参数输入 + 实时预览（年线/触发价/当前信号）。 */
+/** 新建/编辑策略 BottomSheet：类型选择 + 标的 + 参数表单 + 实时预览。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StrategyEditorSheet(
@@ -347,13 +329,27 @@ private fun StrategyEditorSheet(
                 .padding(bottom = 24.dp)
         ) {
             Text(
-                text = if (state.editingId == null) "新建策略 · 年线定投" else "编辑策略 · 年线定投",
+                text = if (state.editingId == null) "新建策略" else "编辑策略",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 标的选择：搜索框 + 过滤列表
+            // 策略类型选择（编辑已有计划时不允许换类型——换类型=删了重建，语义更清晰）
+            Text(
+                text = "策略类型",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            FlowChips(
+                options = StrategyPlanViewModel.STRATEGY_TYPES,
+                selected = state.strategyTypeInput,
+                enabled = state.editingId == null,
+                onSelect = viewModel::onStrategyTypeChanged
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
             StockPickerSection(
                 stocks = state.stocks.map { it.code to it.name },
                 selectedCode = state.selectedStockCode,
@@ -361,44 +357,95 @@ private fun StrategyEditorSheet(
             )
 
             Spacer(modifier = Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                AppTextField(
-                    value = state.maPeriodInput,
-                    onValueChange = viewModel::onMaPeriodChanged,
-                    modifier = Modifier.weight(1f),
-                    label = { Text("均线周期（日）") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
-                AppTextField(
-                    value = state.dcaAmountInput,
-                    onValueChange = viewModel::onDcaAmountChanged,
-                    modifier = Modifier.weight(1f),
-                    label = { Text("每期定投金额（元）") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                )
+            when (state.strategyTypeInput) {
+                com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DCA -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AppTextField(
+                            value = state.maPeriodInput,
+                            onValueChange = viewModel::onMaPeriodChanged,
+                            modifier = Modifier.weight(1f),
+                            label = { Text("均线周期（日）") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        AppTextField(
+                            value = state.dcaAmountInput,
+                            onValueChange = viewModel::onDcaAmountChanged,
+                            modifier = Modifier.weight(1f),
+                            label = { Text("每期定投金额（元）") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AppTextField(
+                            value = state.sellHalfInput,
+                            onValueChange = viewModel::onSellHalfChanged,
+                            modifier = Modifier.weight(1f),
+                            label = { Text("卖出一半阈值（%）") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
+                        AppTextField(
+                            value = state.sellAllInput,
+                            onValueChange = viewModel::onSellAllChanged,
+                            modifier = Modifier.weight(1f),
+                            label = { Text("清仓阈值（%）") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
+                    }
+                }
+                else -> {
+                    // 通用参数表单（按类型字段描述渲染）
+                    StrategyPlanViewModel.editorFields(state.strategyTypeInput).forEach { field ->
+                        if (field.metricToggle) {
+                            Text(
+                                text = field.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            FlowChips(
+                                options = listOf(
+                                    com.stock.dividend.data.repository.StrategyParams.VALUATION_METRIC_PE to "市盈率 PE",
+                                    com.stock.dividend.data.repository.StrategyParams.VALUATION_METRIC_PB to "市净率 PB"
+                                ),
+                                selected = state.paramInputs[field.key] ?: "PE",
+                                enabled = true,
+                                onSelect = { viewModel.onParamChanged(field.key, it) }
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                        } else {
+                            AppTextField(
+                                value = state.paramInputs[field.key].orEmpty(),
+                                onValueChange = { viewModel.onParamChanged(field.key, it) },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text(field.label) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = if (field.numeric) KeyboardType.Decimal else KeyboardType.Text
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
+                    }
+                    // 需要买入金额的类型（dcaAmount 专用列）
+                    if (StrategyPlanViewModel.editorUsesDcaAmount(state.strategyTypeInput)) {
+                        AppTextField(
+                            value = state.dcaAmountInput,
+                            onValueChange = viewModel::onDcaAmountChanged,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("单次买入金额（元）") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                AppTextField(
-                    value = state.sellHalfInput,
-                    onValueChange = viewModel::onSellHalfChanged,
-                    modifier = Modifier.weight(1f),
-                    label = { Text("卖出一半阈值（%）") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                )
-                AppTextField(
-                    value = state.sellAllInput,
-                    onValueChange = viewModel::onSellAllChanged,
-                    modifier = Modifier.weight(1f),
-                    label = { Text("清仓阈值（%）") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                )
-            }
-            Spacer(modifier = Modifier.height(10.dp))
+
             AppTextField(
                 value = state.noteInput,
                 onValueChange = viewModel::onNoteChanged,
@@ -412,20 +459,20 @@ private fun StrategyEditorSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "卖出阈值推送（每档一次，回落后可再提醒）",
+                    text = "卖出信号推送（升级才提醒、回落复位）",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Switch(checked = state.notifyEnabledInput, onCheckedChange = viewModel::onNotifyEnabledChanged)
             }
 
-            // 实时预览：已选标的且有日线数据时展示年线/触发价/信号
+            // 实时预览：已选标的且数据就绪时展示当前信号与关键指标
             if (state.selectedStockCode.isNotBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 val preview = state.previewEvaluation
                 if (preview == null) {
                     Text(
-                        text = "暂无预览：日线数据加载中或不足周期数、参数未填完整",
+                        text = "暂无预览：数据加载中或不足、参数未填完整",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -438,28 +485,19 @@ private fun StrategyEditorSheet(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "按当前参数预估",
+                                    preview.headline,
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                                 StatusPill(
-                                    text = signalLabel(preview.signal),
-                                    tone = signalTone(preview.signal)
+                                    text = actionLabel(preview.action),
+                                    tone = actionTone(preview.action)
                                 )
                             }
                             Spacer(modifier = Modifier.height(6.dp))
-                            FinanceMetricRow(
-                                label = "年线 MA${state.maPeriodInput.trim()}",
-                                value = MoneyFormatter.amount(preview.maValue)
-                            )
-                            FinanceMetricRow(
-                                label = "卖出一半触发价",
-                                value = MoneyFormatter.amount(preview.sellHalfTriggerPrice)
-                            )
-                            FinanceMetricRow(
-                                label = "清仓触发价",
-                                value = MoneyFormatter.amount(preview.sellAllTriggerPrice)
-                            )
+                            preview.metrics.take(3).forEach { metric ->
+                                FinanceMetricRow(label = metric.label, value = metric.value)
+                            }
                         }
                     }
                 }
@@ -482,6 +520,31 @@ private fun StrategyEditorSheet(
                     modifier = Modifier.weight(1f)
                 )
                 AppTextButton(text = "取消", onClick = onDismiss, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** 换行排布的选择 chip 组（策略类型 / PE·PB 切换）。 */
+@Composable
+private fun FlowChips(
+    options: List<Pair<String, String>>,
+    selected: String,
+    enabled: Boolean = true,
+    onSelect: (String) -> Unit
+) {
+    // 简易两列换行（M3 无内置 FlowRow 时用 Column+Row 分组，选项数少无需复杂布局）
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.chunked(2).forEach { rowOptions ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                rowOptions.forEach { (key, label) ->
+                    FilterChip(
+                        selected = selected == key,
+                        enabled = enabled,
+                        onClick = { onSelect(key) },
+                        label = { Text(label, style = MaterialTheme.typography.labelMedium) }
+                    )
+                }
             }
         }
     }

@@ -487,6 +487,18 @@ class BackupRepositoryTest {
         assertThat(plans[0].notifyEnabled).isFalse()   // v30 起建表即有该列且恒序列化，显式值保留
     }
 
+    /** v31 备份的 params JSON 原样透传（新策略类型；脏 params 由 StrategyParams.decode 回退默认）。 */
+    @Test
+    fun `normalizeStrategyPlans passes through v31 params column`() {
+        val plan = StrategyPlanEntity(
+            id = "t1", stockCode = "sh.600036", stockName = "招商银行",
+            strategyType = com.stock.dividend.data.local.entity.STRATEGY_TYPE_TAKE_PROFIT,
+            params = "{\"halfGainPercent\":12.0,\"allGainPercent\":30.0}"
+        )
+        val plans = normalizeStrategyPlans(listOf(plan), dbVersion = 31)
+        assertThat(plans[0].params).isEqualTo("{\"halfGainPercent\":12.0,\"allGainPercent\":30.0}")
+    }
+
     /** v30 备份原样透传（自定义参数与提醒状态不被动过）。 */
     @Test
     fun `normalizeStrategyPlans passes through v30 backup unchanged`() {

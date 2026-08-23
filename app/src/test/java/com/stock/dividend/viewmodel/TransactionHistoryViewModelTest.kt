@@ -11,12 +11,28 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TransactionHistoryViewModelTest {
+
+    @Before
+    fun setUp() {
+        // viewModelScope 需要 Main dispatcher：显式安装（§6 约定）。
+        // 此前缺失时依赖同 JVM 其他测试类恰好装过 Main 的副作用，CI 类顺序不同即挂。
+        Dispatchers.setMain(StandardTestDispatcher())
+    }
+
+    @After
+    fun tearDown() = Dispatchers.resetMain()
 
     private fun tx(id: Long, code: String, type: String, shares: Int, price: Double, date: String, note: String? = null) =
         TransactionEntity(

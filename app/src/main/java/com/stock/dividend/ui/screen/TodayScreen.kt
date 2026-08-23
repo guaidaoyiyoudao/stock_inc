@@ -662,12 +662,12 @@ private fun signalLabel(type: TodaySignalType): String = when (type) {
     TodaySignalType.SELL_TRIGGER -> "波段"
     TodaySignalType.GRID_NEXT_LEVEL -> "网格"
     TodaySignalType.DIVIDEND_COUNTDOWN -> "分红"
-    TodaySignalType.STRATEGY_DCA -> "定投"
-    TodaySignalType.STRATEGY_SELL -> "策略"
+    TodaySignalType.STRATEGY_DCA -> "买点"
+    TodaySignalType.STRATEGY_SELL -> "卖出"
 }
 
 /** 信号类型 → 财务语义色：买入(Positive 绿) / 波段卖出(Warning 黄·即时可执行) / 网格(Warning 黄) / 分红(Neutral 灰) /
- *  策略定投窗口(Positive 绿·买点) / 策略卖出(Negative 红·减仓离场)。 */
+ *  策略买点(Positive 绿·定投/低估窗口) / 策略卖出(Negative 红·减仓离场)。 */
 private fun signalTone(type: TodaySignalType): FinanceStatusTone = when (type) {
     TodaySignalType.BUY_TRIGGER -> FinanceStatusTone.Positive
     TodaySignalType.SELL_TRIGGER -> FinanceStatusTone.Warning

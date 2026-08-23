@@ -72,7 +72,7 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         FuyaoCacheEntity::class,
         StrategyPlanEntity::class
     ],
-    version = 30,
+    version = 31,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -513,6 +513,15 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_strategy_plans_stockCode` " +
                             "ON `strategy_plans`(`stockCode`)"
                 )
+            }
+        }
+
+        val MIGRATION_30_31 = object : Migration(30, 31) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 交易策略参数 JSON 列（2026-08-23）：新增 7 种策略类型（止盈/股息率带/双均线/
+                // 偏离回归/价值平均/估值带/分红再投）的统一参数存储，不再逐类型加列。
+                // MA_DCA 继续用既有专用列（历史存量不迁移）；编解码与脏数据回退见 StrategyParams。
+                db.execSQL("ALTER TABLE strategy_plans ADD COLUMN params TEXT")
             }
         }
     }

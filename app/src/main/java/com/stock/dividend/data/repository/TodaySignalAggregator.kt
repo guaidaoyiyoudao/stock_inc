@@ -55,12 +55,10 @@ data class TodaySignalInput(
     val dividendLookaheadDays: Long = 30,
     /** 网格标的交易记录（按 stockCode 分组）：把已买入档从「下一档」提示中排除（每档只买一次）。 */
     val gridTransactionsByStock: Map<String, List<TransactionEntity>> = emptyMap(),
-    /** 交易策略计划（年线定投等），VM 算好评估结果一并传入（纯函数无 IO）。 */
+    /** 交易策略计划（全部类型），VM 经装配器+调度器算好统一评估传入（纯函数无 IO）。 */
     val strategyPlans: List<StrategyPlanEntity> = emptyList(),
-    /** 策略评估结果（planId → 评估；缺失 = 数据不足，跳过）。 */
-    val strategyEvaluations: Map<String, MaDcaEvaluation> = emptyMap(),
-    /** 持仓股数（stockCode → shares），策略卖出信号折算卖出股数用。 */
-    val strategyHoldings: Map<String, Int> = emptyMap(),
+    /** 策略统一评估结果（planId → 评估；缺失 = 数据不足，跳过）。 */
+    val strategyEvaluations: Map<String, StrategyEvaluation> = emptyMap(),
 )
 
 /** 今日信号聚合（纯函数，无 Android 依赖）。复用 [HoldingRecommender] / [computeBuyThreshold] / [GridCalculator]。 */
@@ -232,47 +230,40 @@ object TodaySignalAggregator {
     }
 
     /**
-     * 交易策略信号（年线定投）：低于年线 → 定投窗口（常驻提示，按约定不发推送）；
-     * 高于年线卖半/清仓阈值 → 卖出信号（推送走通知链路，今日页仅展示）。
+     * 交易策略信号（全部类型，统一评估）：买入方向（BUY）→ 买点信号（常驻提示，
+     * 按约定不发推送）；卖出方向（SELL_HALF/SELL_ALL）→ 卖出信号（推送走通知链路，
+     * 今日页仅展示）。HOLD 不产生信号。
      */
     private fun strategySignals(input: TodaySignalInput, out: MutableList<TodaySignal>) {
         for (plan in input.strategyPlans) {
             val evaluation = input.strategyEvaluations[plan.id] ?: continue
-            when (evaluation.signal) {
-                MaDcaSignal.DCA_WINDOW -> out += TodaySignal(
+            val typeName = StrategyEvaluator.displayName(plan.strategyType)
+            val metricText = evaluation.metrics.take(2)
+                .joinToString(" · ") { "${it.label} ${it.value}" }
+            when (evaluation.action) {
+                StrategyAction.BUY -> out += TodaySignal(
                     type = TodaySignalType.STRATEGY_DCA,
                     stockCode = plan.stockCode,
                     stockName = plan.stockName,
-                    title = "年线定投窗口",
-                    detail = "现价低于年线 %.2f（偏离 %.2f%%），每期定投 %s".format(
-                        evaluation.maValue,
-                        evaluation.deviationPercent,
-                        MoneyFormatter.withSymbol(plan.dcaAmount)
-                    ),
+                    title = "${typeName}：${evaluation.headline}",
+                    detail = metricText + if (evaluation.buyShares > 0) {
+                        " · 可买 ${evaluation.buyShares} 股"
+                    } else "",
                     sortPriority = 0,
                     key = "strategydca-${plan.id}", // 同股多策略各自一条，planId 维度唯一
                 )
-                MaDcaSignal.SELL_HALF, MaDcaSignal.SELL_ALL -> {
-                    val isAll = evaluation.signal == MaDcaSignal.SELL_ALL
-                    val shares = MaDcaStrategyCalculator.sellSharesFor(
-                        evaluation.signal, input.strategyHoldings[plan.stockCode] ?: 0
-                    )
-                    val action = if (isAll) "全部卖出" else "卖出一半"
-                    val threshold = if (isAll) plan.sellAllPercent else plan.sellHalfPercent
-                    out += TodaySignal(
-                        type = TodaySignalType.STRATEGY_SELL,
-                        stockCode = plan.stockCode,
-                        stockName = plan.stockName,
-                        title = "策略：$action",
-                        detail = "现价高于年线 %.2f%%（阈值 %.2f%%）%s".format(
-                            evaluation.deviationPercent, threshold,
-                            if (shares > 0) "，卖出 $shares 股" else ""
-                        ),
-                        sortPriority = 1,
-                        key = "strategysell-${plan.id}",
-                    )
-                }
-                MaDcaSignal.HOLD -> Unit // 年线与阈值之间，无信号
+                StrategyAction.SELL_HALF, StrategyAction.SELL_ALL -> out += TodaySignal(
+                    type = TodaySignalType.STRATEGY_SELL,
+                    stockCode = plan.stockCode,
+                    stockName = plan.stockName,
+                    title = "${typeName}：${evaluation.headline}",
+                    detail = metricText + if (evaluation.sellShares > 0) {
+                        " · 卖出 ${evaluation.sellShares} 股"
+                    } else "",
+                    sortPriority = 1,
+                    key = "strategysell-${plan.id}",
+                )
+                StrategyAction.HOLD -> Unit
             }
         }
     }
