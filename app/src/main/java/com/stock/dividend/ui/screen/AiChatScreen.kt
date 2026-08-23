@@ -34,6 +34,9 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -178,13 +181,14 @@ fun AiChatScreen(
         SessionBar(
             currentTitle = state.sessions.firstOrNull { it.id == state.currentSessionId }?.title ?: "AI 助手",
             onOpenSessions = { showSessions = true },
+            onNewSession = viewModel::onNewSession,
             onOpenAiSettings = onOpenAiSettings,
         )
         LazyColumn(
             modifier = Modifier.weight(1f),
             state = listState,
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (messages.isEmpty()) {
                 item { ChatGreeting(onSuggestionClick = viewModel::onInputChanged) }
@@ -242,22 +246,27 @@ fun AiChatScreen(
 private fun SessionBar(
     currentTitle: String,
     onOpenSessions: () -> Unit,
+    onNewSession: () -> Unit,
     onOpenAiSettings: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+            .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        IconButton(onClick = onOpenSessions) {
+            Icon(Icons.Filled.Chat, contentDescription = "会话列表")
+        }
         Text(
             text = currentTitle,
             style = MaterialTheme.typography.titleMedium,
             maxLines = 1,
+            textAlign = TextAlign.Center,
             modifier = Modifier.weight(1f)
         )
-        IconButton(onClick = onOpenSessions) {
-            Icon(Icons.Filled.Chat, contentDescription = "会话列表")
+        IconButton(onClick = onNewSession) {
+            Icon(Icons.Filled.Add, contentDescription = "新建会话")
         }
         IconButton(onClick = onOpenAiSettings) {
             Icon(Icons.Filled.Settings, contentDescription = "AI 设置")
@@ -348,14 +357,14 @@ private fun ChatGreeting(onSuggestionClick: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 24.dp),
+            .padding(vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
             text = "我是你的股息投资助手",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface
         )
         Text(
             text = "可以查持仓、看行情、估值、买入线，也可以帮你记账和改持仓；\n多模态模型支持发送持仓/成交截图直接识别导入",
@@ -363,15 +372,25 @@ private fun ChatGreeting(onSuggestionClick: (String) -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
+        Spacer(Modifier.height(8.dp))
+        // ChatGPT 式建议胶囊：全圆角 + 细边框，点击即填入输入框
         SUGGESTIONS.forEach { suggestion ->
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                onClick = { onSuggestionClick(suggestion) }
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant
+                ),
+                onClick = { onSuggestionClick(suggestion) },
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = suggestion,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                 )
             }
         }
@@ -384,7 +403,7 @@ private fun MessageBubble(message: ChatMessageUi) {
         ChatRole.USER -> Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             // 用户消息携带的图片（多模态输入）：缩略图置于文字上方
             if (message.images.isNotEmpty()) {
@@ -395,17 +414,22 @@ private fun MessageBubble(message: ChatMessageUi) {
                             contentDescription = "用户发送的图片",
                             modifier = Modifier
                                 .size(width = 110.dp, height = 150.dp)
-                                .clip(MaterialTheme.shapes.small)
+                                .clip(MaterialTheme.shapes.medium)
                         )
                     }
                 }
             }
             if (message.text.isNotEmpty()) {
-                Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+                // ChatGPT 式用户气泡：浅色大圆角（28dp）、限宽靠右、内边距舒展
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = MaterialTheme.shapes.extraLarge,
+                    modifier = Modifier.fillMaxWidth(0.82f)
+                ) {
                     Text(
                         text = message.text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)
                     )
                 }
             }
@@ -417,28 +441,29 @@ private fun MessageBubble(message: ChatMessageUi) {
         ) {
             // 思考过程（联网搜索/推理时，先于答案流式到达；让用户知道没卡住）
             message.thinking?.let { ThinkingSection(it, message.thinkingStreaming) }
-            // 最终回复
+            // 最终回复：ChatGPT 式无气泡全宽排版（正文即界面）
             if (message.text.isNotEmpty()) {
-                Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
-                    // 流式半成品或语法不完整的 Markdown 只显示纯文本，完整后再渲染
-                    if (!message.streaming && canRenderMarkdown(message.text)) {
-                        // 长回答折叠（ExpandableTextView 模式）：估计超 22 行折叠为 16 行 + 渐隐 + 展开按钮
-                        val estimatedLines = message.text.count { it == '\n' } + message.text.length / 30
-                        if (estimatedLines <= 22) {
-                            MarkdownText(
-                                markdown = message.text,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                            )
-                        } else {
-                            CollapsibleAnswer(message.text)
-                        }
+                // 流式半成品或语法不完整的 Markdown 只显示纯文本，完整后再渲染；
+                // 流式期间文本尾部带 ▍ 光标，示意正在生成
+                val displayText = if (message.streaming) message.text + " ▍" else message.text
+                if (!message.streaming && canRenderMarkdown(message.text)) {
+                    // 长回答折叠（ExpandableTextView 模式）：估计超 22 行折叠为 16 行 + 渐隐 + 展开按钮
+                    val estimatedLines = message.text.count { it == '\n' } + message.text.length / 30
+                    if (estimatedLines <= 22) {
+                        MarkdownText(markdown = message.text)
                     } else {
-                        Text(
-                            text = message.text,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                        )
+                        CollapsibleAnswer(message.text)
                     }
+                } else {
+                    Text(
+                        text = displayText,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
+                // 完成态回复底部操作行（ChatGPT 式）：一键复制全文
+                if (!message.streaming) {
+                    CopyActionRow(text = message.text)
                 }
             }
         }
@@ -474,13 +499,10 @@ private fun CollapsibleAnswer(text: String) {
                     .heightIn(max = if (expanded) Dp.Unspecified else collapsedMax)
                     .clipToBounds()
             ) {
-                MarkdownText(
-                    markdown = text,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                )
+                MarkdownText(markdown = text)
             }
             if (!expanded) {
-                // 底部渐隐遮罩：提示下方还有内容
+                // 底部渐隐遮罩：提示下方还有内容（AI 回复已无气泡，渐隐到页面背景色）
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -488,7 +510,7 @@ private fun CollapsibleAnswer(text: String) {
                         .height(36.dp)
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Transparent, MaterialTheme.colorScheme.surfaceVariant)
+                                listOf(Color.Transparent, MaterialTheme.colorScheme.surface)
                             )
                         )
                 )
@@ -502,24 +524,51 @@ private fun CollapsibleAnswer(text: String) {
 }
 
 /**
- * 思考过程区：推理模型/联网搜索时实时展示模型的 reasoning。
- * - 流式接收中（streaming=true）：默认展开 + 标题「思考中…」+ 转圈，让用户知道没卡住。
- * - 接收完成（streaming=false）：默认折叠，标题「思考过程」，用户可点开查看。
+ * 回复底部操作行（ChatGPT 式）：复制全文到剪贴板，小图标弱化不抢正文视线。
+ */
+@Composable
+private fun CopyActionRow(text: String) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        horizontalArrangement = Arrangement.Start
+    ) {
+        IconButton(
+            onClick = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                copied = true
+                android.widget.Toast.makeText(context, "已复制", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            modifier = Modifier.size(32.dp)
+        ) {
+            Icon(
+                imageVector = if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                contentDescription = "复制回复",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+/**
+ * 思考过程区（ChatGPT「已深度思考」样式）：
+ * - 流式接收中：标题「思考中…」+ 转圈，默认展开；
+ * - 接收完成：折叠为「已深度思考」细字标签（无重容器），点开查看斜体浅色正文 + 左侧竖线。
  * 文本用浅色小字纯文本展示（不渲染 Markdown，避免流式闪烁）。
  */@Composable
 private fun ThinkingSection(thinking: String, streaming: Boolean) {
     // 流式时强制展开；完成后默认折叠。用 remember 持久化用户的折叠操作。
     var expanded by remember(streaming) { mutableStateOf(streaming) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(end = 32.dp) // 留出与用户消息对称的右边距
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
                 .clickable { expanded = !expanded }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -530,82 +579,96 @@ private fun ThinkingSection(thinking: String, streaming: Boolean) {
                 )
             }
             Text(
-                text = if (streaming) "思考中…" else "思考过程",
+                text = if (streaming) "思考中…" else "已深度思考",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
             )
-            Text(
-                text = if (expanded) "▲" else "▼",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Icon(
+                imageVector = if (expanded) {
+                    Icons.Filled.KeyboardArrowUp
+                } else {
+                    Icons.Filled.KeyboardArrowDown
+                },
+                contentDescription = if (expanded) "收起思考过程" else "展开思考过程",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
             )
         }
         if (expanded && thinking.isNotBlank()) {
-            Text(
-                text = thinking,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-            )
+            // 左侧竖线 + 斜体浅色（ChatGPT 推理摘要的呈现方式）
+            Row {
+                Box(
+                    modifier = Modifier
+                        .padding(start = 10.dp, end = 10.dp)
+                        .width(2.dp)
+                        .heightIn(min = 1.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant)
+                ) { }
+                Text(
+                    text = thinking,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 24.dp),
+                )
+            }
         }
     }
 }
 
 /**
- * 工具调用胶囊：居中、淡背景圆角，左侧状态图标（进行中转圈 / 完成 ✓ / 失败 ✗）。
- * 完成态整体淡化（alpha 0.6），让历史记录里多个工具调用不打扰阅读。
+ * 工具调用行（ChatGPT「已搜索」样式）：全宽浅底圆角行 + 状态图标（进行中转圈 /
+ * 完成 ✓ / 失败 ✗）。完成态整体淡化，历史里多个工具调用不打扰阅读。
  */
 @Composable
 private fun ToolCallPill(toolCall: ToolCallUi) {
     val isRunning = toolCall.status == ToolCallStatus.RUNNING
-    val alpha = if (isRunning) 1f else 0.6f
+    val alpha = if (isRunning) 1f else 0.66f
     val trailing = when (toolCall.status) {
         ToolCallStatus.RUNNING -> "…"
         ToolCallStatus.DONE -> ""
         ToolCallStatus.FAILED -> "（失败）"
     }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center
-    ) {
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = alpha * 0.7f),
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.alpha(alpha)
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(alpha)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            val iconTint = MaterialTheme.colorScheme.onSecondaryContainer
+            val iconTint = MaterialTheme.colorScheme.onSurfaceVariant
             when (toolCall.status) {
                 ToolCallStatus.RUNNING -> CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
+                    modifier = Modifier.size(14.dp),
                     strokeWidth = 2.dp,
                     color = iconTint
                 )
                 ToolCallStatus.DONE -> Icon(
                     imageVector = Icons.Filled.Check,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(16.dp),
                     tint = iconTint
                 )
                 ToolCallStatus.FAILED -> Icon(
                     imageVector = Icons.Filled.Close,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.error
                 )
             }
             Text(
                 text = toolCall.displayName + trailing,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
     }
 }
 
@@ -651,6 +714,10 @@ private fun ConfirmationCard(
     }
 }
 
+/**
+ * ChatGPT 式输入栏：单个大圆角胶囊容器（细边框 + 轻阴影）内嵌
+ * 「+ 附件按钮 · 无边框多行输入 · 圆形发送按钮」，focus/发送态随主题色。
+ */
 @Composable
 private fun ChatInputBar(
     input: String,
@@ -660,29 +727,59 @@ private fun ChatInputBar(
     onSend: () -> Unit,
     onAttachImage: () -> Unit,
 ) {
-    Row(
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Bottom
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        IconButton(onClick = onAttachImage, enabled = !isSending) {
-            Icon(Icons.Filled.ImageIcon, contentDescription = "发送图片")
-        }
-        Spacer(Modifier.width(4.dp))
-        AppTextField(
-            value = input,
-            onValueChange = onInputChanged,
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("问点什么…") },
-            maxLines = 4,
-            enabled = !isSending
-        )
-        Spacer(Modifier.width(8.dp))
-        Box(contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier.padding(start = 2.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            IconButton(onClick = onAttachImage, enabled = !isSending) {
+                Icon(Icons.Filled.ImageIcon, contentDescription = "发送图片")
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .padding(horizontal = 2.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = input,
+                    onValueChange = onInputChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isSending,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(
+                        MaterialTheme.colorScheme.primary
+                    ),
+                    maxLines = 5,
+                )
+                if (input.isEmpty()) {
+                    Text(
+                        text = "问点什么…",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             FilledIconButton(
                 onClick = onSend,
-                enabled = (input.isNotBlank() || hasPendingImages) && !isSending
+                enabled = (input.isNotBlank() || hasPendingImages) && !isSending,
+                modifier = Modifier.size(44.dp),
+                shape = CircleShape
             ) {
                 if (isSending) {
                     CircularProgressIndicator(
