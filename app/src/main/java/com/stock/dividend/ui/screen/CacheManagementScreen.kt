@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.Paid
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -182,40 +183,46 @@ private fun UsageSummaryCard(entries: List<CacheEntry>) {
     val total = entries.sumOf { it.entries }
     val permanentTotal = entries.filter { it.permanent }.sumOf { it.entries }
 
-    AppCard {
-        Text(
-            text = "缓存占用",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.SpaceBetween,
+    AppCard(elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Text(
-                text = "${formatEntryCount(total)} 条",
-                style = MaterialTheme.typography.headlineMedium.merge(tabularNumberStyle),
+                text = "缓存占用",
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                GroupSubtotal(label = "永久缓存", count = permanentTotal)
-                GroupSubtotal(label = "短期缓存", count = total - permanentTotal)
+                Text(
+                    text = "${formatEntryCount(total)} 条",
+                    style = MaterialTheme.typography.headlineMedium.merge(tabularNumberStyle),
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    GroupSubtotal(label = "永久缓存", count = permanentTotal)
+                    GroupSubtotal(label = "短期缓存", count = total - permanentTotal)
+                }
             }
+            Spacer(modifier = Modifier.height(12.dp))
+            CacheSegmentBar(segments = segments)
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "「永久缓存」为历史不可变数据（已收盘 K 线、已披露财报与分红），本地永续保留、断网可用，" +
+                    "只增量追加、不因过期删除；「短期缓存」联网时自动重建。清理不影响自选股、持仓与交易记录。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        CacheSegmentBar(segments = segments)
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = "「永久缓存」为历史不可变数据（已收盘 K 线、已披露财报与分红），本地永续保留、断网可用，" +
-                "只增量追加、不因过期删除；「短期缓存」联网时自动重建。清理不影响自选股、持仓与交易记录。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -274,7 +281,7 @@ private fun CategoryListCard(
         entries.forEachIndexed { index, entry ->
             if (index > 0) {
                 HorizontalDivider(
-                    modifier = Modifier.padding(start = 48.dp),
+                    modifier = Modifier.padding(start = 64.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
             }
@@ -301,7 +308,7 @@ private fun CacheEntryRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

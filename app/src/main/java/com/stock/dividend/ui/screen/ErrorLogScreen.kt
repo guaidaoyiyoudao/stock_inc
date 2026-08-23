@@ -148,24 +148,30 @@ fun ErrorLogScreen(
 @Composable
 private fun IntroCard(count: Int) {
     AppCard(tone = AppCardTone.Summary) {
-        Text(
-            text = "日志说明",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "自动记录 App 内关键的静默失败（行情/分红/K线/财务等数据获取失败时，" +
-                "页面通常悄悄降级为空数据或缓存，不易察觉）。同来源同摘要 1 分钟内只记一条，" +
-                "最多保留最近 ${ErrorLogRepository.MAX_LOGS} 条。",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "当前 $count 条记录",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "日志说明",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "自动记录 App 内关键的静默失败（行情/分红/K线/财务等数据获取失败时，" +
+                    "页面通常悄悄降级为空数据或缓存，不易察觉）。同来源同摘要 1 分钟内只记一条，" +
+                    "最多保留最近 ${ErrorLogRepository.MAX_LOGS} 条。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "当前 $count 条记录",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 
@@ -178,7 +184,12 @@ private fun ErrorLogRow(
 ) {
     // 有详情才可点击展开；无详情为静态卡片（AppCard 的 onClick=null 走静态分支）
     AppCard(onClick = if (log.detail != null) onClick else null) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
