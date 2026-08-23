@@ -224,7 +224,8 @@ private fun SummaryCard(state: ExpenseCoverageUiState) {
             ) {
                 FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_forecast_income),
-                    value = formatMoney(state.forecastAnnualDividendIncome)
+                    value = formatMoney(state.forecastAnnualDividendIncome),
+                    helpText = "未来 12 个月预测股息收入（TTM 口径：滚动 12 个月分红 + 已排期未除权分红）"
                 )
                 FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_total_expense),
@@ -232,7 +233,8 @@ private fun SummaryCard(state: ExpenseCoverageUiState) {
                 )
                 FinanceMetric(
                     label = stringResource(R.string.expense_coverage_metric_covered_items),
-                    value = "${state.coveredItemCount}/${state.rows.size}"
+                    value = "${state.coveredItemCount}/${state.rows.size}",
+                    helpText = "股息收入已完全覆盖年化金额的支出项目数"
                 )
             }
             Text(

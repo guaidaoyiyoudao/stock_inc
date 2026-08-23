@@ -1,5 +1,14 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,7 +40,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.ui.navigation.stockCardSharedBounds
 import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.Motion
 import com.stock.dividend.ui.theme.tabularNumberStyle
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -41,8 +52,8 @@ fun StockCard(
     name: String,
     code: String,
     shares: Int = 0,
-    forecastIncome: String? = null,
-    marketValue: String? = null,
+    forecastIncomeAmount: Double? = null,
+    marketValueAmount: Double? = null,
     lastUpdated: Long? = null,
     currentPrice: Double? = null,
     latestYearlyDividend: Double? = null,
@@ -66,12 +77,14 @@ fun StockCard(
     AppCard(
         modifier = modifier
             .fillMaxWidth()
+            .stockCardSharedBounds(code)
             .clickable(onClick = onClick),
         // 自选股用 surfaceVariant（柔和），持仓股用 surface；AppCard 默认 tone=Surface，
         // 自选股在这里用 List tone 复用 surface，再单独覆盖 containerColor 区分。
         tone = if (isWatchOnly) AppCardTone.List else AppCardTone.Surface,
     ) {
-        Column {
+        // animateContentSize：BOLL 懒加载二段变高（占位 54dp → 数据 ~150dp）时整卡平滑展开
+        Column(modifier = Modifier.animateContentSize(tween(Motion.DurationMedium, easing = Motion.Standard))) {
             // 坐标轴切换按钮：右上角浮在横轴上方。showBoll=false 显示股息率横轴（TrendingUp 图标），
             // showBoll=true 显示 BOLL 横轴（ShowChart 图标）。
             Row(
@@ -90,19 +103,39 @@ fun StockCard(
                 }
             }
 
-            // 坐标轴主体：按切换状态渲染股息率横轴或 BOLL 横轴。
-            if (showBoll) {
-                BollPriceScale(
-                    currentPrice = currentPrice,
-                    band = bollBand,
-                    modifier = Modifier.padding(start = 10.dp, end = 10.dp)
-                )
-            } else {
-                DividendPriceScale(
-                    currentPrice = currentPrice,
-                    latestYearlyDividend = latestYearlyDividend,
-                    modifier = Modifier.padding(start = 10.dp, end = 10.dp)
-                )
+            // 坐标轴主体：按切换状态渲染股息率横轴或 BOLL 横轴（滑动+淡入切换）。
+            // ⚠️ SizeTransform 必须 clip=false：BOLL 懒加载是两段式（先 54dp 占位、数据到达后
+            // 长高到 ~150dp），默认 clip=true 会在尺寸动画期间把底部「现价落点/带内%」行裁掉。
+            AnimatedContent(
+                targetState = showBoll,
+                label = "axisSwitch",
+                transitionSpec = {
+                    ContentTransform(
+                        targetContentEnter = slideInHorizontally(
+                            animationSpec = tween(Motion.DurationShort, easing = Motion.EmphasizedDecelerate),
+                            initialOffsetX = { it / 4 },
+                        ) + fadeIn(tween(Motion.DurationShort)),
+                        initialContentExit = slideOutHorizontally(
+                            animationSpec = tween(Motion.DurationShort, easing = Motion.EmphasizedAccelerate),
+                            targetOffsetX = { -it / 4 },
+                        ) + fadeOut(tween(Motion.DurationShort)),
+                        sizeTransform = SizeTransform(clip = false),
+                    )
+                },
+            ) { boll ->
+                if (boll) {
+                    BollPriceScale(
+                        currentPrice = currentPrice,
+                        band = bollBand,
+                        modifier = Modifier.padding(start = 10.dp, end = 10.dp)
+                    )
+                } else {
+                    DividendPriceScale(
+                        currentPrice = currentPrice,
+                        latestYearlyDividend = latestYearlyDividend,
+                        modifier = Modifier.padding(start = 10.dp, end = 10.dp)
+                    )
+                }
             }
 
             Row(
@@ -183,11 +216,12 @@ fun StockCard(
                                     .background(color.copy(alpha = 0.12f), MaterialTheme.shapes.extraSmall)
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
-                                Text(
-                                    text = "${if (pct > 0) "+" else ""}${"%.2f".format(pct)}%",
-                                    style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                                PercentText(
+                                    value = pct,
+                                    signed = true,
+                                    decimals = 2,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = color,
-                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
@@ -203,13 +237,14 @@ fun StockCard(
                 }
             }
 
-            if (marketValue != null || forecastIncome != null) {
+            if (marketValueAmount != null || forecastIncomeAmount != null) {
                 Column(horizontalAlignment = Alignment.End) {
-                    if (marketValue != null) {
-                        Text(
-                            text = marketValue,
-                            style = MaterialTheme.typography.titleMedium.merge(tabularNumberStyle),
-                            color = MaterialTheme.colorScheme.tertiary
+                    if (marketValueAmount != null) {
+                        AmountText(
+                            value = marketValueAmount,
+                            style = MaterialTheme.typography.titleMedium,
+                            colored = false,
+                            color = MaterialTheme.colorScheme.tertiary,
                         )
                         Text(
                             text = "市值",
@@ -218,12 +253,12 @@ fun StockCard(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                     }
-                    if (forecastIncome != null) {
-                        Text(
-                            text = forecastIncome,
-                            style = MaterialTheme.typography.titleLarge.merge(tabularNumberStyle),
+                    if (forecastIncomeAmount != null) {
+                        AmountText(
+                            value = forecastIncomeAmount,
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            colored = false,
                             color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = "预测收入",

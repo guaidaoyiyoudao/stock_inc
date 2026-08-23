@@ -13,7 +13,6 @@ import com.stock.dividend.ui.screen.TradeStrategyListScreen
 import com.stock.dividend.ui.screen.TransactionHistoryScreen
 import com.stock.dividend.ui.screen.TransactionImportScreen
 import com.stock.dividend.ui.screen.GridPlanScreen
-
 object Routes {
     const val MAIN = "main"
     const val FIRE_GOAL_SETUP = "fireGoalSetup"
@@ -36,7 +35,11 @@ fun AppNavigation(
 
     NavHost(
         navController = rootNavController,
-        startDestination = Routes.MAIN
+        startDestination = Routes.MAIN,
+        enterTransition = { NavTransitions.enter() },
+        exitTransition = { NavTransitions.exit() },
+        popEnterTransition = { NavTransitions.popEnter() },
+        popExitTransition = { NavTransitions.popExit() },
     ) {
         composable(Routes.MAIN) {
             MainScaffold(

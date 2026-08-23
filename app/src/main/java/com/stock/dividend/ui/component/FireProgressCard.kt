@@ -1,6 +1,14 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,20 +20,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.stock.dividend.data.repository.MoneyFormatter
 import com.stock.dividend.data.repository.PercentFormatter
 import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.Motion
 import com.stock.dividend.ui.theme.tabularNumberStyle
+import kotlin.math.PI
+import kotlin.math.sin
 
 @Composable
 fun FireProgressCard(
@@ -111,25 +124,24 @@ fun FireProgressCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text(
-                        text = PercentFormatter.percent(coveragePercent.toDouble(), decimals = 1),
-                        style = MaterialTheme.typography.titleMedium.merge(tabularNumberStyle),
-                        fontWeight = FontWeight.Bold,
-                        color = if (achieved) ext.positive else MaterialTheme.colorScheme.onSurface
+                    PercentText(
+                        value = coveragePercent.toDouble(),
+                        decimals = 1,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = if (achieved) ext.positive else MaterialTheme.colorScheme.onSurface,
                     )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                LinearProgressIndicator(
-                    progress = { coverageProgress },
+                // 水波进度（借鉴 WaveLoading 模式）：波面精确停在 coverageProgress 处
+                WaveProgress(
+                    progress = coverageProgress,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(MaterialTheme.shapes.extraSmall),
+                        .height(24.dp),
                     color = if (achieved) ext.positive else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    strokeCap = StrokeCap.Round
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -189,5 +201,63 @@ fun FireProgressCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * 水波进度条（借鉴 WaveLoading 模式）：两条正弦波错相无限水平滚动，波面精确停在 [progress] 处。
+ *
+ * 数据准确性：进度值经 animateFloatAsState 平滑过渡，落点恒为传入的精确 progress；
+ * 波动仅是波面附近的正弦扰动，不改变水位含义。
+ */
+@Composable
+private fun WaveProgress(
+    progress: Float,
+    color: Color,
+    trackColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val waterLevel by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(Motion.DurationLong, easing = Motion.EmphasizedDecelerate),
+        label = "waterLevel",
+    )
+    val transition = rememberInfiniteTransition(label = "wave")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "wavePhase",
+    )
+    val dimColor = color.copy(alpha = 0.45f)
+
+    Canvas(
+        modifier = modifier.clip(MaterialTheme.shapes.extraSmall),
+    ) {
+        drawRect(color = trackColor)
+
+        val surfaceY = size.height * (1f - waterLevel)
+        val amplitude = 2.5.dp.toPx()
+        val wavelength = size.width / 1.6f
+        val step = 8.dp.toPx()
+
+        fun wavePath(phaseShift: Float): Path = Path().apply {
+            moveTo(-wavelength, surfaceY)
+            var x = -wavelength
+            while (x <= size.width + step) {
+                val y = surfaceY + sin((x + phase + phaseShift) / wavelength * 2f * PI.toFloat()) * amplitude
+                lineTo(x, y)
+                x += step
+            }
+            lineTo(size.width, size.height)
+            lineTo(-wavelength, size.height)
+            close()
+        }
+
+        drawPath(path = wavePath(0f), color = dimColor)
+        drawPath(path = wavePath(wavelength / 2f), color = color)
     }
 }

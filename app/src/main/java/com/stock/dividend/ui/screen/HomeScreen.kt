@@ -22,12 +22,18 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import nl.dionsegijn.konfetti.compose.KonfettiView
+import nl.dionsegijn.konfetti.core.Party
+import nl.dionsegijn.konfetti.core.Position
+import nl.dionsegijn.konfetti.core.emitter.Emitter
+import java.util.concurrent.TimeUnit
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -164,11 +170,52 @@ fun AchievementScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // 本次会话新解锁 → 撒花庆祝一次（粒子自行消亡，4s 后移除覆盖层）
+    var celebrate by remember { mutableStateOf(false) }
+    LaunchedEffect(state.newlyUnlockedIds) {
+        if (state.newlyUnlockedIds.isNotEmpty()) {
+            celebrate = true
+            kotlinx.coroutines.delay(4000)
+            celebrate = false
+        }
+    }
+
     Scaffold { padding ->
+        Box(modifier = Modifier.padding(padding)) {
             AchievementTabContent(
                 state = state,
-                modifier = Modifier.padding(padding)
+                modifier = Modifier.fillMaxSize()
             )
+            if (celebrate) {
+                KonfettiView(
+                    modifier = Modifier.fillMaxSize(),
+                    parties = remember {
+                        listOf(
+                            Party(
+                                speed = 25f,
+                                maxSpeed = 50f,
+                                damping = 0.9f,
+                                spread = 90,
+                                angle = 270,
+                                position = Position.Relative(0.2, 1.0),
+                                emitter = Emitter(duration = 500, TimeUnit.MILLISECONDS).max(60),
+                                colors = listOf(0xfce18a, 0xff726d, 0xb48def, 0xf4306d),
+                            ),
+                            Party(
+                                speed = 25f,
+                                maxSpeed = 50f,
+                                damping = 0.9f,
+                                spread = 90,
+                                angle = 270,
+                                position = Position.Relative(0.8, 1.0),
+                                emitter = Emitter(duration = 500, TimeUnit.MILLISECONDS).max(60),
+                                colors = listOf(0xfce18a, 0xff726d, 0xb48def, 0xf4306d),
+                            ),
+                        )
+                    },
+                )
+            }
+        }
     }
 }
 

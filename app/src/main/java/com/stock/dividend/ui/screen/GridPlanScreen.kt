@@ -594,7 +594,8 @@ private fun BacktestResultRows(r: GridBacktestResult) {
             label = "一次性对比",
             value = r.costSavingPct?.let { "省 ${"%.1f".format(it)}%" } ?: "—",
             modifier = Modifier.weight(1f),
-            textAlign = TextAlign.End
+            textAlign = TextAlign.End,
+            helpText = "回测窗口内，同样资金首日一次性买入 vs 网格分档买入的成本节省比例"
         )
     }
     Spacer(modifier = Modifier.height(4.dp))
@@ -1255,7 +1256,8 @@ private fun PreviewBlock(result: GridResult, customWeights: Boolean = false) {
                     label = "参考上界（不追买）",
                     value = MoneyFormatter.withSymbol(result.highPrice),
                     modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.End
+                    textAlign = TextAlign.End,
+                    helpText = "三周期 BOLL 智能锚定的上界（月上轨）：价格高于此位不再追买，避免追高"
                 )
             }
             // 自定义比例：逐档金额/股数实时可见（保存后在计划卡档位表可见）

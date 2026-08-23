@@ -1,11 +1,14 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -15,6 +18,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stock.dividend.data.repository.GridLevel
 import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.Motion
 import com.stock.dividend.ui.theme.tabularNumberStyle
 import kotlin.math.abs
 
@@ -101,6 +110,15 @@ fun GridLevelScale(
             .map { abs(basePrice - it.price) / basePrice }
             .maxOrNull()?.coerceAtLeast(0.0001) ?: 0.0001
 
+        // 入场：刻度柱自底向上生长（外壳高度固定，无布局抖动；落点 = 完整高度）
+        var grown by remember(levels) { mutableStateOf(false) }
+        val growProgress by animateFloatAsState(
+            targetValue = if (grown) 1f else 0f,
+            animationSpec = tween(Motion.DurationMedium, easing = Motion.EmphasizedDecelerate),
+            label = "gridScaleGrow",
+        )
+        LaunchedEffect(levels) { grown = true }
+
         // 价格从左到右递增：最便宜档（资金用完位）在左，买入起点在右
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -115,7 +133,8 @@ fun GridLevelScale(
                     isNextBuy = isNextBuy,
                     fraction = {
                         (abs(basePrice - level.price) / basePrice / maxDeviation).coerceIn(0.0, 1.0)
-                    }
+                    },
+                    growProgress = growProgress
                 )
             }
         }
@@ -159,7 +178,8 @@ private fun GridScaleTick(
     price: Double,
     triggered: Boolean,
     isNextBuy: Boolean,
-    fraction: () -> Double
+    fraction: () -> Double,
+    growProgress: Float
 ) {
     val ext = LocalExtendedColors.current
     // 下一买档 primary 强调；已触发档淡化；其余档用正向色（买入区）
@@ -181,15 +201,22 @@ private fun GridScaleTick(
             fontSize = 10.sp
         )
 
-        // 刻度柱：偏离买入起点越深柱越长
-        val barHeight = (26f * (0.18f + 0.82f * fraction().toFloat())).dp
+        // 刻度柱：偏离买入起点越深柱越长；外壳固定高，内部按 growProgress 自底向上生长
         Box(
             modifier = Modifier
                 .width(if (isNextBuy) 4.dp else 3.dp)
-                .height(barHeight)
-                .clip(RoundedCornerShape(2.dp))
-                .background(color)
-        )
+                .height((26f * (0.18f + 0.82f * fraction().toFloat())).dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    // fillMaxHeight 的 fraction 要求 (0,1]，growth 为 0 时取极小值保底
+                    .fillMaxHeight((fractionOf(fraction()) * growProgress).coerceIn(0.02f, 1f))
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(color)
+            )
+        }
 
         Text(
             text = "%.2f".format(price),
@@ -201,3 +228,6 @@ private fun GridScaleTick(
         Spacer(modifier = Modifier.size(5.dp))
     }
 }
+
+/** fraction（0..1 的偏离归一化）→ 高度占比：最低保底 18%（与外壳公式一致）。 */
+private fun fractionOf(fraction: Double): Float = (0.18f + 0.82f * fraction.toFloat())

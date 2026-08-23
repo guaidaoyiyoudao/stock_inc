@@ -47,9 +47,12 @@ import com.stock.dividend.data.repository.MoneyFormatter
 import com.stock.dividend.data.repository.PercentFormatter
 import com.stock.dividend.data.repository.PortfolioRiskDiagnosis
 import com.stock.dividend.data.repository.TodaySignalType
+import com.stock.dividend.ui.component.AmountText
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardTone
 import com.stock.dividend.ui.component.EmptyStateView
+import com.stock.dividend.ui.component.PercentText
+import com.stock.dividend.ui.component.SkeletonList
 import com.stock.dividend.ui.component.FinanceMetricRow
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.SectionHeader
@@ -85,7 +88,16 @@ fun TodayScreen(
     registerTabRefresh(refresh = { viewModel.refresh() }, isRefreshing = state.isLoading)
 
     if (!state.hasHoldings) {
-        // 无持仓：仍展示市场环境（看大盘不需要持仓）+ 引导添加
+        // 无持仓：首载显示骨架屏；确认无数据后展示市场环境 + 引导添加
+        if (state.isLoading && state.indices.isEmpty()) {
+            SkeletonList(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                cardCount = 3,
+            )
+            return
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
@@ -163,25 +175,38 @@ fun TodayScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 大字总市值：加粗 ¥ + 千分位金额（tnum 等宽，IncomeSummaryCard 同款）
-                    Text(
-                        text = buildAnnotatedString {
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("¥ ") }
-                            append(MoneyFormatter.amount(state.marketValue))
-                        },
-                        style = MaterialTheme.typography.headlineMedium.merge(tabularNumberStyle),
-                        color = MaterialTheme.colorScheme.onSurface,
+                    // 大字总市值（tnum 等宽 + 数字滚动，IncomeSummaryCard 同款口径）
+                    AmountText(
+                        value = state.marketValue,
+                        style = MaterialTheme.typography.headlineMedium,
+                        colored = false,
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // 今日盈亏：↑↓ 箭头 + 财务色
-                    Text(
-                        text = "${arrow(state.todayPnl)} ${MoneyFormatter.withSign(state.todayPnl)}" +
-                            "（${PercentFormatter.withSign(state.todayPnlRate)}）",
-                        style = MaterialTheme.typography.labelLarge.merge(tabularNumberStyle),
-                        color = pnlColor(state.todayPnl),
-                    )
+                    // 今日盈亏：↑↓ 箭头 + 金额/百分比滚动（财务色 + 闪色）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            arrow(state.todayPnl),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = pnlColor(state.todayPnl),
+                        )
+                        AmountText(
+                            value = state.todayPnl,
+                            signed = true,
+                            colored = true,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        PercentText(
+                            value = state.todayPnlRate,
+                            signed = true,
+                            colored = true,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -190,11 +215,19 @@ fun TodayScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text(
-                            "累计 ${PercentFormatter.withSign(state.totalPnlRate)}",
-                            style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                            color = pnlColor(state.totalPnl),
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "累计 ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            PercentText(
+                                value = state.totalPnlRate,
+                                signed = true,
+                                colored = true,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
                         state.beatHs300?.let { beat ->
                             Text(
                                 "跑赢沪深300 ${"%+.2fpp".format(beat)}",
@@ -336,7 +369,7 @@ private fun MarketSection(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                // 四大指数 2×2 网格（名称 + 涨跌幅财务色）
+                // 四大指数 2×2 网格（名称 + 涨跌幅财务色 + 滚动）
                 indices.chunked(2).forEach { row ->
                     Row(modifier = Modifier.fillMaxWidth()) {
                         row.forEach { q ->
@@ -346,10 +379,11 @@ private fun MarketSection(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                Text(
-                                    PercentFormatter.withSign(q.changePct ?: 0.0),
-                                    style = MaterialTheme.typography.titleSmall.merge(tabularNumberStyle),
-                                    color = pnlColor(q.changePct ?: 0.0),
+                                PercentText(
+                                    value = q.changePct ?: 0.0,
+                                    signed = true,
+                                    colored = true,
+                                    style = MaterialTheme.typography.titleSmall,
                                 )
                             }
                         }
@@ -478,13 +512,30 @@ private fun PortfolioHealthCard(
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(top = 12.dp)) {
                     FinanceMetricRow("持仓数", diagnosis.holdingCount.toString())
-                    FinanceMetricRow("行业集中 HHI", diagnosis.industryHhi?.roundToInt()?.toString() ?: "—")
-                    FinanceMetricRow("前 3 行业合计", diagnosis.industryCr3?.let { PercentFormatter.percent(it, 0) } ?: "—")
-                    FinanceMetricRow("单股最大权重", diagnosis.stockCr1?.let { PercentFormatter.percent(it, 0) } ?: "—")
-                    FinanceMetricRow("股息来源前 3", diagnosis.dividendSourceCr3?.let { PercentFormatter.percent(it, 0) } ?: "—")
+                    FinanceMetricRow(
+                        "行业集中 HHI",
+                        diagnosis.industryHhi?.roundToInt()?.toString() ?: "—",
+                        helpText = "各行业权重的平方和（0~10000）：<1500 分散，1500~2500 适中，>2500 集中",
+                    )
+                    FinanceMetricRow(
+                        "前 3 行业合计",
+                        diagnosis.industryCr3?.let { PercentFormatter.percent(it, 0) } ?: "—",
+                        helpText = "权重最大的 3 个行业合计占比（CR3），建议不超过 60%",
+                    )
+                    FinanceMetricRow(
+                        "单股最大权重",
+                        diagnosis.stockCr1?.let { PercentFormatter.percent(it, 0) } ?: "—",
+                        helpText = "第一大持仓占总市值的比例，建议不超过 20%",
+                    )
+                    FinanceMetricRow(
+                        "股息来源前 3",
+                        diagnosis.dividendSourceCr3?.let { PercentFormatter.percent(it, 0) } ?: "—",
+                        helpText = "分红金额最大的 3 只股合计占全部股息收入的比例，过高则现金流依赖少数公司",
+                    )
                     FinanceMetricRow(
                         "派息率>100%",
                         diagnosis.highPayoutCodes.takeIf { it.isNotEmpty() }?.joinToString("、") ?: "无",
+                        helpText = "近 12 个月分红超过同期净利润的公司（分红不可持续的风险信号）",
                     )
                     FinanceMetricRow(
                         "加权股息率 vs 10Y 国债",
@@ -492,6 +543,7 @@ private fun PortfolioHealthCard(
                             diagnosis.weightedDividendYieldPct?.let { PercentFormatter.percent(it) },
                             diagnosis.bondYield10yPct?.let { PercentFormatter.percent(it) },
                         ).joinToString(" / ").ifEmpty { "—" },
+                        helpText = "组合加权股息率高于 10 年期国债收益率越多，股息安全垫越厚（利差为正较优）",
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     diagnosis.suggestions.forEach { s ->

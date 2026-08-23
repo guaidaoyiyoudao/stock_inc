@@ -1,5 +1,6 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +22,7 @@ import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.columnSeries
+import com.stock.dividend.ui.theme.Motion
 
 @Composable
 fun IncomeTrendChart(
@@ -64,6 +66,8 @@ fun IncomeTrendChart(
                 .height(180.dp)
                 .padding(horizontal = 8.dp, vertical = 12.dp),
             scrollState = rememberVicoScrollState(scrollEnabled = false),
+            // 柱状入场生长动画，节奏与全局 Motion 统一（落点 = 完整数据）
+            animationSpec = tween(Motion.DurationLong, easing = Motion.EmphasizedDecelerate),
         )
     }
 }

@@ -1,6 +1,20 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -10,7 +24,10 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -23,16 +40,27 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.skydoves.balloon.compose.Balloon
+import com.skydoves.balloon.compose.rememberBalloonBuilder
 import com.stock.dividend.data.repository.MoneyFormatter
 import com.stock.dividend.data.repository.PercentFormatter
 import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.Motion
 import com.stock.dividend.ui.theme.tabularNumberStyle
 
 // ── AppCard：统一卡片封装 ────────────────────────────────────────────
@@ -96,13 +124,15 @@ fun AppCard(
     val shape = MaterialTheme.shapes.medium
 
     if (onClick != null) {
+        val interactionSource = remember { MutableInteractionSource() }
         Card(
-            modifier = modifier,
+            modifier = modifier.pressScale(interactionSource),
             shape = shape,
             colors = colors,
             elevation = elevation,
             border = border,
             onClick = onClick,
+            interactionSource = interactionSource,
             content = content,
         )
     } else {
@@ -115,6 +145,107 @@ fun AppCard(
             content = content,
         )
     }
+}
+
+/** 按压缩放反馈（借鉴 ElasticViews 模式）：按下整体缩到 [pressedScale]，松手回弹。 */
+@Composable
+private fun Modifier.pressScale(
+    interactionSource: InteractionSource,
+    pressedScale: Float = 0.97f,
+): Modifier {
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) pressedScale else 1f,
+        animationSpec = tween(Motion.DurationShort, easing = Motion.EmphasizedDecelerate),
+        label = "pressScale",
+    )
+    return graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
+// ── RollingText：数字滚动文本（tab-digit 模式） ──────────────────────
+
+/**
+ * 数字滚动文本：文本（已格式化的精确值）变化时新值按涨跌方向滑入，并短暂闪现涨跌色。
+ *
+ * 数据准确性：组件只消费 formatter 输出的字符串，滚动/闪色仅作用于过渡帧，
+ * 动画落点恒为传入的精确文本。
+ *
+ * @param direction 相对上一次值的方向：1 涨（新值自上滑入）/ -1 跌（自下滑入）/ 0 无变化。
+ */
+@Composable
+private fun RollingText(
+    text: String,
+    direction: Int,
+    color: Color,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    animated: Boolean = true,
+) {
+    if (!animated) {
+        Text(
+            text = text,
+            modifier = modifier,
+            color = color,
+            style = style,
+            textAlign = TextAlign.End,
+        )
+        return
+    }
+
+    val flash = remember { Animatable(0f) }
+    LaunchedEffect(text) {
+        if (direction != 0) {
+            flash.snapTo(1f)
+            flash.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(Motion.DurationMedium, easing = Motion.EmphasizedDecelerate),
+            )
+        }
+    }
+    val ext = LocalExtendedColors.current
+    val flashColor = if (direction > 0) ext.positive else ext.negative
+    val displayColor = lerp(color, flashColor, flash.value * 0.45f)
+
+    AnimatedContent(
+        targetState = text,
+        modifier = modifier,
+        transitionSpec = {
+            val rising = direction >= 0
+            val enter = slideInVertically(
+                animationSpec = tween(Motion.DurationMedium, easing = Motion.EmphasizedDecelerate),
+                initialOffsetY = { full -> if (rising) -full / 2 else full / 2 },
+            ) + fadeIn(tween(Motion.DurationMedium))
+            val exit = slideOutVertically(
+                animationSpec = tween(Motion.DurationMedium, easing = Motion.EmphasizedAccelerate),
+                targetOffsetY = { full -> if (rising) full / 2 else -full / 2 },
+            ) + fadeOut(tween(Motion.DurationMedium))
+            ContentTransform(enter, exit, sizeTransform = SizeTransform(clip = false))
+        },
+        label = "rollingNumber",
+    ) { target ->
+        Text(
+            text = target,
+            color = displayColor,
+            style = style,
+            textAlign = TextAlign.End,
+        )
+    }
+}
+
+/** 记录值方向变化（1 涨 / -1 跌 / 0 无变化），供 [RollingText] 判定滚动方向。 */
+@Composable
+private fun rememberValueDirection(value: Double): Int {
+    val previous = remember { mutableDoubleStateOf(value) }
+    val direction = when {
+        value > previous.doubleValue -> 1
+        value < previous.doubleValue -> -1
+        else -> 0
+    }
+    SideEffect { previous.doubleValue = value }
+    return direction
 }
 
 // ── AmountText：金额展示（金融专用） ─────────────────────────────────
@@ -136,6 +267,8 @@ fun AppCard(
  * @param showSymbol 是否显示货币符号（默认 true）。
  * @param colored 是否自动着色（正数 positive/负数 negative/零 onSurface），默认 true。
  * @param signed 是否显示正负号（盈亏场景用），默认 false。
+ * @param animated 是否启用数字滚动 + 涨跌闪色（高频刷新的列表行可关闭），默认 true。
+ * @param color 显式颜色；非空时覆盖 [colored] 自动着色（如达标变绿等场景语义色）。
  */
 @Composable
 fun AmountText(
@@ -145,6 +278,8 @@ fun AmountText(
     showSymbol: Boolean = true,
     colored: Boolean = true,
     signed: Boolean = false,
+    animated: Boolean = true,
+    color: Color? = null,
 ) {
     val symbol = if (showSymbol) "¥" else ""
     val text = if (signed) {
@@ -153,7 +288,7 @@ fun AmountText(
         MoneyFormatter.withSymbol(value, symbol = symbol)
     }
 
-    val color = if (colored) {
+    val resolvedColor = color ?: if (colored) {
         when {
             value > 0 -> LocalExtendedColors.current.positive
             value < 0 -> LocalExtendedColors.current.negative
@@ -163,12 +298,13 @@ fun AmountText(
         MaterialTheme.colorScheme.onSurface
     }
 
-    Text(
+    RollingText(
         text = text,
-        modifier = modifier,
+        direction = rememberValueDirection(value),
+        color = resolvedColor,
         style = style.merge(tabularNumberStyle),
-        color = color,
-        textAlign = TextAlign.End,
+        modifier = modifier,
+        animated = animated,
     )
 }
 
@@ -181,6 +317,8 @@ fun AmountText(
  * @param decimals 小数位，默认 2（股息率），占比/趋势可用 1。
  * @param colored 是否自动着色（正/负），默认 false（百分比未必有涨跌语义）。
  * @param signed 是否显示正负号，默认 false。
+ * @param animated 是否启用数字滚动 + 涨跌闪色，默认 true。
+ * @param color 显式颜色；非空时覆盖 [colored] 自动着色。
  */
 @Composable
 fun PercentText(
@@ -190,6 +328,8 @@ fun PercentText(
     decimals: Int = 2,
     colored: Boolean = false,
     signed: Boolean = false,
+    animated: Boolean = true,
+    color: Color? = null,
 ) {
     val text = if (signed) {
         PercentFormatter.withSign(value, decimals = decimals)
@@ -197,7 +337,7 @@ fun PercentText(
         PercentFormatter.percent(value, decimals = decimals)
     }
 
-    val color = if (colored) {
+    val resolvedColor = color ?: if (colored) {
         when {
             value > 0 -> LocalExtendedColors.current.positive
             value < 0 -> LocalExtendedColors.current.negative
@@ -207,12 +347,13 @@ fun PercentText(
         MaterialTheme.colorScheme.onSurface
     }
 
-    Text(
+    RollingText(
         text = text,
-        modifier = modifier,
+        direction = rememberValueDirection(value),
+        color = resolvedColor,
         style = style.merge(tabularNumberStyle),
-        color = color,
-        textAlign = TextAlign.End,
+        modifier = modifier,
+        animated = animated,
     )
 }
 
@@ -240,10 +381,12 @@ fun AppButton(
     containerColor: Color? = null,
     contentColor: Color? = null,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     Button(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.pressScale(interactionSource),
         enabled = enabled,
+        interactionSource = interactionSource,
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor ?: MaterialTheme.colorScheme.primary,
             contentColor = contentColor ?: MaterialTheme.colorScheme.onPrimary,
@@ -260,10 +403,12 @@ fun AppButton(
     enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     Button(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.pressScale(interactionSource),
         enabled = enabled,
+        interactionSource = interactionSource,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -285,10 +430,12 @@ fun AppOutlinedButton(
     text: String,
     leadingIcon: ImageVector? = null,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.pressScale(interactionSource),
         enabled = enabled,
+        interactionSource = interactionSource,
         content = { AppButtonContent(text, leadingIcon) },
     )
 }
@@ -301,10 +448,12 @@ fun AppOutlinedButton(
     enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.pressScale(interactionSource),
         enabled = enabled,
+        interactionSource = interactionSource,
         content = content,
     )
 }
@@ -322,10 +471,12 @@ fun AppTextButton(
     text: String,
     leadingIcon: ImageVector? = null,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     TextButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.pressScale(interactionSource),
         enabled = enabled,
+        interactionSource = interactionSource,
         content = { AppButtonContent(text, leadingIcon) },
     )
 }
@@ -338,10 +489,12 @@ fun AppTextButton(
     enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     TextButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.pressScale(interactionSource),
         enabled = enabled,
+        interactionSource = interactionSource,
         content = content,
     )
 }
@@ -367,6 +520,7 @@ private fun AppButtonContent(text: String, leadingIcon: ImageVector?) {
  * @param label 左侧标签。
  * @param value 右侧值（字符串，已格式化）。
  * @param valueColor 值的颜色，默认 onSurface（可用财务语义色）。
+ * @param helpText 术语说明；非空时标签旁显示问号图标，点击弹出解释气泡（Balloon）。
  */
 @Composable
 fun FinanceMetricRow(
@@ -374,22 +528,67 @@ fun FinanceMetricRow(
     value: String,
     modifier: Modifier = Modifier,
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
+    helpText: String? = null,
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (helpText != null) {
+                HelpTooltipIcon(helpText)
+            }
+        }
         Text(
             text = value,
             style = MaterialTheme.typography.titleMedium.merge(tabularNumberStyle),
             color = valueColor,
             textAlign = TextAlign.End,
+        )
+    }
+}
+
+/** 术语帮助图标：图标即锚点，点击在图标下方弹出跟随主题的说明气泡（Balloon 1.6.x API：锚点作为 Balloon 尾lambda 内容）。 */
+@Composable
+internal fun HelpTooltipIcon(helpText: String) {
+    val inverseSurface = MaterialTheme.colorScheme.inverseSurface
+    val inverseOnSurface = MaterialTheme.colorScheme.inverseOnSurface
+    val bodySmall = MaterialTheme.typography.bodySmall
+    val balloonBuilder = rememberBalloonBuilder {
+        setArrowSize(10)
+        setArrowPosition(0.5f)
+        setPadding(12)
+        setMarginHorizontal(12)
+        setCornerRadius(8f)
+        setBackgroundColor(inverseSurface.toArgb())
+        setTextColor(inverseOnSurface.toArgb())
+    }
+    Balloon(
+        builder = balloonBuilder,
+        balloonContent = {
+            Text(
+                text = helpText,
+                style = bodySmall,
+                color = inverseOnSurface,
+            )
+        },
+    ) { balloonWindow ->
+        Icon(
+            imageVector = Icons.Outlined.HelpOutline,
+            contentDescription = "术语说明",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .size(16.dp)
+                .clickable { balloonWindow.showAlignBottom() },
         )
     }
 }

@@ -85,17 +85,23 @@ fun FinanceMetric(
     value: String,
     modifier: Modifier = Modifier,
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
-    textAlign: TextAlign = TextAlign.Start
+    textAlign: TextAlign = TextAlign.Start,
+    helpText: String? = null
 ) {
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (helpText != null) {
+                HelpTooltipIcon(helpText)
+            }
+        }
         Text(
             text = value,
             style = MaterialTheme.typography.labelMedium,
@@ -103,6 +109,33 @@ fun FinanceMetric(
             fontWeight = FontWeight.SemiBold,
             textAlign = textAlign
         )
+    }
+}
+
+/** FinanceMetric 的 Composable 值重载（传入 AmountText/PercentText 获得数字滚动效果）。 */
+@Composable
+fun FinanceMetric(
+    label: String,
+    valueContent: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign = TextAlign.Start,
+    helpText: String? = null
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (helpText != null) {
+                HelpTooltipIcon(helpText)
+            }
+        }
+        valueContent()
     }
 }
 

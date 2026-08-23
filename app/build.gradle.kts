@@ -163,6 +163,10 @@ dependencies {
     implementation(libs.vico.compose.m3)
     implementation(libs.mpandroidchart)
 
+    // 动效：撒花庆祝 / 术语气泡
+    implementation(libs.konfetti.compose)
+    implementation(libs.balloon.compose)
+
     // Desugaring
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 

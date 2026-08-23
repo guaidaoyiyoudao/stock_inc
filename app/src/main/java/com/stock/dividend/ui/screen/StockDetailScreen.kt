@@ -72,6 +72,7 @@ import com.stock.dividend.data.repository.formatFundamentalsPeriod
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.AppCardTone
+import com.stock.dividend.ui.component.AmountText
 import com.stock.dividend.ui.component.CompanyIcon
 import com.stock.dividend.ui.component.CompactTopAppBar
 import com.stock.dividend.ui.component.DividendRateChart
@@ -80,10 +81,13 @@ import com.stock.dividend.ui.component.FinanceMetric
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.ForecastComparisonCard
 import com.stock.dividend.ui.component.KlineYieldChart
+import com.stock.dividend.ui.component.PercentText
 import com.stock.dividend.ui.component.SectionHeader
+import com.stock.dividend.ui.component.SkeletonList
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.viewmodel.ForecastDetail
 import com.stock.dividend.viewmodel.StockDetailViewModel
+import com.stock.dividend.ui.navigation.stockCardSharedBounds
 import com.stock.dividend.ui.theme.LocalExtendedColors
 import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.ui.component.AppOutlinedButton
@@ -135,15 +139,15 @@ fun StockDetailScreen(
         }
     ) { padding ->
         if (uiState.isLoading) {
-            Column(
+            // 首载骨架屏：结构对齐下方 LazyColumn（横幅 + 盘口 + 估值 + 预测），防跳变
+            SkeletonList(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                CircularProgressIndicator()
-            }
+                    .padding(padding)
+                    .padding(AppCardDefaults.PageHorizontalPadding),
+                cardCount = 4,
+                lines = 4,
+            )
         } else if (uiState.dividends.isEmpty()) {
             Column(
                 modifier = Modifier
@@ -495,7 +499,9 @@ private fun GridPlanEntryCard(onClick: () -> Unit) {
 @Composable
 private fun HoldingInfoBanner(shares: Int, stockName: String, stockCode: String) {
     AppCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .stockCardSharedBounds(stockCode),
         tone = AppCardTone.Summary,
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -846,7 +852,7 @@ private fun QuoteBoardCard(quote: QuoteSnapshot) {
     } ?: MaterialTheme.colorScheme.onSurface
     AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
-            // 第一行：现价 + 涨跌额/幅（现价突出）
+            // 第一行：现价 + 涨跌额/幅（现价突出；数字滚动 + 涨跌闪色）
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -854,18 +860,67 @@ private fun QuoteBoardCard(quote: QuoteSnapshot) {
             ) {
                 FinanceMetric(
                     label = "现价",
-                    value = quote.price?.let { MoneyFormatter.withSymbol(it) } ?: "—",
-                    valueColor = changeColor
+                    valueContent = {
+                        if (quote.price != null) {
+                            AmountText(
+                                value = quote.price,
+                                style = MaterialTheme.typography.labelMedium,
+                                colored = false,
+                                color = changeColor,
+                            )
+                        } else {
+                            Text(
+                                text = "—",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = changeColor,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 )
                 FinanceMetric(
                     label = "涨跌",
-                    value = quote.change?.let { "${if (it > 0) "+" else ""}${"%.2f".format(it)}" } ?: "—",
-                    valueColor = changeColor
+                    valueContent = {
+                        if (quote.change != null) {
+                            AmountText(
+                                value = quote.change,
+                                signed = true,
+                                showSymbol = false,
+                                style = MaterialTheme.typography.labelMedium,
+                                colored = false,
+                                color = changeColor,
+                            )
+                        } else {
+                            Text(
+                                text = "—",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = changeColor,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 )
                 FinanceMetric(
                     label = "涨跌幅",
-                    value = quote.changePct?.let { "${if (it > 0) "+" else ""}${"%.2f".format(it)}%" } ?: "—",
-                    valueColor = changeColor
+                    valueContent = {
+                        if (quote.changePct != null) {
+                            PercentText(
+                                value = quote.changePct,
+                                signed = true,
+                                decimals = 2,
+                                style = MaterialTheme.typography.labelMedium,
+                                colored = false,
+                                color = changeColor,
+                            )
+                        } else {
+                            Text(
+                                text = "—",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = changeColor,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -884,9 +939,21 @@ private fun QuoteBoardCard(quote: QuoteSnapshot) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                FinanceMetric(label = "换手率", value = quote.turnoverRate?.let { "%.2f%%".format(it) } ?: "—")
-                FinanceMetric(label = "量比", value = quote.volumeRatio?.let { "%.2f".format(it) } ?: "—")
-                FinanceMetric(label = "振幅", value = quote.amplitude?.let { "%.2f%%".format(it) } ?: "—")
+                FinanceMetric(
+                    label = "换手率",
+                    value = quote.turnoverRate?.let { "%.2f%%".format(it) } ?: "—",
+                    helpText = "当日成交量占流通股本的比例，反映交易活跃度"
+                )
+                FinanceMetric(
+                    label = "量比",
+                    value = quote.volumeRatio?.let { "%.2f".format(it) } ?: "—",
+                    helpText = "当日每分钟平均成交量 ÷ 过去5日每分钟平均成交量，>1 表示放量"
+                )
+                FinanceMetric(
+                    label = "振幅",
+                    value = quote.amplitude?.let { "%.2f%%".format(it) } ?: "—",
+                    helpText = "当日最高价与最低价之差占昨收的比例，反映日内波动"
+                )
             }
         }
     }
@@ -902,8 +969,16 @@ private fun ValuationCard(quote: QuoteSnapshot) {
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                FinanceMetric(label = "PE(TTM)", value = quote.pe?.let { "%.2f".format(it) } ?: "—")
-                FinanceMetric(label = "PB", value = quote.pb?.let { "%.2f".format(it) } ?: "—")
+                FinanceMetric(
+                    label = "PE(TTM)",
+                    value = quote.pe?.let { "%.2f".format(it) } ?: "—",
+                    helpText = "市盈率TTM：总市值 ÷ 最近12个月净利润。红利股常年在 5~10 倍区间"
+                )
+                FinanceMetric(
+                    label = "PB",
+                    value = quote.pb?.let { "%.2f".format(it) } ?: "—",
+                    helpText = "市净率：股价 ÷ 每股净资产，小于 1 为破净，银行股常见"
+                )
             }
             Spacer(modifier = Modifier.height(8.dp))
             // 第二行：总市值 / 流通市值（紧凑万亿单位）
@@ -911,8 +986,16 @@ private fun ValuationCard(quote: QuoteSnapshot) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                FinanceMetric(label = "总市值", value = quote.totalMarketCap?.let { MoneyFormatter.compact(it) } ?: "—")
-                FinanceMetric(label = "流通市值", value = quote.circMarketCap?.let { MoneyFormatter.compact(it) } ?: "—")
+                FinanceMetric(
+                    label = "总市值",
+                    value = quote.totalMarketCap?.let { MoneyFormatter.compact(it) } ?: "—",
+                    helpText = "全部股本 × 现价"
+                )
+                FinanceMetric(
+                    label = "流通市值",
+                    value = quote.circMarketCap?.let { MoneyFormatter.compact(it) } ?: "—",
+                    helpText = "流通股本 × 现价（可在二级市场自由交易的部分）"
+                )
             }
         }
     }

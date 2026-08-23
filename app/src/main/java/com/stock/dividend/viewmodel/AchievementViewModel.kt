@@ -34,7 +34,9 @@ data class AchievementUiState(
     val achievements: List<AchievementItem> = emptyList(),
     val unlockedCount: Int = 0,
     val totalCount: Int = AchievementDef.entries.size,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    /** 本次会话内新解锁的成就 id（一次性庆祝事件语义；首次加载不触发）。 */
+    val newlyUnlockedIds: List<String> = emptyList()
 )
 
 @HiltViewModel
@@ -46,6 +48,9 @@ class AchievementViewModel @Inject constructor(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(AchievementUiState())
     val uiState: StateFlow<AchievementUiState> = _uiState.asStateFlow()
+
+    /** 上一帧已解锁 id 集合；null = 尚未完成首次加载（首次不庆祝历史成就）。 */
+    private var previousUnlockedIds: Set<String>? = null
 
     private val stocksFlow = stockRepository.observeAllStocks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -100,11 +105,17 @@ class AchievementViewModel @Inject constructor(
                         unlockedAt = entity?.unlockedAt
                     )
                 }
+                val unlockedIds = items.filter { it.unlocked }.map { it.def.id }.toSet()
+                val newlyUnlocked = previousUnlockedIds
+                    ?.let { prev -> (unlockedIds - prev).toList() }
+                    ?: emptyList()
+                previousUnlockedIds = unlockedIds
                 _uiState.value = AchievementUiState(
                     achievements = items,
                     unlockedCount = items.count { it.unlocked },
                     totalCount = items.size,
-                    isLoading = false
+                    isLoading = false,
+                    newlyUnlockedIds = newlyUnlocked
                 )
             }.collect {}
         }

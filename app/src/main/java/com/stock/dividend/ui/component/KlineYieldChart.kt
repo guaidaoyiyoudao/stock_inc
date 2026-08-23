@@ -1,5 +1,7 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +31,7 @@ import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.MoneyFormatter
 import com.stock.dividend.data.repository.PercentFormatter
 import com.stock.dividend.ui.theme.LocalExtendedColors
+import com.stock.dividend.ui.theme.Motion
 import com.stock.dividend.ui.theme.tabularNumberStyle
 
 /**
@@ -63,6 +67,16 @@ fun KlineYieldChart(
     val textMeasurer = rememberTextMeasurer()
     val display = remember(bars) { bars.takeLast(VISIBLE_BARS) }
 
+    // 入场动画：蜡烛自左向右浮现（绘制进度 0→1，动画结束 = 完整数据集，数值不变）
+    val reveal = remember { Animatable(0f) }
+    LaunchedEffect(display) {
+        reveal.snapTo(0f)
+        reveal.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 800, easing = Motion.EmphasizedDecelerate),
+        )
+    }
+
     // 区间价格摘要：最新价 + 区间涨跌/高低
     val last = display.last()
     val first = display.first()
@@ -93,6 +107,7 @@ fun KlineYieldChart(
     val dateStyle = MaterialTheme.typography.labelSmall
         .merge(tabularNumberStyle)
         .copy(fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val dateBaseColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     // 图例：dps 有效时计算器保证 ≥3 档（窄区间也不缩水），无需「无档位」降级文案
     val legendText = when {
@@ -102,7 +117,7 @@ fun KlineYieldChart(
 
     AppCard(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
-            // 价格摘要行：最新价 + 区间涨跌（涨绿跌红）
+            // 价格摘要行：最新价 + 区间涨跌（涨绿跌红；数字滚动）
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -113,10 +128,10 @@ fun KlineYieldChart(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text(
-                        text = MoneyFormatter.withSymbol(last.close),
-                        style = MaterialTheme.typography.titleMedium.merge(tabularNumberStyle),
-                        fontWeight = FontWeight.Bold
+                    AmountText(
+                        value = last.close,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        colored = false,
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
@@ -125,13 +140,14 @@ fun KlineYieldChart(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text(
-                        text = PercentFormatter.withSign(periodChangePct),
-                        style = MaterialTheme.typography.titleMedium.merge(tabularNumberStyle),
-                        fontWeight = FontWeight.Bold,
+                    PercentText(
+                        value = periodChangePct,
+                        signed = true,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        colored = false,
                         color = if (periodChangePct > 0) ext.positive
                         else if (periodChangePct < 0) ext.negative
-                        else MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
@@ -145,6 +161,7 @@ fun KlineYieldChart(
             Spacer(modifier = Modifier.height(10.dp))
             Canvas(modifier = Modifier.fillMaxWidth().height(CHART_HEIGHT)) {
                 val n = display.size
+                val progress = reveal.value
                 val priceH = PRICE_PANEL_HEIGHT.toPx()
                 val volTop = priceH + PANEL_GAP.toPx()
                 val volH = VOLUME_PANEL_HEIGHT.toPx()
@@ -170,13 +187,16 @@ fun KlineYieldChart(
                 val gutter = measuredLabels.maxOfOrNull { it.size.width }?.plus(8.dp.roundToPx()) ?: 0
                 val plotW = (size.width - gutter).coerceAtLeast(40.dp.toPx())
 
-                // 1) 股息率水平虚线 + 右侧标签（股息率% + 对应价）
+                // 逐根浮现的透明度：progress*n - i（最右一根渐入，其余 0/1）
+                fun alphaAt(i: Int): Float = (progress * n - i).coerceIn(0f, 1f)
+
+                // 1) 股息率水平虚线 + 右侧标签（随入场进度淡入）
                 if (measuredLabels.isNotEmpty()) {
                     val dash = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 4.dp.toPx()))
                     yieldLines.zip(measuredLabels).forEach { (line, label) ->
                         val y = yFor(line.price)
                         drawLine(
-                            color = yieldColor,
+                            color = yieldColor.copy(alpha = progress),
                             start = Offset(0f, y),
                             end = Offset(plotW, y),
                             strokeWidth = 1.dp.toPx(),
@@ -184,19 +204,25 @@ fun KlineYieldChart(
                         )
                         val labelY = (y - label.size.height / 2f)
                             .coerceIn(0f, (priceH - label.size.height).coerceAtLeast(0f))
-                        drawText(label, topLeft = Offset(plotW + 4.dp.toPx(), labelY))
+                        drawText(
+                            label,
+                            color = yieldColor.copy(alpha = progress),
+                            topLeft = Offset(plotW + 4.dp.toPx(), labelY),
+                        )
                     }
                 }
 
-                // 2) 蜡烛：影线（最高-最低）+ 实体（开-收）
+                // 2) 蜡烛：影线（最高-最低）+ 实体（开-收），自左向右逐根浮现
                 val slot = plotW / n
                 val bodyW = (slot * 0.6f).coerceAtLeast(2.dp.toPx())
                 val wickW = 1.dp.toPx()
                 display.forEachIndexed { i, bar ->
+                    val alpha = alphaAt(i)
+                    if (alpha <= 0f) return@forEachIndexed
                     val cx = slot * i + slot / 2f
                     val color = if (bar.close >= bar.open) upColor else downColor
                     drawLine(
-                        color = color,
+                        color = color.copy(alpha = alpha),
                         start = Offset(cx, yFor(bar.high)),
                         end = Offset(cx, yFor(bar.low)),
                         strokeWidth = wickW
@@ -205,34 +231,42 @@ fun KlineYieldChart(
                     val bodyBottom = yFor(minOf(bar.open, bar.close))
                     val bodyH = (bodyBottom - bodyTop).coerceAtLeast(1.dp.toPx())
                     drawRect(
-                        color = color,
+                        color = color.copy(alpha = alpha),
                         topLeft = Offset(cx - bodyW / 2f, bodyTop),
                         size = Size(bodyW, bodyH)
                     )
                 }
 
-                // 3) 成交量面条：高度归一化，按当日涨跌着色（减淡）
+                // 3) 成交量面条：高度归一化，按当日涨跌着色（减淡），与蜡烛同步浮现
                 val maxVol = display.maxOf { it.volume }.coerceAtLeast(1.0)
                 display.forEachIndexed { i, bar ->
+                    val alpha = alphaAt(i)
+                    if (alpha <= 0f) return@forEachIndexed
                     val cx = slot * i + slot / 2f
                     val vh = (bar.volume / maxVol * volH).toFloat()
                     if (vh > 0f) {
                         drawRect(
-                            color = (if (bar.close >= bar.open) upColor else downColor).copy(alpha = 0.45f),
+                            color = (if (bar.close >= bar.open) upColor else downColor)
+                                .copy(alpha = 0.45f * alpha),
                             topLeft = Offset(cx - bodyW / 2f, volTop + volH - vh),
                             size = Size(bodyW, vh)
                         )
                     }
                 }
 
-                // 4) 首末日期标签（MM-dd，对齐绘图区两端）
-                val firstLabel = textMeasurer.measure(klineDateLabel(display.first().date), dateStyle)
-                val lastLabel = textMeasurer.measure(klineDateLabel(display.last().date), dateStyle)
-                drawText(firstLabel, topLeft = Offset(0f, dateY))
-                drawText(
-                    lastLabel,
-                    topLeft = Offset((plotW - lastLabel.size.width).coerceAtLeast(0f), dateY)
-                )
+                // 4) 首末日期标签（MM-dd，对齐绘图区两端；入场尾声淡入）
+                val dateAlpha = ((progress - 0.6f) / 0.4f).coerceIn(0f, 1f)
+                if (dateAlpha > 0f) {
+                    val firstLabel = textMeasurer.measure(klineDateLabel(display.first().date), dateStyle)
+                    val lastLabel = textMeasurer.measure(klineDateLabel(display.last().date), dateStyle)
+                    val dateColor = dateBaseColor.copy(alpha = dateAlpha)
+                    drawText(firstLabel, color = dateColor, topLeft = Offset(0f, dateY))
+                    drawText(
+                        lastLabel,
+                        color = dateColor,
+                        topLeft = Offset((plotW - lastLabel.size.width).coerceAtLeast(0f), dateY)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))

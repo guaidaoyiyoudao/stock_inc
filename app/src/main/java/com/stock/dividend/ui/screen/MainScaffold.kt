@@ -1,5 +1,7 @@
 package com.stock.dividend.ui.screen
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -31,6 +33,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.stock.dividend.ui.navigation.LocalNavAnimatedVisibilityScope
+import com.stock.dividend.ui.navigation.LocalSharedTransitionScope
+import com.stock.dividend.ui.navigation.NavTransitions
+import com.stock.dividend.ui.navigation.TabEnterTransition
+import com.stock.dividend.ui.navigation.TabExitTransition
 import com.stock.dividend.ui.navigation.Routes
 
 internal data class BottomNavItem(
@@ -47,7 +54,7 @@ internal val bottomNavItems = listOf(
     BottomNavItem("settings", "设置", Icons.Filled.Settings)
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun MainScaffold(
     rootNavController: NavHostController,
@@ -80,6 +87,11 @@ fun MainScaffold(
     val refreshHandle by refreshHandleState
 
     CompositionLocalProvider(LocalTabRefreshRegistrar provides refreshHandleState) {
+        // SharedTransitionLayout：Tab 级 NavHost 的共享元素容器（列表卡 ↔ 详情页头部容器变换）。
+        // 必须用 Layout 版而非裸 SharedTransitionScope——后者要求 content 手动使用其 Modifier，
+        // 否则 "Uninitialized LayoutCoordinates" 崩溃。
+        SharedTransitionLayout {
+        CompositionLocalProvider(LocalSharedTransitionScope provides this) {
         Scaffold(
             // 移除顶部「股息追踪」标题栏：Scaffold 默认仍会把状态栏 inset 计入 content
             // 的 innerPadding（contentWindowInsets），保留与系统状态栏的间距。
@@ -150,9 +162,20 @@ fun MainScaffold(
             startDestination = "today",
             modifier = Modifier
                 .padding(padding)
-                .consumeWindowInsets(padding)
+                .consumeWindowInsets(padding),
+            enterTransition = { NavTransitions.enter() },
+            exitTransition = { NavTransitions.exit() },
+            popEnterTransition = { NavTransitions.popEnter() },
+            popExitTransition = { NavTransitions.popExit() },
         ) {
-            composable("today") {
+            composable(
+                route = "today",
+                enterTransition = TabEnterTransition,
+                exitTransition = TabExitTransition,
+                popEnterTransition = TabEnterTransition,
+                popExitTransition = TabExitTransition,
+            ) {
+                CompositionLocalProvider(LocalNavAnimatedVisibilityScope provides this) {
                 TodayScreen(
                     onOpenPortfolio = { tabNavController.navigate("portfolio") },
                     onOpenStock = { code -> tabNavController.navigate("stockDetail/$code") },
@@ -160,8 +183,16 @@ fun MainScaffold(
                     onOpenIncome = { tabNavController.navigate("income") },
                     onOpenGridPlan = { code -> tabNavController.navigate("gridPlanFor/$code") },
                 )
+                }
             }
-            composable("portfolio") {
+            composable(
+                route = "portfolio",
+                enterTransition = TabEnterTransition,
+                exitTransition = TabExitTransition,
+                popEnterTransition = TabEnterTransition,
+                popExitTransition = TabExitTransition,
+            ) {
+                CompositionLocalProvider(LocalNavAnimatedVisibilityScope provides this) {
                 PortfolioScreen(
                     snackbarHostState = snackbarHostState,
                     onAddStockClick = { tabNavController.navigate("addStock") },
@@ -171,6 +202,7 @@ fun MainScaffold(
                     onFireCardClick = { rootNavController.navigate(Routes.EXPENSE_COVERAGE) },
                     onNavigateToEvaluation = { tabNavController.navigate("portfolioEvaluation") }
                 )
+                }
             }
             composable("portfolioEvaluation") {
                 val parentEntry = remember(it) {
@@ -181,10 +213,22 @@ fun MainScaffold(
                     viewModel = hiltViewModel(parentEntry)
                 )
             }
-            composable("income") {
+            composable(
+                route = "income",
+                enterTransition = TabEnterTransition,
+                exitTransition = TabExitTransition,
+                popEnterTransition = TabEnterTransition,
+                popExitTransition = TabExitTransition,
+            ) {
                 IncomeScreen()
             }
-            composable("ai") {
+            composable(
+                route = "ai",
+                enterTransition = TabEnterTransition,
+                exitTransition = TabExitTransition,
+                popEnterTransition = TabEnterTransition,
+                popExitTransition = TabExitTransition,
+            ) {
                 AiChatScreen(
                     onGoSettings = {
                         tabNavController.navigate("settings") {
@@ -202,7 +246,13 @@ fun MainScaffold(
             composable("achievements") {
                 AchievementScreen()
             }
-            composable("settings") {
+            composable(
+                route = "settings",
+                enterTransition = TabEnterTransition,
+                exitTransition = TabExitTransition,
+                popEnterTransition = TabEnterTransition,
+                popExitTransition = TabExitTransition,
+            ) {
                 SettingsScreen(
                     onOpenAlertEvalSettings = { tabNavController.navigate("alertEvalSettings") },
                     onOpenLlmStrategySettings = { tabNavController.navigate("llmStrategySettings") },
@@ -256,6 +306,7 @@ fun MainScaffold(
                 arguments = listOf(navArgument("code") { type = NavType.StringType })
             ) { entry ->
                 val code = entry.arguments?.getString("code") ?: return@composable
+                CompositionLocalProvider(LocalNavAnimatedVisibilityScope provides this) {
                 StockDetailScreen(
                     stockCode = code,
                     onBack = { tabNavController.popBackStack() },
@@ -264,6 +315,7 @@ fun MainScaffold(
                     onOpenGridPlan = { c -> tabNavController.navigate("gridPlanFor/$c") },
                     onOpenNotificationSettings = { c -> tabNavController.navigate("stockNotificationSettings/$c") }
                 )
+                }
             }
             composable(
                 route = "dripSimulation/{code}",
@@ -301,6 +353,8 @@ fun MainScaffold(
                 StockNotificationSettingsScreen(onBack = { tabNavController.popBackStack() })
             }
         }
+    }
+    }
     }
     }
 }

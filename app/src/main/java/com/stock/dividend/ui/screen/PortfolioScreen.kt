@@ -75,6 +75,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.stock.dividend.ui.component.AmountText
 import com.stock.dividend.ui.component.AppCard
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.AppOutlinedButton
@@ -84,11 +85,19 @@ import com.stock.dividend.ui.component.DividendPriceScale
 import com.stock.dividend.ui.component.DividendSummaryCard
 import com.stock.dividend.ui.component.EmptyStateView
 import com.stock.dividend.ui.component.FireProgressCard
+import com.stock.dividend.ui.component.PercentText
+import com.stock.dividend.ui.component.SkeletonList
 import com.stock.dividend.ui.component.StockCard
 import com.stock.dividend.ui.component.FinanceStatusTone
 import com.stock.dividend.ui.component.StatusPill
+import com.stock.dividend.ui.navigation.stockCardSharedBounds
 import com.stock.dividend.ui.theme.LocalExtendedColors
 import com.stock.dividend.ui.theme.tabularNumberStyle
+import nl.dionsegijn.konfetti.compose.KonfettiView
+import nl.dionsegijn.konfetti.core.Party
+import nl.dionsegijn.konfetti.core.Position
+import nl.dionsegijn.konfetti.core.emitter.Emitter
+import java.util.concurrent.TimeUnit
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.MoneyFormatter
@@ -142,13 +151,42 @@ fun PortfolioScreen(
     }
 
     if (uiState.items.isEmpty() && uiState.watchlist.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            EmptyStateView(onAddClick = onAddStockClick)
+        // 首次加载（无任何数据 + loading）显示骨架屏；确认为空才显示空状态
+        if (uiState.isLoading) {
+            SkeletonList(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(AppCardDefaults.PageHorizontalPadding),
+                cardCount = 4,
+            )
+        } else {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                EmptyStateView(onAddClick = onAddStockClick)
+            }
         }
         return
     }
 
     var holdingsExpanded by remember { mutableStateOf(true) }
+
+    // FIRE 达标撒花：覆盖率从 <100% 跨到 ≥100% 的瞬间庆祝一次（每次会话仅一次，刷新不重复）
+    var fireCelebration by remember { mutableStateOf(false) }
+    var fireCelebrated by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.fireProgress) {
+        val p = uiState.fireProgress
+        if (p != null && p >= 100f && !fireCelebrated) {
+            fireCelebrated = true
+            fireCelebration = true
+        }
+    }
+    LaunchedEffect(fireCelebration) {
+        if (fireCelebration) {
+            kotlinx.coroutines.delay(4000)
+            fireCelebration = false
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
         contentPadding = PaddingValues(
             start = AppCardDefaults.PageHorizontalPadding,
@@ -334,6 +372,38 @@ fun PortfolioScreen(
                 }
             }
         }
+    }
+
+    // FIRE 达标庆祝：全屏 Konfetti 覆盖层（粒子自行消亡，4s 后移除覆盖层）
+    if (fireCelebration) {
+        KonfettiView(
+            modifier = Modifier.fillMaxSize(),
+            parties = remember {
+                listOf(
+                    Party(
+                        speed = 25f,
+                        maxSpeed = 50f,
+                        damping = 0.9f,
+                        spread = 90,
+                        angle = 270,
+                        position = Position.Relative(0.2, 1.0),
+                        emitter = Emitter(duration = 500, TimeUnit.MILLISECONDS).max(60),
+                        colors = listOf(0xfce18a, 0xff726d, 0xb48def, 0xf4306d),
+                    ),
+                    Party(
+                        speed = 25f,
+                        maxSpeed = 50f,
+                        damping = 0.9f,
+                        spread = 90,
+                        angle = 270,
+                        position = Position.Relative(0.8, 1.0),
+                        emitter = Emitter(duration = 500, TimeUnit.MILLISECONDS).max(60),
+                        colors = listOf(0xfce18a, 0xff726d, 0xb48def, 0xf4306d),
+                    ),
+                )
+            },
+        )
+    }
 
     val editingCode = uiState.editingCode
     if (editingCode != null) {
@@ -393,12 +463,21 @@ private fun PortfolioSummaryCard(
                     modifier = Modifier.clip(MaterialTheme.shapes.small).clickable(onClick = onEditTotalAssets)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = if (totalAssets > 0.0) portfolioFormatMoney(totalAssets) else "点击设置",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        if (totalAssets > 0.0) {
+                            AmountText(
+                                value = totalAssets,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                colored = false,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        } else {
+                            Text(
+                                text = "点击设置",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.Default.Edit,
@@ -417,11 +496,10 @@ private fun PortfolioSummaryCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = portfolioFormatMoney(holdingsMarketValue),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+            AmountText(
+                value = holdingsMarketValue,
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                colored = false,
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -435,21 +513,42 @@ private fun PortfolioSummaryCard(
             ) {
                 SummaryMetric(
                     label = "总成本",
-                    value = portfolioFormatMoney(totalCost),
+                    valueContent = {
+                        AmountText(
+                            value = totalCost,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            colored = false,
+                        )
+                    },
                     modifier = Modifier.weight(1f)
                 )
                 VerticalDivider()
                 SummaryMetric(
                     label = "浮盈/浮亏",
-                    value = portfolioFormatSignedPnl(totalPnl),
-                    valueColor = pnlColor,
+                    valueContent = {
+                        AmountText(
+                            value = totalPnl,
+                            signed = true,
+                            colored = false,
+                            color = pnlColor,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        )
+                    },
                     modifier = Modifier.weight(1f)
                 )
                 VerticalDivider()
                 SummaryMetric(
                     label = "盈亏率",
-                    value = portfolioFormatPercent(totalPnlRate * 100.0),
-                    valueColor = pnlColor,
+                    valueContent = {
+                        PercentText(
+                            value = totalPnlRate * 100.0,
+                            signed = true,
+                            decimals = 1,
+                            colored = false,
+                            color = pnlColor,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        )
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -468,18 +567,22 @@ private fun PortfolioSummaryCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = portfolioFormatSignedPnl(totalRealizedPnl),
-                            style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
-                            fontWeight = FontWeight.SemiBold,
-                            color = pnlColor(totalRealizedPnl)
+                        AmountText(
+                            value = totalRealizedPnl,
+                            signed = true,
+                            colored = false,
+                            color = pnlColor(totalRealizedPnl),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                         )
                         totalRealizedPnlRate?.let { rate ->
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "(${portfolioFormatPercent(rate)})",
-                                style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                                color = pnlColor(totalRealizedPnl)
+                            PercentText(
+                                value = rate,
+                                signed = true,
+                                decimals = 1,
+                                colored = false,
+                                color = pnlColor(totalRealizedPnl),
+                                style = MaterialTheme.typography.labelSmall,
                             )
                         }
                     }
@@ -525,6 +628,7 @@ private fun PortfolioHoldingCard(
     AppCard(
         modifier = modifier
             .fillMaxWidth()
+            .stockCardSharedBounds(item.code)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = {
@@ -553,22 +657,48 @@ private fun PortfolioHoldingCard(
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = item.marketValue?.let { portfolioFormatMoney(it) } ?: "—",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    if (item.marketValue != null) {
+                        AmountText(
+                            value = item.marketValue,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            colored = false,
+                        )
+                    } else {
+                        Text(
+                            text = "—",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                     val pnl = item.unrealizedPnl
                     val rate = item.unrealizedPnlRate
-                    Text(
-                        text = if (pnl != null && rate != null) {
-                            "${portfolioFormatSignedPnl(pnl)} (${portfolioFormatPercent(rate * 100.0)})"
-                        } else "—",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = pnl?.let { pnlColor(it) } ?: MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (pnl != null && rate != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            AmountText(
+                                value = pnl,
+                                signed = true,
+                                colored = true,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            )
+                            PercentText(
+                                value = rate * 100.0,
+                                signed = true,
+                                decimals = 1,
+                                colored = true,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "—",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -714,6 +844,27 @@ private fun SummaryMetric(
             fontWeight = FontWeight.Bold,
             color = valueColor
         )
+    }
+}
+
+/** SummaryMetric 的 Composable 值重载（传入 AmountText/PercentText 获得数字滚动效果）。 */
+@Composable
+private fun SummaryMetric(
+    label: String,
+    valueContent: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        valueContent()
     }
 }
 
@@ -1069,8 +1220,8 @@ private fun SwipeToDismissWatchItem(
                 name = stock.name,
                 code = stock.code,
                 shares = stock.shares,
-                forecastIncome = forecastIncome?.let { MoneyFormatter.withSymbol(it) },
-                marketValue = marketValue?.let { MoneyFormatter.withSymbol(it) },
+                forecastIncomeAmount = forecastIncome,
+                marketValueAmount = marketValue,
                 lastUpdated = stock.lastUpdated,
                 currentPrice = currentPrice,
                 latestYearlyDividend = latestYearlyDividend,

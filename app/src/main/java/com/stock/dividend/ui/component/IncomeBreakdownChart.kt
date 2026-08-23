@@ -1,5 +1,7 @@
 package com.stock.dividend.ui.component
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +30,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.stock.dividend.ui.theme.Motion
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -82,6 +86,16 @@ fun IncomeBreakdownChart(
     val textStyle = MaterialTheme.typography.labelSmall
     val textMeasurer = rememberTextMeasurer()
 
+    // 入场动画：扇形自 12 点方向顺时针扫开（进度 1 = 完整 360°，数值不变）
+    val sweepProgress = remember { Animatable(0f) }
+    LaunchedEffect(slices) {
+        sweepProgress.snapTo(0f)
+        sweepProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(Motion.DurationLong, easing = Motion.EmphasizedDecelerate),
+        )
+    }
+
     AppCard(
         modifier = modifier
     ) {
@@ -105,7 +119,7 @@ fun IncomeBreakdownChart(
                 val surfaceColor = MaterialTheme.colorScheme.surface
                 val onSurfaceColor = MaterialTheme.colorScheme.onSurface
 
-                // Pie chart
+                // Pie chart（甜甜圈随入场进度扫开）
                 Canvas(
                     modifier = Modifier.size(120.dp)
                 ) {
@@ -116,10 +130,11 @@ fun IncomeBreakdownChart(
                         (size.height - canvasSize) / 2f
                     )
                     val arcSize = Size(canvasSize, canvasSize)
+                    val progress = sweepProgress.value
 
                     var startAngle = -90f
                     for (slice in slices) {
-                        val sweep = (slice.amount / total * 360f).toFloat()
+                        val sweep = (slice.amount / total * 360f).toFloat() * progress
                         drawArc(
                             color = slice.color,
                             startAngle = startAngle,
@@ -139,20 +154,22 @@ fun IncomeBreakdownChart(
                         center = center
                     )
 
-                    // Center text
-                    val totalText = "¥%.0f".format(total)
-                    val textLayoutResult = textMeasurer.measure(
-                        totalText,
-                        style = textStyle.copy(fontSize = 13.sp, textAlign = TextAlign.Center)
-                    )
-                    drawText(
-                        textLayoutResult = textLayoutResult,
-                        topLeft = Offset(
-                            center.x - textLayoutResult.size.width / 2f,
-                            center.y - textLayoutResult.size.height / 2f
-                        ),
-                        color = onSurfaceColor
-                    )
+                    // Center text（扫开完成后浮现）
+                    if (progress > 0.85f) {
+                        val totalText = "¥%.0f".format(total)
+                        val textLayoutResult = textMeasurer.measure(
+                            totalText,
+                            style = textStyle.copy(fontSize = 13.sp, textAlign = TextAlign.Center)
+                        )
+                        drawText(
+                            textLayoutResult = textLayoutResult,
+                            topLeft = Offset(
+                                center.x - textLayoutResult.size.width / 2f,
+                                center.y - textLayoutResult.size.height / 2f
+                            ),
+                            color = onSurfaceColor
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(16.dp))

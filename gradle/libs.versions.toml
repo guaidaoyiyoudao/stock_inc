@@ -23,6 +23,8 @@ desugar-jdk-libs = "2.1.4"
 coil = "3.1.0"
 mlkit-text-recognition = "16.0.1"
 glance = "1.1.1"
+konfetti = "2.0.5"
+balloon = "1.6.9"
 
 # Testing
 junit = "4.13.2"
@@ -99,6 +101,10 @@ mlkit-text-recognition = { group = "com.google.android.gms", name = "play-servic
 # Glance (Compose for Widgets)
 glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
 glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glance" }
+
+# 动效：Konfetti 撒花庆祝 / Balloon 术语气泡
+konfetti-compose = { group = "nl.dionsegijn", name = "konfetti-compose", version.ref = "konfetti" }
+balloon-compose = { group = "com.github.skydoves", name = "balloon-compose", version.ref = "balloon" }
 
 # Desugaring
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar-jdk-libs" }
