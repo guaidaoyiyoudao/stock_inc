@@ -274,7 +274,8 @@ CI 用 JDK 17 temurin，显式 `USE_CHINA_MIRROR=false` 直连官方仓库；本
 9. **依赖版本只改 `libs.versions.toml`**，别在 `build.gradle.kts` 写裸版本号。
 10. **取股市数据必须走 `MarketDataPlane`（§4.2A）**：消费方禁止直接注入/调用行情类 Repository 取数方法或行情类 Dao；否则缓存写透/分红自动刷新/BOLL 限流等统一语义全部失效。
 11. **外部数据接入必读 §4.9**：三接口单位规则互不相同、资金流字段编号要查文档、新 DTO 必须配实测 fixture 单测并用腾讯 qt 交叉验证。
-12. **中文界面与中文注释**：所有用户可见文本中文；注释统一中文。
+12. **Gson 反射模型必须被 R8 keep**：release 开启混淆，凡经 `Gson.toJson/fromJson` 的类（网络 DTO / Room 缓存 payload 模型 / AI 协议 DTO / 备份载体）字段名即 JSON 键——**没 keep 就混淆成 a/b**，症状是 release 专属的数据解析失败或服务端 400 missing field（2026-08-23 连续两案：AI 会话 400、缓存数据跨版本失效）。已 keep：`data.remote.dto` / `data.local.backup` / entity 字段 / `data.agent` / `data.repository` 全包；**新增 Gson 模型若放其他包，必须同步在 `proguard-rules.pro` 加 keep**。
+13. **中文界面与中文注释**：所有用户可见文本中文；注释统一中文。
 
 ---
 
