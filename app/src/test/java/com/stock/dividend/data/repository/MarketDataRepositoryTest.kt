@@ -21,14 +21,59 @@ class MarketDataRepositoryTest {
 
     private val marketApi: MarketApi = mockk()
     private val stockRepository: StockRepository = mockk()
+    private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi = mockk()
+    private val fuyaoConfig: FuyaoConfig = mockk(relaxed = true)
     private val fundamentalApi: FundamentalApi = mockk()
     private val errorLogRepository: ErrorLogRepository = mockk(relaxed = true)
-    private val repo = MarketDataRepository(marketApi, stockRepository, fundamentalApi, errorLogRepository)
+    private val cacheDao: com.stock.dividend.data.local.dao.FuyaoCacheDao = mockk(relaxed = true)
+    private val repo = MarketDataRepository(
+        marketApi, stockRepository, fuyaoApi, fuyaoConfig, FuyaoCacheStore(cacheDao),
+        fundamentalApi, errorLogRepository
+    )
+
+    @org.junit.Before
+    fun setUp() {
+        // 默认扶摇未配置（relaxed Boolean=false），存量用例全部走东财现状路径
+        io.mockk.coEvery { fuyaoConfig.enabled } returns false
+    }
 
     private fun clistResponse(vararg items: MarketClistResponse.MarketClistItem) =
         MarketClistResponse(
             MarketClistResponse.MarketClistData(diff = items.toList(), total = items.size)
         )
+
+    // ── 扶摇指数批量主源 ─────────────────────────────────────────
+
+    @Test
+    fun `fetchIndexQuotes uses fuyao batch primary with local names`() = runTest {
+        io.mockk.coEvery { fuyaoConfig.enabled } returns true
+        io.mockk.coEvery { fuyaoApi.getIndexSnapshot(thscodes = any()) } returns
+            com.stock.dividend.data.remote.dto.FuyaoEnvelope(
+                code = 0, message = "success", requestId = "t",
+                data = com.stock.dividend.data.remote.dto.FuyaoSnapshotData(
+                    item = listOf(
+                        com.stock.dividend.data.remote.dto.FuyaoPriceItem(
+                            thscode = "000001.SH", lastPrice = 3905.2, changePct = 0.037913,
+                            prevClose = 3903.72, turnover = 883423480000.0
+                        ),
+                        com.stock.dividend.data.remote.dto.FuyaoPriceItem(
+                            thscode = "399001.SZ", lastPrice = 14094.168, changePct = 0.868739
+                        )
+                    )
+                )
+            )
+
+        val quotes = repo.fetchIndexQuotes()
+
+        // 只返回扶摇给的两只；名称由本地清单带出（扶摇快照无名称），代码为 6 位
+        assertThat(quotes).hasSize(2)
+        val sh = quotes.first { it.code == "000001" }
+        assertThat(sh.name).isEqualTo("上证指数")
+        assertThat(sh.price).isWithin(1e-9).of(3905.2)
+        assertThat(sh.changePct).isWithin(1e-9).of(0.037913)
+        // 一次批量请求，东财 stock/get 未调用（原为 7 次单查）
+        io.mockk.coVerify(exactly = 0) { marketApi.getIndexQuote(any()) }
+    }
 
     @Test
     fun `fetchCapitalFlow picks only the row matching requested code`() = runTest {

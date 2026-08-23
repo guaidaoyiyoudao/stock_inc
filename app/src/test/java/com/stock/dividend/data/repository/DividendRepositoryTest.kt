@@ -31,8 +31,10 @@ class DividendRepositoryTest {
     @EastMoneyDividendApi
     private val eastMoneyApi: DividendApi = mockk()
     private val fundDividendApi: FundDividendApi = mockk()
+    private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi = mockk()
+    private val fuyaoConfig: FuyaoConfig = mockk(relaxed = true)
     private val dao: DividendDao = mockk(relaxed = true)
-    private val repository = DividendRepository(tencentApi, eastMoneyApi, fundDividendApi, dao)
+    private val repository = DividendRepository(tencentApi, eastMoneyApi, fundDividendApi, fuyaoApi, fuyaoConfig, dao)
 
     @Before
     fun setUp() {
@@ -40,6 +42,8 @@ class DividendRepositoryTest {
         coEvery { eastMoneyApi.getDividends(filter = any()) } returns DividendResponse(
             success = true, result = DividendResponse.DividendResult(data = emptyList())
         )
+        // 默认扶摇未配置（relaxed Boolean=false），存量用例全部走腾讯/f10 现状路径
+        coEvery { fuyaoConfig.enabled } returns false
     }
 
     /** 构造一条 qfqday 记录：前 6 个是 OHLCV 字符串，第 7 个是分红对象（可为 null 表示无分红）。 */
@@ -712,5 +716,140 @@ class DividendRepositoryTest {
 
         assertThat(result.isSuccess).isTrue()   // 失败静默（与腾讯主源同语义），不误清历史
         coVerify(exactly = 0) { dao.insertAll(any()) }
+    }
+
+    // ── 扶摇主源（股票分红事件流 + ETF/LOF 结构化分红）──────────────────
+
+    private fun msOf(date: String): Long = java.time.LocalDate.parse(date)
+        .atStartOfDay(java.time.ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli()
+
+    @Test
+    fun `fuyao stock dividends are primary and eastmoney enriches reportDate yield and scheduled`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        // 扶摇事件流：农行 2025 中期（每股 0.1195，2025-12-15 除息）+ 2025 年度（0.13）
+        coEvery { fuyaoApi.getAdjustmentFactors(any(), any(), any()) } returns
+            com.stock.dividend.data.remote.dto.FuyaoEnvelope(
+                code = 0, message = "success", requestId = "t",
+                data = com.stock.dividend.data.remote.dto.FuyaoAdjustmentFactorsData(
+                    thscode = "601288.SH", ticker = "601288",
+                    item = listOf(
+                        com.stock.dividend.data.remote.dto.FuyaoAdjustmentItem(
+                            exDateMs = msOf("2026-05-13"), dividendPerShare = 0.13
+                        ),
+                        com.stock.dividend.data.remote.dto.FuyaoAdjustmentItem(
+                            exDateMs = msOf("2025-12-15"), dividendPerShare = 0.1195
+                        )
+                    )
+                )
+            )
+        // 东财 enrich：中期分红的准确报告期 2025-06-30 + 股息率快照 + 登记日；
+        // 另一条已排期未除权（2026-12-15，扶摇只有已除权事件 → 由此通道合并）
+        coEvery { eastMoneyApi.getDividends(filter = any()) } returns DividendResponse(
+            success = true,
+            result = DividendResponse.DividendResult(
+                data = listOf(
+                    eastMoneyItem(
+                        secuCode = "601288.SH", reportDate = "2025-06-30T00:00:00",
+                        pretaxBonusRmb = 1.195, dividentRatio = 0.0176,
+                        exDividendDate = "2025-12-15T00:00:00",
+                        equityRecordDate = "2025-12-14T00:00:00"
+                    ),
+                    eastMoneyItem(
+                        secuCode = "601288.SH", reportDate = "2026-06-30T00:00:00",
+                        pretaxBonusRmb = 1.30, dividentRatio = 0.0180,
+                        exDividendDate = "2026-12-15T00:00:00"
+                    )
+                )
+            )
+        )
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+
+        repository.fetchAndCacheDividends("sh.601288", "601288")
+
+        // 扶摇主源成功 → 不打腾讯
+        coVerify(exactly = 0) { tencentApi.getKline(any()) }
+        val entities = entitiesSlot.last()
+        assertThat(entities).hasSize(3)   // 扶摇 2 条已除权 + 东财 1 条已排期
+        val interim = entities.first { it.exDividendDate == "2025-12-15" }
+        // 每股现金直出（无每10股换算）
+        assertThat(interim.cashPerShare).isWithin(1e-9).of(0.1195)
+        // reportDate 由东财按除权日对齐回填准确报告期（扶摇事件流无报告期，占位是除权年 12-31）
+        assertThat(interim.reportDate).isEqualTo("2025-06-30")
+        assertThat(interim.recordDate).isEqualTo("2025-12-14")
+        assertThat(interim.dividendYield).isWithin(1e-9).of(1.76)
+        val annual = entities.first { it.exDividendDate == "2026-05-13" }
+        assertThat(annual.cashPerShare).isWithin(1e-9).of(0.13)
+        // 已排期未除权（2026-12-15）来自东财通道
+        val scheduled = entities.first { it.exDividendDate == "2026-12-15" }
+        assertThat(scheduled.cashPerShare).isWithin(1e-9).of(0.13)
+        assertThat(scheduled.reportDate).isEqualTo("2026-06-30")
+    }
+
+    @Test
+    fun `stock fuyao failure falls back to tencent`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        coEvery { fuyaoApi.getAdjustmentFactors(any(), any(), any()) } throws
+            SocketTimeoutException("fuyao down")
+        stubTencent(
+            listOf(dayEntry("2025-07-11", dividendObj("2024", "24.6", "2025-07-10", "2025-07-11")))
+        )
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+
+        repository.fetchAndCacheDividends("sz.000001", "000001")
+
+        val entity = entitiesSlot.last().single()
+        assertThat(entity.cashPerShare).isWithin(0.001).of(2.46)   // 腾讯口径生效
+    }
+
+    @Test
+    fun `fund fuyao structured dividends replace f10 html parsing`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        // 实测：红利ETF 2026-01-20 除息，每10份税前 1.43 元
+        coEvery { fuyaoApi.getFundDividends(any(), any()) } returns
+            com.stock.dividend.data.remote.dto.FuyaoEnvelope(
+                code = 0, message = "success", requestId = "t",
+                data = com.stock.dividend.data.remote.dto.FuyaoFundDividendsData(
+                    dividendCount = 1, dividendTotal = 1.43,
+                    item = listOf(
+                        com.stock.dividend.data.remote.dto.FuyaoFundDividendItem(
+                            perTenCashBeforeTax = 1.43,
+                            publishDateMs = msOf("2026-01-15"),
+                            registrationDateMs = msOf("2026-01-19"),
+                            exDividendDateMs = msOf("2026-01-20")
+                        )
+                    )
+                )
+            )
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+
+        repository.fetchAndCacheDividends("sh.510880", "510880")
+
+        // 扶摇成功 → 不再拉 f10 HTML
+        coVerify(exactly = 0) { fundDividendApi.getFundDividendHtml(any()) }
+        val entity = entitiesSlot.last().single()
+        assertThat(entity.cashPerShare).isWithin(1e-9).of(0.143)   // 每10份 ÷10
+        assertThat(entity.exDividendDate).isEqualTo("2026-01-20")
+        assertThat(entity.recordDate).isEqualTo("2026-01-19")
+        assertThat(entity.reportDate).isEqualTo("2026-12-31")      // 公告年度 → 年末日
+    }
+
+    @Test
+    fun `fund fuyao failure falls back to f10 html`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        coEvery { fuyaoApi.getFundDividends(any(), any()) } throws
+            SocketTimeoutException("fuyao down")
+        coEvery { fundDividendApi.getFundDividendHtml("510880") } returns """
+            <html><body><div class="cfxq"><table>
+            <tr><td>2026</td><td>2026-01-19</td><td>2026-01-20</td>
+            <td>每10份派现金1.43元</td><td>2026-01-23</td></tr>
+            </table></div></body></html>
+        """.trimIndent()
+
+        repository.fetchAndCacheDividends("sh.510880", "510880")
+
+        coVerify(exactly = 1) { fundDividendApi.getFundDividendHtml("510880") }
     }
 }

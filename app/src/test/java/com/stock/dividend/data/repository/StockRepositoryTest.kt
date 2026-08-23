@@ -45,6 +45,8 @@ class StockRepositoryTest {
 
     private val api: SearchApi = mockk()
     private val quoteApi: QuoteApi = mockk()
+    private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi = mockk()
+    private val fuyaoConfig: FuyaoConfig = mockk(relaxed = true)
     private val fundamentalApi: com.stock.dividend.data.remote.FundamentalApi = mockk()
     private val dao: StockDao = mockk(relaxed = true)
     private val transactionDao: TransactionDao = mockk(relaxed = true)
@@ -56,7 +58,7 @@ class StockRepositoryTest {
     private val appDatabase: AppDatabase = mockk(relaxed = true)
     private val errorLogRepository: ErrorLogRepository = mockk(relaxed = true)
     private val repository = StockRepository(
-        api, quoteApi, fundamentalApi, dao, transactionDao, industryTargetDao,
+        api, quoteApi, fuyaoApi, fuyaoConfig, fundamentalApi, dao, transactionDao, industryTargetDao,
         priceCacheDao, searchCacheDao, stockTagDao, klineRepository, appDatabase, errorLogRepository
     )
 
@@ -72,6 +74,8 @@ class StockRepositoryTest {
         coEvery { searchCacheDao.getByQuery(any()) } returns emptyList()
         // priceCacheDao.getByCodes 默认返回空（getCachedPrices 无缓存）
         coEvery { priceCacheDao.getByCodes(any()) } returns emptyList()
+        // 默认扶摇未配置（relaxed Boolean=false），存量用例全部走东财现状路径
+        coEvery { fuyaoConfig.enabled } returns false
     }
 
     @After
@@ -1100,6 +1104,151 @@ class StockRepositoryTest {
 
         val result = repository.fetchFundamentals("sz.000001")
         assertThat(result).isNull()
+    }
+
+    // ── 扶摇主源（行情并行补齐 / 搜索）─────────────────────────────
+
+    private fun fuyaoPriceItem(
+        thscode: String,
+        lastPrice: Double,
+        volumeShares: Double? = null,
+        amplitudePct: Double? = null,
+        turnoverRatePct: Double? = null
+    ) = com.stock.dividend.data.remote.dto.FuyaoPriceItem(
+        thscode = thscode, lastPrice = lastPrice, volumeShares = volumeShares,
+        amplitudePct = amplitudePct, turnoverRatePct = turnoverRatePct
+    )
+
+    private fun fuyaoSnapshotEnvelope(vararg items: com.stock.dividend.data.remote.dto.FuyaoPriceItem) =
+        com.stock.dividend.data.remote.dto.FuyaoEnvelope(
+            code = 0, message = "success", requestId = "t",
+            data = com.stock.dividend.data.remote.dto.FuyaoSnapshotData(item = items.toList())
+        )
+
+    @Test
+    fun `quotes use fuyao as authoritative with eastmoney field supplement`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        val stocks = listOf(
+            StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1"),
+            StockEntity(code = "sh.510880", name = "红利ETF", marketCode = "1")
+        )
+        // 股票批量 + 基金逐只（ETF 混入 A 股批量会整批 1002，必须拆分）
+        coEvery { fuyaoApi.getPriceSnapshot(thscodes = "600519.SH") } returns fuyaoSnapshotEnvelope(
+            fuyaoPriceItem("600519.SH", 1272.83, volumeShares = 3347231.0)
+        )
+        coEvery { fuyaoApi.getFundSnapshot(thscode = "510880.SH") } returns fuyaoSnapshotEnvelope(
+            fuyaoPriceItem("510880.SH", 3.387, amplitudePct = 0.739208, turnoverRatePct = 2.281838)
+        )
+        // 东财候补并行：提供扶摇缺失的 PE/市值（÷100 裸值规则）
+        coEvery { quoteApi.getQuotes(secids = any()) } returns QuoteResponse(
+            data = QuoteData(
+                diff = listOf(
+                    QuoteItem(
+                        price = 127283.0, code = "600519", market = 1,
+                        pe = 1954.0, totalMarketCap = 1591141000000.0
+                    ),
+                    QuoteItem(price = 3387.0, code = "510880", market = 1)
+                )
+            )
+        )
+
+        val snapshots = repository.fetchQuoteSnapshots(stocks)
+
+        val maotai = snapshots["sh.600519"]!!
+        // 扶摇权威值（真实值无换算；东财 1272.83 相同但价来自扶摇）
+        assertThat(maotai.price).isWithin(1e-9).of(1272.83)
+        assertThat(maotai.volume).isWithin(1e-9).of(33472.31)   // 股→手
+        // 东财补齐缺失字段
+        assertThat(maotai.pe).isWithin(1e-9).of(19.54)
+        assertThat(maotai.totalMarketCap).isWithin(1.0).of(1591141000000.0)
+        val fund = snapshots["sh.510880"]!!
+        assertThat(fund.price).isWithin(1e-9).of(3.387)
+        assertThat(fund.turnoverRate).isWithin(1e-9).of(2.281838)
+        // 写透 price_cache
+        coVerify { priceCacheDao.upsertAll(any()) }
+    }
+
+    @Test
+    fun `quotes fall back to eastmoney wholly when fuyao fails`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        coEvery { fuyaoApi.getPriceSnapshot(thscodes = any()) } throws RuntimeException("fuyao down")
+        coEvery { quoteApi.getQuotes(secids = any()) } returns QuoteResponse(
+            data = QuoteData(
+                diff = listOf(QuoteItem(price = 127283.0, code = "600519", market = 1))
+            )
+        )
+
+        val snapshots = repository.fetchQuoteSnapshots(
+            listOf(StockEntity(code = "sh.600519", name = "贵州茅台", marketCode = "1"))
+        )
+
+        assertThat(snapshots["sh.600519"]!!.price).isWithin(1e-9).of(1272.83)  // 东财 ÷100 口径
+        // 降级可感知：失败日志落「同花顺」源（60s 防抖在 ErrorLogRepository 内部）
+        coVerify(atLeast = 1) {
+            errorLogRepository.record(
+                source = "同花顺", message = any(), throwable = any(), category = any()
+            )
+        }
+    }
+
+    @Test
+    fun `fund-only batch skips a-share endpoint`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        coEvery { fuyaoApi.getFundSnapshot(thscode = any()) } returns fuyaoSnapshotEnvelope(
+            fuyaoPriceItem("510880.SH", 3.387)
+        )
+        coEvery { quoteApi.getQuotes(secids = any()) } returns QuoteResponse(
+            data = QuoteData(diff = listOf(QuoteItem(price = 3387.0, code = "510880", market = 1)))
+        )
+
+        val snapshots = repository.fetchQuoteSnapshots(
+            listOf(StockEntity(code = "sh.510880", name = "红利ETF", marketCode = "1"))
+        )
+
+        assertThat(snapshots["sh.510880"]!!.price).isWithin(1e-9).of(3.387)
+        coVerify(exactly = 0) { fuyaoApi.getPriceSnapshot(thscodes = any()) }
+    }
+
+    @Test
+    fun `search uses fuyao primary filtering otc and bj duplicates`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        coEvery { fuyaoApi.searchTickers(query = any(), assetType = any(), limit = any()) } returns
+            com.stock.dividend.data.remote.dto.FuyaoEnvelope(
+                code = 0, message = "success", requestId = "t",
+                data = com.stock.dividend.data.remote.dto.FuyaoTickerSearchData(
+                    item = listOf(
+                        com.stock.dividend.data.remote.dto.FuyaoTickerItem(
+                            thscode = "023572.OF", name = "红利ETFA", exchange = null,
+                            assetType = "fund-otc"
+                        ),
+                        com.stock.dividend.data.remote.dto.FuyaoTickerItem(
+                            thscode = "899050.BJ", name = "北证50", exchange = "BJ",
+                            assetType = "a-share"
+                        ),
+                        com.stock.dividend.data.remote.dto.FuyaoTickerItem(
+                            thscode = "510880.SH", name = "红利ETF", exchange = "SH",
+                            assetType = "fund-etf"
+                        )
+                    )
+                )
+            )
+        // 搜索补价走扶摇快照
+        coEvery { fuyaoApi.getFundSnapshot(thscode = any()) } returns fuyaoSnapshotEnvelope(
+            fuyaoPriceItem("510880.SH", 3.387)
+        )
+
+        val result = repository.searchStocks("红利ETF")
+
+        assertThat(result.isSuccess).isTrue()
+        val items = result.getOrThrow()
+        // 场外（exchange=null）与北交所被过滤，仅留场内基金
+        assertThat(items).hasSize(1)
+        assertThat(items[0].code).isEqualTo("sh.510880")
+        assertThat(items[0].name).isEqualTo("红利ETF")
+        assertThat(items[0].marketCode).isEqualTo("1")
+        assertThat(items[0].currentPrice).isWithin(1e-9).of(3.387)
+        // 东财搜索未调用
+        coVerify(exactly = 0) { api.searchStocks(input = any()) }
     }
 
     private fun stockItem(code: String, name: String, mktNum: String) = StockSearchResponse.StockItem(

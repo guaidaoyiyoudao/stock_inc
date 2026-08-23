@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.stock.dividend.data.local.dao.FinancialStatementsCacheDao
 import com.stock.dividend.data.local.entity.FinancialStatementsCacheEntity
 import com.stock.dividend.data.remote.FundamentalApi
+import com.stock.dividend.data.remote.dto.toFuyaoThscodeOrNull
 import com.stock.dividend.di.EastMoneyFundamentalApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -20,6 +21,8 @@ import javax.inject.Singleton
 @Singleton
 class FinancialStatementsRepository @Inject constructor(
     private val financialStatementsCacheDao: FinancialStatementsCacheDao,
+    private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi,
+    private val fuyaoConfig: FuyaoConfig,
     @EastMoneyFundamentalApi private val fundamentalApi: FundamentalApi,
 ) {
     private val gson = Gson()
@@ -78,25 +81,79 @@ class FinancialStatementsRepository @Inject constructor(
         return cached?.let { parse(it.payload) }
     }
 
-    /** 并发拉三表（任一失败降级为空，不阻塞另两个），用 [FinancialStatementsBuilder] 对齐合并。 */
+    /**
+     * 扶摇主源 + 东财并行补齐（2026-08-23 起，行情域同款范式）：
+     * - 扶摇三表成功：扶摇为权威值，东财仅按报告期回填扶摇缺口科目（财务费用/扣非/
+     *   期末现金/存货/应付/固定资产，见 [FuyaoStatementsBuilder]）；东财失败不影响主源结果。
+     * - 扶摇失败/未配置/基金（扶摇不覆盖场内基金）：东财全量兜底（现状路径）。
+     * 两源并发发起，不增加刷新时延。
+     */
     private suspend fun fetchFromNetwork(stockCode: String): FinancialStatements? {
         val securityCode = stockCode.substringAfter(".")
         val filter = """(SECURITY_CODE="$securityCode")"""
         return coroutineScope {
-            val incomeDeferred = async {
-                runCatching { fundamentalApi.getIncomeStatement(filter = filter) }.getOrNull()
+            val fuyaoEnabled = fuyaoConfig.enabled &&
+                !FundDividendParser.isExchangeTradedFund(stockCode)
+            val fuyaoDeferred = if (fuyaoEnabled) {
+                async { runCatching { fetchStatementsFromFuyao(stockCode) }.getOrNull() }
+            } else null
+            // 东财候补：既是扶摇失败时的整体兜底，也是扶摇成功时的缺口科目补齐源
+            val emDeferred = async {
+                runCatching {
+                    val incomeDeferred = async {
+                        runCatching { fundamentalApi.getIncomeStatement(filter = filter) }.getOrNull()
+                    }
+                    val cashDeferred = async {
+                        runCatching { fundamentalApi.getCashFlowStatement(filter = filter) }.getOrNull()
+                    }
+                    val balDeferred = async {
+                        runCatching { fundamentalApi.getBalanceSheetFull(filter = filter) }.getOrNull()
+                    }
+                    FinancialStatementsBuilder.build(
+                        income = incomeDeferred.await()?.result?.data.orEmpty(),
+                        cashFlow = cashDeferred.await()?.result?.data.orEmpty(),
+                        balance = balDeferred.await()?.result?.data.orEmpty()
+                    )
+                }.getOrNull()
             }
-            val cashDeferred = async {
-                runCatching { fundamentalApi.getCashFlowStatement(filter = filter) }.getOrNull()
+
+            val fuyao = fuyaoDeferred?.await()
+            val em = emDeferred.await()
+            when {
+                fuyao != null -> {
+                    val emByDate = em?.periods?.associateBy { it.reportDate }.orEmpty()
+                    FinancialStatements(fuyao.periods.map { it.supplementedFrom(emByDate[it.reportDate]) })
+                }
+                else -> em
+            }
+        }
+    }
+
+    /** 扶摇三表（并发三请求；任一信封非 0 视为整体失败 → 调用方降级东财）。 */
+    private suspend fun fetchStatementsFromFuyao(stockCode: String): FinancialStatements {
+        val thscode = stockCode.toFuyaoThscodeOrNull()
+            ?: throw IllegalArgumentException("代码无法映射扶摇 thscode: $stockCode")
+        return coroutineScope {
+            val incomeDeferred = async {
+                val envelope = fuyaoApi.getIncomeStatements(thscode = thscode)
+                check(envelope.isOk) { "扶摇利润表失败: code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty()
             }
             val balDeferred = async {
-                runCatching { fundamentalApi.getBalanceSheetFull(filter = filter) }.getOrNull()
+                val envelope = fuyaoApi.getBalanceSheets(thscode = thscode)
+                check(envelope.isOk) { "扶摇资产负债表失败: code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty()
             }
-            FinancialStatementsBuilder.build(
-                income = incomeDeferred.await()?.result?.data.orEmpty(),
-                cashFlow = cashDeferred.await()?.result?.data.orEmpty(),
-                balance = balDeferred.await()?.result?.data.orEmpty()
-            )
+            val cashDeferred = async {
+                val envelope = fuyaoApi.getCashFlowStatements(thscode = thscode)
+                check(envelope.isOk) { "扶摇现金流量表失败: code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty()
+            }
+            FuyaoStatementsBuilder.build(
+                income = incomeDeferred.await(),
+                balance = balDeferred.await(),
+                cashFlow = cashDeferred.await()
+            ) ?: throw IllegalStateException("扶摇三表无数据: $stockCode")
         }
     }
 

@@ -27,6 +27,7 @@ enum class CacheKind(val permanent: Boolean, val label: String, val description:
     FUNDAMENTALS(true, "财务指标", "主要财务指标（ROE/负债率等），历史报告期不可变、仅新期次追加"),
     STATEMENTS(true, "财务三表", "利润/现金流/资产负债表，历史报告期不可变、仅新期次追加"),
     DIVIDENDS(true, "分红历史", "历年分红记录，永续保留；清理后重新下载"),
+    FUYAO(true, "同花顺数据缓存", "交易日历/指数日K/基金持仓·净值/龙虎榜·热榜历史等（历史不可变部分永续保留），断网可看；清理后重新下载"),
     LLM_ANALYSIS(false, "AI 解读缓存", "LLM 评估结果快照（24 小时有效期），过期仅作离线兜底");
 }
 
@@ -55,6 +56,7 @@ class CacheManagementRepository @Inject constructor(
     private val llmAnalysisCacheDao: LlmAnalysisCacheDao,
     private val dividendDao: DividendDao,
     private val dividendFreshnessStore: DividendFreshnessStore,
+    private val fuyaoCacheDao: com.stock.dividend.data.local.dao.FuyaoCacheDao,
 ) {
     /** 各缓存当前条目数（按 [CacheKind] 声明顺序返回；单个 DAO 统计失败记 0，不影响其余）。 */
     suspend fun loadStats(): List<CacheStats> = CacheKind.entries.map { kind ->
@@ -71,6 +73,7 @@ class CacheManagementRepository @Inject constructor(
                 CacheKind.FUNDAMENTALS -> fundamentalsCacheDao.clear()
                 CacheKind.STATEMENTS -> financialStatementsCacheDao.clear()
                 CacheKind.LLM_ANALYSIS -> llmAnalysisCacheDao.clear()
+                CacheKind.FUYAO -> fuyaoCacheDao.clearAll()
                 CacheKind.DIVIDENDS -> {
                     dividendDao.deleteAll()
                     dividendFreshnessStore.clear()
@@ -91,6 +94,7 @@ class CacheManagementRepository @Inject constructor(
         CacheKind.FUNDAMENTALS -> fundamentalsCacheDao.count()
         CacheKind.STATEMENTS -> financialStatementsCacheDao.count()
         CacheKind.LLM_ANALYSIS -> llmAnalysisCacheDao.count()
+        CacheKind.FUYAO -> fuyaoCacheDao.count()
         CacheKind.DIVIDENDS -> dividendDao.count()
     }
 }

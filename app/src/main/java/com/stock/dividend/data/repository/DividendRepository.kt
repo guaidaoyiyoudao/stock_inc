@@ -8,6 +8,8 @@ import com.stock.dividend.data.remote.FundDividendApi
 import com.stock.dividend.data.remote.TencentDividendApi
 import com.stock.dividend.data.remote.dto.DividendResponse
 import com.stock.dividend.data.remote.dto.TencentDividendItem
+import com.stock.dividend.data.remote.dto.fuyaoMsToDateStringOrNull
+import com.stock.dividend.data.remote.dto.toFuyaoThscodeOrNull
 import com.stock.dividend.di.EastMoneyDividendApi
 import com.stock.dividend.di.TencentDividendSource
 import kotlinx.coroutines.flow.Flow
@@ -25,30 +27,46 @@ class DividendRepository @Inject constructor(
     @TencentDividendSource private val tencentApi: TencentDividendApi,
     @EastMoneyDividendApi private val eastMoneyApi: DividendApi,
     private val fundDividendApi: FundDividendApi,
+    private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi,
+    private val fuyaoConfig: FuyaoConfig,
     private val dividendDao: DividendDao
 ) {
     /**
-     * 拉取并写入分红记录（腾讯主源 + 东财回退/补充）。
+     * 拉取并写入分红记录。
      *
-     * **场内基金（ETF/LOF）走专用源**：腾讯 K 线分红与东财 RPT_SHAREBONUS_DET 均不覆盖
-     * ETF（2026-08-22 实测均空），改拉基金 f10 分红送配页解析（见 [FundDividendParser]）。
+     * **主源分层**（2026-08-23 起）：同花顺扶摇为权威主源（股票=分红事件流一次拉全部已除权历史，
+     * 替代腾讯三块分块；ETF/LOF=结构化分红记录，替代基金 f10 页 HTML 解析）；
+     * 东财始终做 enrich（回填准确报告期/历史股息率快照/已排期未除权合并）；
+     * 扶摇失败时降级腾讯（股票）/f10 HTML（基金）。
      *
      * **历史保留式写入**（历史分红不可变）：只定点删除本次结果覆盖到的行（同 id 或同除权日），
-     * 腾讯拉取窗口（~6 年）之外的历史行永续累积，不随窗口滑动丢失；双源均无数据时不清库
+     * 拉取窗口之外的历史行永续累积，不随窗口滑动丢失；双源均无数据时不清库
      * （多为网络/反爬抖动，清空不可再生的历史记录比暂时不更新更糟）。
      */
     suspend fun fetchAndCacheDividends(stockCode: String, securityCode: String): Result<Unit> {
         return try {
             var usedEastMoneyFallback = false
             val entities = if (FundDividendParser.isExchangeTradedFund(stockCode)) {
-                fetchFundDividends(stockCode)
+                // ETF/LOF：扶摇结构化分红主源，失败降级基金 f10 页 HTML 解析
+                val fromFuyao = if (fuyaoConfig.enabled) {
+                    runCatching { fetchFundDividendsFromFuyao(stockCode) }.getOrNull()
+                } else null
+                fromFuyao ?: fetchFundDividends(stockCode)
             } else {
-                val fromTencent = fetchFromTencent(stockCode, securityCode)
-                usedEastMoneyFallback = fromTencent.isEmpty()
-                if (usedEastMoneyFallback) {
-                    fetchFromEastMoney(stockCode, securityCode)
+                val fromFuyao = if (fuyaoConfig.enabled) {
+                    runCatching { fetchDividendsFromFuyao(stockCode) }.getOrNull()
+                } else null
+                if (fromFuyao != null) {
+                    // 扶摇主源成功：东财仍按除权日对齐 enrich（报告期/股息率/已排期合并，见函数头）
+                    enrichAndMergeFromEastMoney(stockCode, securityCode, fromFuyao)
                 } else {
-                    enrichAndMergeFromEastMoney(stockCode, securityCode, fromTencent)
+                    val fromTencent = fetchFromTencent(stockCode, securityCode)
+                    usedEastMoneyFallback = fromTencent.isEmpty()
+                    if (usedEastMoneyFallback) {
+                        fetchFromEastMoney(stockCode, securityCode)
+                    } else {
+                        enrichAndMergeFromEastMoney(stockCode, securityCode, fromTencent)
+                    }
                 }
             }
 
@@ -107,7 +125,41 @@ class DividendRepository @Inject constructor(
     // ── 场内基金（ETF/LOF）专用源 ────────────────────────────────
 
     /**
-     * 基金 f10 分红送配页拉取。失败静默返回空（与腾讯主源同语义）——
+     * 扶摇基金分红（主源，替代 f10 HTML 解析）：结构化 JSON，含税前每10份现金/登记日/除息日。
+     * 每10份→每份 ÷10 为唯一单位换算（宪法原则 III 合规项）；除息日未定的记录不入库
+     * （与股票侧「exDate 已定才入库」口径一致，未除权记录由东财已排期通道覆盖股票侧）。
+     * 失败抛异常由调用方降级 f10 HTML。
+     */
+    private suspend fun fetchFundDividendsFromFuyao(stockCode: String): List<DividendEntity> {
+        val thscode = stockCode.toFuyaoThscodeOrNull()
+            ?: throw IllegalArgumentException("基金代码无法映射扶摇 thscode: $stockCode")
+        val envelope = fuyaoApi.getFundDividends(thscode = thscode)
+        check(envelope.isOk) { "扶摇基金分红失败: code=${envelope.code} ${envelope.message}" }
+        return envelope.data?.item.orEmpty().mapNotNull { item ->
+            val cashPerShare = item.perTenCashBeforeTax
+                ?.let { it / 10.0 }
+                ?.takeIf { it > 0.0 }
+                ?: return@mapNotNull null
+            val exDate = item.exDividendDateMs.fuyaoMsToDateStringOrNull() ?: return@mapNotNull null
+            // reportDate 取公告年度（对应 f10 表「年份」列语义），公告日缺失时退除息日年份
+            val year = item.publishDateMs.fuyaoMsToDateStringOrNull()?.substringBefore("-")
+                ?: exDate.substringBefore("-")
+            DividendEntity(
+                id = "${stockCode}_${exDate}",
+                stockCode = stockCode,
+                reportDate = "$year-12-31",
+                cashPerShare = cashPerShare,
+                dividendYield = null,
+                exDividendDate = exDate,
+                recordDate = item.registrationDateMs.fuyaoMsToDateStringOrNull(),
+                planNoticeDate = null,
+                planStatus = null
+            )
+        }.distinctBy { it.id }
+    }
+
+    /**
+     * 基金 f10 分红送配页拉取（候补源）。失败静默返回空（与主源同语义）——
      * f10 页对未分红基金会返回「暂无分红」空表，同样得到空列表、不误清历史。
      */
     private suspend fun fetchFundDividends(stockCode: String): List<DividendEntity> {
@@ -119,7 +171,38 @@ class DividendRepository @Inject constructor(
         return FundDividendParser.parseDividendHtml(html, stockCode)
     }
 
-    // ── 腾讯（主源）──────────────────────────────────────────────
+    // ── 同花顺扶摇（主源）──────────────────────────────────────
+
+    /**
+     * 扶摇股票分红事件流（主源）：**一次请求返回全部已除权历史**（替代腾讯三块各 2 年的分块请求），
+     * `dividend_per_share` 已是每股现金口径（无每10股换算）。纯送股事件（现金=0）无字段承载、跳过。
+     * 事件流**无报告期与预案状态**：reportDate 先按除权年占位，由 [enrichAndMergeFromEastMoney]
+     * 按除权日对齐回填东财准确报告期；「已排期未除权」仍由东财通道合并。
+     * 失败/信封非 0 抛异常 → 调用方降级腾讯路径。
+     */
+    private suspend fun fetchDividendsFromFuyao(stockCode: String): List<DividendEntity> {
+        val thscode = stockCode.toFuyaoThscodeOrNull()
+            ?: throw IllegalArgumentException("股票代码无法映射扶摇 thscode: $stockCode")
+        val envelope = fuyaoApi.getAdjustmentFactors(thscode = thscode)
+        check(envelope.isOk) { "扶摇分红事件流失败: code=${envelope.code} ${envelope.message}" }
+        return envelope.data?.item.orEmpty().mapNotNull { item ->
+            val cashPerShare = item.dividendPerShare?.takeIf { it > 0.0 } ?: return@mapNotNull null
+            val exDate = item.exDateMs.fuyaoMsToDateStringOrNull() ?: return@mapNotNull null
+            DividendEntity(
+                id = "${stockCode}_${exDate}",
+                stockCode = stockCode,
+                reportDate = "${exDate.substringBefore("-")}-12-31", // 占位，东财 enrich 回填准确报告期
+                cashPerShare = cashPerShare,
+                dividendYield = null,
+                exDividendDate = exDate,
+                recordDate = null,
+                planNoticeDate = null,
+                planStatus = null
+            )
+        }.distinctBy { it.id }
+    }
+
+    // ── 腾讯（候补）──────────────────────────────────────────────
 
     private suspend fun fetchFromTencent(
         stockCode: String,
@@ -200,10 +283,12 @@ class DividendRepository @Inject constructor(
     // ── 东方财富（补充/回退）──────────────────────────────────────
 
     /**
-     * 东财明细对腾讯主数据的补充（同一请求两用）：① 按除权日对齐补 [DividendEntity.dividendYield]
-     * 历史股息率快照（腾讯无此字段）；② 合并**已排期未除权**记录——腾讯分红嵌在历史 K 线里、只有
-     * 已除权日的记录，「实施公告已发布、除权日在未来」的分红（如年度分红明天除权）只能来自东财。
-     * 预案（exDate=null，金额可能变）不合并；东财失败/无数据时静默返回原列表，不影响主源数据。
+     * 东财明细对主源数据的补充（同一请求三用）：① 按除权日对齐补 [DividendEntity.dividendYield]
+     * 历史股息率快照与 **reportDate/recordDate**（扶摇事件流无报告期——按除权年占位的行由此
+     * 回填准确报告期；腾讯主源数据本身有报告期，回填通常为幂等同值）；② 合并**已排期未除权**
+     * 记录——主源已除权数据只有过去记录，「实施公告已发布、除权日在未来」的分红（如年度分红
+     * 明天除权）只能来自东财。预案（exDate=null，金额可能变）不合并；东财失败/无数据时静默
+     * 返回原列表，不影响主源数据。
      */
     private suspend fun enrichAndMergeFromEastMoney(
         stockCode: String,
@@ -217,22 +302,32 @@ class DividendRepository @Inject constructor(
         if (items.isEmpty()) return entities
 
         val expectedSecuCode = stockCode.toEastmoneySecuCode()
-        val yieldByExDate = items.mapNotNull { item ->
-            val exDate = item.exDividendDate?.toDateOnlyOrNull() ?: return@mapNotNull null
-            val yieldPct = item.dividentRatio?.let { it * 100.0 } ?: return@mapNotNull null
-            exDate to yieldPct
-        }.toMap()
+        val yieldByExDate = mutableMapOf<String, Double>()
+        val reportDateByExDate = mutableMapOf<String, String>()
+        val recordDateByExDate = mutableMapOf<String, String>()
+        items.forEach { item ->
+            val exDate = item.exDividendDate?.toDateOnlyOrNull() ?: return@forEach
+            item.dividentRatio?.let { yieldByExDate.putIfAbsent(exDate, it * 100.0) }
+            item.reportDate.toDateOnlyOrNull()?.let { reportDateByExDate.putIfAbsent(exDate, it) }
+            item.equityRecordDate.toDateOnlyOrNull()?.let { recordDateByExDate.putIfAbsent(exDate, it) }
+        }
 
-        // 已排期未除权 = exDate 已定但腾讯按除权日没有对应记录（腾讯只有已除权的）
-        val tencentExDates = entities.mapNotNull { it.exDividendDate }.toSet()
+        // 已排期未除权 = exDate 已定但主源按除权日没有对应记录（主源只有已除权的）
+        val mergedExDates = entities.mapNotNull { it.exDividendDate }.toSet()
         val scheduledOnly = items.mapNotNull { item ->
             item.exDividendDate?.toDateOnlyOrNull()
-                ?.takeIf { it !in tencentExDates }
+                ?.takeIf { it !in mergedExDates }
                 ?.let { toEastMoneyEntity(item, stockCode, expectedSecuCode) }
         }.distinctBy { it.exDividendDate }
 
-        return entities.map { it.copy(dividendYield = it.dividendYield ?: yieldByExDate[it.exDividendDate]) } +
-            scheduledOnly
+        return entities.map { entity ->
+            val exDate = entity.exDividendDate
+            entity.copy(
+                reportDate = (exDate?.let { reportDateByExDate[it] }) ?: entity.reportDate,
+                dividendYield = entity.dividendYield ?: exDate?.let { yieldByExDate[it] },
+                recordDate = entity.recordDate ?: exDate?.let { recordDateByExDate[it] }
+            )
+        } + scheduledOnly
     }
 
     /** 东财分红明细查询过滤条件：优先精确 SECUCODE，退化为 SECURITY_CODE。 */

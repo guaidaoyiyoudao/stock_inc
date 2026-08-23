@@ -1,8 +1,14 @@
 package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.remote.MarketApi
+import com.stock.dividend.data.remote.dto.FuyaoPriceItem
 import com.stock.dividend.data.remote.dto.IndexQuoteResponse
 import com.stock.dividend.data.remote.dto.MarketClistResponse
+import com.stock.dividend.data.remote.dto.fuyaoMsToDateStringOrNull
+import com.stock.dividend.data.remote.dto.fuyaoThscodeToAppCodeOrNull
+import com.stock.dividend.data.remote.dto.toFuyaoThscodeOrNull
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -75,6 +81,60 @@ data class DragonTigerItem(
 )
 
 /**
+ * 扶摇龙虎榜榜单（域模型，2026-08-23）。
+ * ⚠️ 换算：扶摇 `change`/`net_rate` 为**小数分数**（全 API 唯一非百分比原值的比率字段，
+ * 实测 -0.10022 = -10.022%），此处 ×100 转为 App 百分比口径，配 FuyaoDtoParseTest fixture 锁定。
+ */
+data class DragonTigerBoard(
+    val tradeDate: String?,
+    val boardType: String?,
+    val entries: List<DragonTigerBoardEntry>
+)
+
+data class DragonTigerBoardEntry(
+    val securityCode: String?,
+    val securityName: String?,
+    /** 涨跌幅 %（小数分数 ×100 后）。 */
+    val changePct: Double?,
+    /** 龙虎榜净买入额（元）。 */
+    val netBuy: Double?,
+    /** 净买入占比 %（小数分数 ×100 后）。 */
+    val netBuyPct: Double?,
+    val buyValue: Double?,
+    val sellValue: Double?,
+    val concepts: List<String>,
+    /** 上榜原因（涨停原因/题材）。 */
+    val reason: String?,
+    val hotRank: Int?,
+    val rangeDays: Int?,
+    /** 游资净买入额（元，仅全部榜返回）。 */
+    val hotMoneyNetBuy: Double?
+)
+
+/** 扶摇龙虎榜 DTO → 域模型（change/net_rate 小数分数 ×100；纯函数，配解析测试）。 */
+internal fun com.stock.dividend.data.remote.dto.FuyaoDragonTigerData.toDragonTigerBoard(): DragonTigerBoard =
+    DragonTigerBoard(
+        tradeDate = tradeDate,
+        boardType = boardType,
+        entries = stockItems.orEmpty().map { item ->
+            DragonTigerBoardEntry(
+                securityCode = item.ticker ?: item.thscode?.substringBefore("."),
+                securityName = item.name,
+                changePct = item.change?.takeIfFinite()?.let { it * 100.0 },
+                netBuy = item.netValue.takeIfFinite(),
+                netBuyPct = item.netRate?.takeIfFinite()?.let { it * 100.0 },
+                buyValue = item.buyValue.takeIfFinite(),
+                sellValue = item.sellValue.takeIfFinite(),
+                concepts = item.conceptList.orEmpty().mapNotNull { it.name },
+                reason = item.limitReason,
+                hotRank = item.hotRank,
+                rangeDays = item.rangeDays,
+                hotMoneyNetBuy = item.hotMoneyNetValue.takeIfFinite()
+            )
+        }
+    )
+
+/**
  * 市场行情数据（资金流、板块、行业内个股、指数、龙虎榜、市场情绪）。
  *
  * 所有网络失败一律吞异常返回空（红线 #2）。⚠️ 单位规则按数据源区分：
@@ -85,6 +145,9 @@ data class DragonTigerItem(
 class MarketDataRepository @Inject constructor(
     private val marketApi: MarketApi,
     private val stockRepository: StockRepository,
+    private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi,
+    private val fuyaoConfig: FuyaoConfig,
+    private val cacheStore: FuyaoCacheStore,
     @com.stock.dividend.di.EastMoneyFundamentalApi
     private val fundamentalApi: com.stock.dividend.data.remote.FundamentalApi,
     private val errorLogRepository: ErrorLogRepository,
@@ -272,12 +335,24 @@ class MarketDataRepository @Inject constructor(
 
     /** 主要指数行情（上证/深证/沪深300/创业板/科创50/中证500/中证1000）。失败返回空。 */
     suspend fun fetchIndexQuotes(): List<IndexQuote> {
-        val results = MAIN_INDICES.map { (code, secid) ->
-            runCatching { marketApi.getIndexQuote(secid).toIndexQuote(code) }
+        // 同花顺扶摇主源：一次批量拉全部主要指数（东财为 7 次单查）；失败降级东财
+        if (fuyaoConfig.enabled) {
+            runCatching { fetchIndexQuotesFromFuyao() }
+                .onSuccess { return it }
+                .onFailure {
+                    errorLogRepository.record(
+                        source = "同花顺",
+                        message = "指数主源失败，已降级东财",
+                        throwable = (it as? Exception)
+                    )
+                }
+        }
+        val results = MAIN_INDICES.map { (name, secid, _) ->
+            runCatching { marketApi.getIndexQuote(secid).toIndexQuote(name) }
                 .onFailure {
                     errorLogRepository.record(
                         source = "市场数据",
-                        message = "指数行情获取失败（$code）",
+                        message = "指数行情获取失败（$name）",
                         throwable = it,
                     )
                 }
@@ -286,8 +361,30 @@ class MarketDataRepository @Inject constructor(
         return results.filterNotNull()
     }
 
+    /** 扶摇指数批量快照 → [IndexQuote]（真实值无换算；名称由本地清单带出，快照响应无名称字段）。 */
+    private suspend fun fetchIndexQuotesFromFuyao(): List<IndexQuote> {
+        val thscodes = MAIN_INDICES.joinToString(",") { it.third }
+        val envelope = fuyaoApi.getIndexSnapshot(thscodes = thscodes)
+        check(envelope.isOk) { "扶摇指数快照失败: code=${envelope.code} ${envelope.message}" }
+        val byThscode = envelope.data?.item.orEmpty()
+            .associateBy { it.thscode }
+        return MAIN_INDICES.mapNotNull { (name, _, thscode) ->
+            byThscode[thscode]?.toIndexQuoteFromFuyao(
+                code6 = thscode.substringBefore("."),
+                name = name
+            )
+        }
+    }
+
     /** 查询单只指数/ETF 行情（传 6 位代码，自动判市场）。 */
     suspend fun fetchIndexOrEtfQuote(code6: String): IndexQuote? {
+        // 扶摇主源：快照（指数/基金按代码形态选接口）+ 并行 ticker-search 补名称（快照无名称）；
+        // 任一失败降级东财 stock/get（自带 f58 名称）。
+        if (fuyaoConfig.enabled) {
+            runCatching { fetchIndexOrEtfQuoteFromFuyao(code6) }
+                .getOrNull()
+                ?.let { return it }
+        }
         val secid = guessSecidByCode6(code6) ?: return null
         return runCatching { marketApi.getIndexQuote(secid).toIndexQuote(code6) }
             .onFailure {
@@ -298,6 +395,36 @@ class MarketDataRepository @Inject constructor(
                 )
             }
             .getOrNull()
+    }
+
+    /** 扶摇单只指数/基金快照 + 名称检索。基金走基金接口；000/399 走指数接口；其余按 A 股快照。 */
+    private suspend fun fetchIndexOrEtfQuoteFromFuyao(code6: String): IndexQuote? {
+        if (!code6.matches(Regex("\\d{6}"))) return null
+        val isFund = FundDividendParser.isExchangeTradedFundCode(code6)
+        // 市场判定与 guessSecidByCode6 一致：6 开头沪股票 / 5 开头沪基金 → 沪，其余深
+        val thscode = if (code6.startsWith("6") || code6.startsWith("5")) "$code6.SH" else "$code6.SZ"
+        return kotlinx.coroutines.coroutineScope {
+            val quoteDeferred = async {
+                val envelope = when {
+                    isFund -> fuyaoApi.getFundSnapshot(thscode = thscode)
+                    code6.startsWith("000") || code6.startsWith("399") ->
+                        fuyaoApi.getIndexSnapshot(thscodes = thscode)
+                    else -> fuyaoApi.getPriceSnapshot(thscodes = thscode)
+                }
+                check(envelope.isOk) { "扶摇快照失败: $code6 code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty().firstOrNull()
+                    ?: throw IllegalStateException("扶摇快照无数据: $code6")
+            }
+            val nameDeferred = async {
+                // 名称补充（快照响应无名称）；失败仅降级为 null，不拖垮行情
+                runCatching {
+                    val search = fuyaoApi.searchTickers(query = code6, limit = 5)
+                    search.data?.item.orEmpty()
+                        .firstOrNull { it.thscode == thscode }?.name
+                }.getOrNull()
+            }
+            quoteDeferred.await().toIndexQuoteFromFuyao(code6 = code6, name = nameDeferred.await())
+        }
     }
 
     /** 龙虎榜。传 code 过滤单股，不传返回当日全市场。失败返回空。 */
@@ -329,6 +456,282 @@ class MarketDataRepository @Inject constructor(
             )
         }.getOrDefault(emptyList())
     }
+
+    // ── 扶摇独有能力（东财/腾讯无对应；2026-08-23 数据平面全量接入）──────────
+
+    /** 扶摇独有能力统一执行器：禁用返回 null（调用方给默认值）；失败记日志返回 null（无降级源）。 */
+    private suspend fun <T> fetchFuyaoOnly(message: String, block: suspend () -> T): T? {
+        if (!fuyaoConfig.enabled) return null
+        return runCatching { block() }
+            .onFailure {
+                errorLogRepository.record(source = "同花顺", message = message, throwable = (it as? Exception))
+            }
+            .getOrNull()
+    }
+
+    /** A 股估值快照（批量 PE_TTM/PB 等）。key 为 App 代码（sh.600519）。 */
+    suspend fun fetchValuations(stockCodes: List<String>): Map<String, com.stock.dividend.data.remote.dto.FuyaoValuationItem> {
+        if (stockCodes.isEmpty()) return emptyMap()
+        return fetchFuyaoOnly("估值快照获取失败") {
+            val thscodes = stockCodes.mapNotNull { it.toFuyaoThscodeOrNull() }
+            val envelope = fuyaoApi.getValuations(thscodes = thscodes.joinToString(","))
+            check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+            envelope.data?.item.orEmpty().mapNotNull { item ->
+                item.thscode?.fuyaoThscodeToAppCodeOrNull()?.let { it to item }
+            }.toMap()
+        } ?: emptyMap()
+    }
+
+    /** 交易日历（近一年，`yyyy-MM-dd` 升序；合并式永久缓存——历史交易日不可变，新日期追加）。 */
+    suspend fun fetchTradingDays(): List<String> =
+        cacheStore.fetchFirstMerge(
+            "tradingDays",
+            fuyaoCacheTypeOf<List<String>>(),
+            merge = { cached, fresh ->
+                if (cached == null) fresh
+                else (fresh + cached).distinct().sorted()
+            }
+        ) {
+            fetchFuyaoOnly("交易日历获取失败") {
+                val envelope = fuyaoApi.getTradingDays()
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty().mapNotNull { it.date?.let { d ->
+                    // yyyyMMdd → yyyy-MM-dd
+                    if (d.length == 8) "${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}" else null
+                } }
+            } ?: emptyList()
+        } ?: emptyList()
+
+    /** 扶摇龙虎榜榜单（过去日期按日缓存优先——历史榜单不可变零网络；缺省日期恒拉最新）。 */
+    suspend fun fetchDragonTigerBoard(
+        boardType: String = "all",
+        date: String? = null
+    ): DragonTigerBoard? {
+        val isPast = date != null && date < java.time.LocalDate.now().toString()
+        return cacheStore.cacheFirstForDate(
+            key = "dragonTiger|$boardType|${date ?: "auto"}",
+            typeOfT = fuyaoCacheTypeOf<DragonTigerBoard>(),
+            isPastDate = isPast
+        ) {
+            fetchFuyaoOnly("龙虎榜（扶摇）获取失败") {
+                val envelope = fuyaoApi.getDragonTigerList(boardType = boardType, date = date)
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data?.toDragonTigerBoard()
+            }
+        }
+    }
+
+    /** 涨停股票池（过去日期按日缓存优先；当日实时恒拉网，失败回退最近一次缓存）。 */
+    suspend fun fetchLimitUpPool(
+        dateMs: Long? = null,
+        page: Int = 1,
+        size: Int = 50,
+        sortField: String = "last_price",
+        sortDir: String = "desc"
+    ): com.stock.dividend.data.remote.dto.FuyaoLimitPoolData? =
+        limitPoolCached("limitUp", dateMs, page, size) {
+            fuyaoApi.getLimitUpPool(dateMs, page, size, sortField, sortDir)
+        }
+
+    /** 跌停股票池。 */
+    suspend fun fetchLimitDownPool(
+        dateMs: Long? = null,
+        page: Int = 1,
+        size: Int = 50
+    ): com.stock.dividend.data.remote.dto.FuyaoLimitPoolData? =
+        limitPoolCached("limitDown", dateMs, page, size) {
+            fuyaoApi.getLimitDownPool(dateMs, page, size)
+        }
+
+    /** 炸板股票池。 */
+    suspend fun fetchLimitBreakPool(
+        dateMs: Long? = null,
+        page: Int = 1,
+        size: Int = 50
+    ): com.stock.dividend.data.remote.dto.FuyaoLimitPoolData? =
+        limitPoolCached("limitBreak", dateMs, page, size) {
+            fuyaoApi.getLimitBreakPool(dateMs, page, size)
+        }
+
+    /** 池子类按日缓存：显式过去日期命中即零网络；缺省（当日）拉网+缓存兜底。 */
+    private suspend fun limitPoolCached(
+        kind: String,
+        dateMs: Long?,
+        page: Int,
+        size: Int,
+        fetch: suspend () -> com.stock.dividend.data.remote.dto.FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoLimitPoolData>
+    ): com.stock.dividend.data.remote.dto.FuyaoLimitPoolData? {
+        val todayStartMs = java.time.LocalDate.now()
+            .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        return cacheStore.cacheFirstForDate(
+            key = "$kind|${dateMs ?: "auto"}|$page|$size",
+            typeOfT = fuyaoCacheTypeOf<com.stock.dividend.data.remote.dto.FuyaoLimitPoolData>(),
+            isPastDate = dateMs != null && dateMs < todayStartMs
+        ) {
+            fetchFuyaoOnly("$kind 池获取失败") {
+                val envelope = fetch()
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data
+            }
+        }
+    }
+
+    /** 连板天梯（近 30 交易日梯队矩阵，原始 JSON）。 */
+    suspend fun fetchLimitUpLadder(): com.google.gson.JsonObject? =
+        fetchFuyaoOnly("连板天梯获取失败") {
+            fuyaoApi.getLimitUpLadder().takeIf { it.isOk }?.data
+        }
+
+    /** 热股榜 Top30（覆盖式缓存：实时榜过期即无意义，缓存仅作断网兜底）。 */
+    suspend fun fetchHotStockList(period: String = "day"): List<com.stock.dividend.data.remote.dto.FuyaoHotStockItem> =
+        cacheStore.fetchFirstReplace("hotStock|$period", fuyaoCacheTypeOf<List<com.stock.dividend.data.remote.dto.FuyaoHotStockItem>>()) {
+            fetchFuyaoOnly("热股榜获取失败") {
+                val envelope = fuyaoApi.getHotStockList(period)
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty()
+            } ?: emptyList()
+        } ?: emptyList()
+
+    /** 热度飙升榜 Top30（覆盖式缓存兜底）。 */
+    suspend fun fetchSkyrocketList(period: String = "day"): List<com.stock.dividend.data.remote.dto.FuyaoHotStockItem> =
+        cacheStore.fetchFirstReplace("skyrocket|$period", fuyaoCacheTypeOf<List<com.stock.dividend.data.remote.dto.FuyaoHotStockItem>>()) {
+            fetchFuyaoOnly("飙升榜获取失败") {
+                val envelope = fuyaoApi.getSkyrocketList(period)
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty()
+            } ?: emptyList()
+        } ?: emptyList()
+
+    /** 历史热股榜（按自然日不可变：过去日期命中缓存零网络）。 */
+    suspend fun fetchHotStockListHistory(date: String): List<com.stock.dividend.data.remote.dto.FuyaoHotStockItem> =
+        cacheStore.cacheFirstForDate(
+            key = "hotHistory|$date",
+            typeOfT = fuyaoCacheTypeOf<List<com.stock.dividend.data.remote.dto.FuyaoHotStockItem>>(),
+            isPastDate = date < java.time.LocalDate.now().toString()
+        ) {
+            fetchFuyaoOnly("历史热股榜获取失败（$date）") {
+                val envelope = fuyaoApi.getHotStockListHistory(date)
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty()
+            } ?: emptyList()
+        } ?: emptyList()
+
+    /** 个股热度排名走势（原始 JSON 点位序列）。 */
+    suspend fun fetchHotStockRankTrend(
+        thscode: String,
+        startDate: String,
+        endDate: String
+    ): com.google.gson.JsonObject? =
+        fetchFuyaoOnly("个股热度走势获取失败（$thscode）") {
+            fuyaoApi.getHotStockRankTrend(thscode, startDate, endDate).takeIf { it.isOk }?.data
+        }
+
+    /** 个股异动原因列表（原始 JSON；tag 过滤）。 */
+    suspend fun fetchAnomalyList(tagCodes: String? = null): com.google.gson.JsonObject? =
+        fetchFuyaoOnly("异动列表获取失败") {
+            fuyaoApi.getAnomalyList(tagCodes).takeIf { it.isOk }?.data
+        }
+
+    /** 按股票批量查当日异动原因（原始 JSON）。 */
+    suspend fun fetchAnomalyByStock(thscodes: String): com.google.gson.JsonObject? =
+        fetchFuyaoOnly("个股异动原因获取失败") {
+            fuyaoApi.getAnomalyByStock(thscodes).takeIf { it.isOk }?.data
+        }
+
+    /** 集合竞价快照（原始 JSON；stage=live/final）。 */
+    suspend fun fetchAuctionSnapshot(thscodes: String, stage: String = "final"): com.google.gson.JsonObject? =
+        fetchFuyaoOnly("集合竞价快照获取失败") {
+            fuyaoApi.getAuctionSnapshot(thscodes, stage).takeIf { it.isOk }?.data
+        }
+
+    /** 短线风向标竞价基准（原始 JSON）。 */
+    suspend fun fetchShortTermBenchmark(date: String? = null): com.google.gson.JsonObject? =
+        fetchFuyaoOnly("短线风向标获取失败") {
+            fuyaoApi.getShortTermBenchmark(date).takeIf { it.isOk }?.data
+        }
+
+    /** 同花顺指数清单（覆盖式缓存：目录慢变，断网/禁用回退缓存）。 */
+    suspend fun fetchThsIndexList(tag: String = "cn_concept"): List<com.stock.dividend.data.remote.dto.FuyaoThsIndexItem> =
+        cacheStore.fetchFirstReplace("thsIndex|$tag", fuyaoCacheTypeOf<List<com.stock.dividend.data.remote.dto.FuyaoThsIndexItem>>()) {
+            fetchFuyaoOnly("同花顺指数清单获取失败（$tag）") {
+                val envelope = fuyaoApi.getThsIndexList(tag)
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty()
+            } ?: emptyList()
+        } ?: emptyList()
+
+    /** 指数成分股（覆盖式缓存兜底；成分半年调整一次）。 */
+    suspend fun fetchIndexConstituents(thscode: String): List<com.stock.dividend.data.remote.dto.FuyaoTickerItem> =
+        cacheStore.fetchFirstReplace("constituents|$thscode", fuyaoCacheTypeOf<List<com.stock.dividend.data.remote.dto.FuyaoTickerItem>>()) {
+            fetchFuyaoOnly("指数成分股获取失败（$thscode）") {
+                val envelope = fuyaoApi.getIndexConstituents(thscode)
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty()
+            } ?: emptyList()
+        } ?: emptyList()
+
+    /**
+     * 指数日K（无复权——历史永不漂移，比股票 K 线更不可变）。
+     * 合并式永久缓存 + 当日新鲜短路：尾根=今天或今日已同步过 → 零网络直读；
+     * 否则拉增量合并（远端覆盖同期、缓存独有旧日期永续保留）。
+     */
+    suspend fun fetchIndexDailyBars(thscode: String, days: Int = 400): List<KlineBar> {
+        val key = "indexBars|$thscode|$days"
+        val cached = cacheStore.loadEntry<List<KlineBar>>(key, fuyaoCacheTypeOf<List<KlineBar>>())
+        val today = java.time.LocalDate.now().toString()
+        val syncedToday = cached != null && java.time.Instant.ofEpochMilli(cached.fetchedAt)
+            .atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString() == today
+        if (cached != null && cached.value.isNotEmpty() &&
+            (cached.value.last().date >= today || syncedToday)
+        ) {
+            return cached.value
+        }
+        return cacheStore.fetchFirstMerge(
+            key,
+            fuyaoCacheTypeOf<List<KlineBar>>(),
+            merge = { c, fresh ->
+                if (c == null) fresh
+                else (fresh.associateBy { it.date } + c.associateBy { it.date })
+                    .values.toList().sortedBy { it.date }
+            }
+        ) {
+            fetchFuyaoOnly("指数日K获取失败（$thscode）") {
+                val endMs = System.currentTimeMillis()
+                val startMs = java.time.LocalDate.now().minusDays(days.toLong())
+                    .atStartOfDay(com.stock.dividend.data.remote.dto.FUYAO_ZONE)
+                    .toInstant().toEpochMilli()
+                val envelope = fuyaoApi.getIndexDailyBars(
+                    thscode = thscode, startMs = startMs, endMs = endMs
+                )
+                check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+                envelope.data?.item.orEmpty().mapNotNull { bar ->
+                    val date = bar.dateMs.fuyaoMsToDateStringOrNull() ?: return@mapNotNull null
+                    val close = bar.close?.takeIf { it.isFinite() && it > 0.0 } ?: return@mapNotNull null
+                    KlineBar(
+                        date = date,
+                        open = bar.open?.takeIf { it.isFinite() } ?: close,
+                        close = close,
+                        high = bar.high?.takeIf { it.isFinite() } ?: close,
+                        low = bar.low?.takeIf { it.isFinite() } ?: close,
+                        // 指数成交量扶摇为股（上证 8/21 实测 446.9 亿股与成交额/均价互洽），÷100 对齐 KlineBar 手口径
+                        volume = bar.volume?.takeIf { it.isFinite() }?.div(100.0) ?: 0.0
+                    )
+                }
+            } ?: emptyList()
+        } ?: cached?.value ?: emptyList()
+    }
+
+    /** 全量代码表（asset_type=a-share/fund-etf/fund-lof/...，分页）。 */
+    suspend fun fetchTickerList(
+        assetType: String? = null,
+        limit: Int = 1000,
+        offset: Int = 0
+    ): List<com.stock.dividend.data.remote.dto.FuyaoTickerItem> =
+        fetchFuyaoOnly("代码表获取失败") {
+            val envelope = fuyaoApi.getTickerList(assetType, limit, offset)
+            check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
+            envelope.data?.item.orEmpty()
+        } ?: emptyList()
 
     // ── 辅助：secid / fs / 单位换算 ──
 
@@ -384,15 +787,15 @@ class MarketDataRepository @Inject constructor(
         /** 全市场榜单带过滤条件时的候选集大小（客户端过滤仅作用于榜单前列）。 */
         private const val RANKING_SCAN_SIZE = 200
 
-        /** 主要指数：显示名 → push2 secid。 */
-        val MAIN_INDICES: List<Pair<String, String>> = listOf(
-            "上证指数" to "1.000001",
-            "深证成指" to "0.399001",
-            "沪深300" to "1.000300",
-            "创业板指" to "0.399006",
-            "科创50" to "1.000688",
-            "中证500" to "0.000905",
-            "中证1000" to "0.000852"
+        /** 主要指数：显示名 → (push2 secid, 扶摇 thscode)。扶摇 thscode 实测全部可用（2026-08-23）。 */
+        val MAIN_INDICES: List<Triple<String, String, String>> = listOf(
+            Triple("上证指数", "1.000001", "000001.SH"),
+            Triple("深证成指", "0.399001", "399001.SZ"),
+            Triple("沪深300", "1.000300", "000300.SH"),
+            Triple("创业板指", "0.399006", "399006.SZ"),
+            Triple("科创50", "1.000688", "000688.SH"),
+            Triple("中证500", "0.000905", "000905.SH"),
+            Triple("中证1000", "0.000852", "000852.SH")
         )
     }
 }
@@ -447,3 +850,19 @@ internal fun IndexQuoteResponse.toIndexQuote(fallbackCode: String): IndexQuote {
 
 /** 可空 Double 取有限值；null/NaN/Infinity → null。clist 字段可空，统一用本扩展（internal 供解析测试共用）。 */
 internal fun Double?.takeIfFinite(): Double? = this?.takeIf { it.isFinite() }
+
+/**
+ * 扶摇快照 item → [IndexQuote]（真实值口径无换算；金额=turnover 元）。
+ * 名称与代码由调用方提供（快照响应无名称；扶摇指数 ticker 为内部码如 1A0001，非 6 位代码）。
+ */
+internal fun FuyaoPriceItem.toIndexQuoteFromFuyao(code6: String, name: String?): IndexQuote = IndexQuote(
+    code = code6,
+    name = name,
+    price = lastPrice.takeIfFinite(),
+    changePct = changePct.takeIfFinite(),
+    prevClose = prevClose.takeIfFinite(),
+    high = high.takeIfFinite(),
+    low = low.takeIfFinite(),
+    open = open.takeIfFinite(),
+    amount = turnover.takeIfFinite()
+)

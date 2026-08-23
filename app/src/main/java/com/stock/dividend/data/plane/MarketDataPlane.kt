@@ -9,12 +9,14 @@ import com.stock.dividend.data.repository.CapitalFlow
 import com.stock.dividend.data.repository.DividendRepository
 import com.stock.dividend.data.repository.DividendMetricsCalculator
 import com.stock.dividend.data.repository.DragonTigerItem
+import com.stock.dividend.data.repository.DragonTigerBoard
 import com.stock.dividend.data.repository.ErrorLogRepository
 import com.stock.dividend.data.repository.FinancialStatements
 import com.stock.dividend.data.repository.FinancialStatementsRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.FundamentalsCacheRepository
+import com.stock.dividend.data.repository.FundDataRepository
 import com.stock.dividend.data.repository.IndexQuote
 import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
@@ -31,6 +33,21 @@ import com.stock.dividend.data.repository.StockSearchResult
 import com.stock.dividend.data.repository.TreasuryYields
 import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.enrichPayoutRatio
+import com.google.gson.JsonObject
+import com.stock.dividend.data.remote.dto.FuyaoAssetAllocationItem
+import com.stock.dividend.data.remote.dto.FuyaoFundDrawdownItem
+import com.stock.dividend.data.remote.dto.FuyaoFundHolderItem
+import com.stock.dividend.data.remote.dto.FuyaoFundHoldingsData
+import com.stock.dividend.data.remote.dto.FuyaoFundIndustryItem
+import com.stock.dividend.data.remote.dto.FuyaoFundNavItem
+import com.stock.dividend.data.remote.dto.FuyaoFundProfileItem
+import com.stock.dividend.data.remote.dto.FuyaoFundReportDateItem
+import com.stock.dividend.data.remote.dto.FuyaoFundReturnItem
+import com.stock.dividend.data.remote.dto.FuyaoHotStockItem
+import com.stock.dividend.data.remote.dto.FuyaoTickerItem
+import com.stock.dividend.data.remote.dto.FuyaoThsIndexItem
+import com.stock.dividend.data.remote.dto.FuyaoValuationItem
+import com.stock.dividend.data.remote.dto.toFuyaoThscodeOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -69,6 +86,7 @@ class MarketDataPlane @Inject constructor(
     private val fundamentalsCacheRepository: FundamentalsCacheRepository,
     private val financialStatementsRepository: FinancialStatementsRepository,
     private val marketDataRepository: MarketDataRepository,
+    private val fundDataRepository: FundDataRepository,
     private val bondYieldRepository: BondYieldRepository,
     private val researchRepository: ResearchRepository,
     private val dividendFreshnessStore: DividendFreshnessStore,
@@ -455,6 +473,211 @@ class MarketDataPlane @Inject constructor(
      * [com.stock.dividend.viewmodel.CacheManagementViewModel] 联动调用——
      * 否则 10s/60s 窗口内仍会读到已清库前的旧内存值。网络源与持久缓存不受影响。
      */
+    // ══ 扶摇独有能力（2026-08-23 全量接入；东财/腾讯无对应，禁用时返回空/null）═══════
+    // 市场类（榜单/池子/目录等）走 cachedMarket 60s 缓存；单实体类（基金资料/持仓等）
+    // 直通（数据为定期披露的低频数据，无需会话缓存）。返回的 DTO 为扶摇真实值口径
+    // （§4.9.5），唯一换算点在 DragonTigerBoard（change/net_rate 小数分数 ×100）。
+
+    /** A 股估值快照（批量 PE_TTM/PE_MRQ/PB/PS/PCF）。key 为 App 代码。60s 缓存。 */
+    suspend fun getValuations(codes: List<String>): Map<String, FuyaoValuationItem> =
+        cachedMarket("valuations|${codes.sorted().joinToString(",")}") {
+            marketDataRepository.fetchValuations(codes)
+        }
+
+    /** 交易日历（近一年 `yyyy-MM-dd` 升序；节假日守卫/回测对齐用）。60s 缓存。 */
+    suspend fun getTradingDays(): List<String> =
+        cachedMarket("tradingDays") { marketDataRepository.fetchTradingDays() }
+
+    /** 扶摇龙虎榜榜单（board_type=all/org/hot_money；date 缺省最近交易日）。60s 缓存。 */
+    suspend fun getDragonTigerBoard(boardType: String = "all", date: String? = null): DragonTigerBoard? =
+        cachedMarket("dragonTigerBoard|$boardType|$date") {
+            marketDataRepository.fetchDragonTigerBoard(boardType, date)
+        }
+
+    /** 涨停股票池（情绪温度计）。60s 缓存。 */
+    suspend fun getLimitUpPool(dateMs: Long? = null, page: Int = 1, size: Int = 50) =
+        cachedMarket("limitUp|$dateMs|$page|$size") {
+            marketDataRepository.fetchLimitUpPool(dateMs, page, size)
+        }
+
+    /** 跌停股票池。60s 缓存。 */
+    suspend fun getLimitDownPool(dateMs: Long? = null, page: Int = 1, size: Int = 50) =
+        cachedMarket("limitDown|$dateMs|$page|$size") {
+            marketDataRepository.fetchLimitDownPool(dateMs, page, size)
+        }
+
+    /** 炸板股票池。60s 缓存。 */
+    suspend fun getLimitBreakPool(dateMs: Long? = null, page: Int = 1, size: Int = 50) =
+        cachedMarket("limitBreak|$dateMs|$page|$size") {
+            marketDataRepository.fetchLimitBreakPool(dateMs, page, size)
+        }
+
+    /** 连板天梯（近 30 交易日梯队矩阵，原始 JSON）。60s 缓存。 */
+    suspend fun getLimitUpLadder(): JsonObject? =
+        cachedMarket("limitLadder") { marketDataRepository.fetchLimitUpLadder() }
+
+    /** A 股热股榜 Top30（period=day 24小时级/hour 小时级）。60s 缓存。 */
+    suspend fun getHotStockList(period: String = "day"): List<FuyaoHotStockItem> =
+        cachedMarket("hotStock|$period") { marketDataRepository.fetchHotStockList(period) }
+
+    /** 热度飙升榜 Top30。60s 缓存。 */
+    suspend fun getSkyrocketList(period: String = "day"): List<FuyaoHotStockItem> =
+        cachedMarket("skyrocket|$period") { marketDataRepository.fetchSkyrocketList(period) }
+
+    /** 历史热股榜（按自然日）。60s 缓存。 */
+    suspend fun getHotStockHistory(date: String): List<FuyaoHotStockItem> =
+        cachedMarket("hotHistory|$date") { marketDataRepository.fetchHotStockListHistory(date) }
+
+    /** 个股热度排名走势（原始 JSON）。60s 缓存。 */
+    suspend fun getHotStockRankTrend(thscode: String, startDate: String, endDate: String): JsonObject? =
+        cachedMarket("rankTrend|$thscode|$startDate|$endDate") {
+            marketDataRepository.fetchHotStockRankTrend(thscode, startDate, endDate)
+        }
+
+    /** 个股异动原因列表（原始 JSON；tag 过滤）。60s 缓存。 */
+    suspend fun getAnomalyList(tagCodes: String? = null): JsonObject? =
+        cachedMarket("anomaly|$tagCodes") { marketDataRepository.fetchAnomalyList(tagCodes) }
+
+    /** 按股票批量查当日异动原因（原始 JSON，传 App 代码列表）。60s 缓存。 */
+    suspend fun getAnomalyReasons(codes: List<String>): JsonObject? {
+        val thscodes = codes.mapNotNull { it.toFuyaoThscodeOrNull() }
+        if (thscodes.isEmpty()) return null
+        return cachedMarket("anomalyStock|${thscodes.joinToString(",")}") {
+            marketDataRepository.fetchAnomalyByStock(thscodes.joinToString(","))
+        }
+    }
+
+    /** 集合竞价快照（原始 JSON；stage=live/final，传 App 代码列表）。60s 缓存。 */
+    suspend fun getAuctionSnapshot(codes: List<String>, stage: String = "final"): JsonObject? {
+        val thscodes = codes.mapNotNull { it.toFuyaoThscodeOrNull() }
+        if (thscodes.isEmpty()) return null
+        return cachedMarket("auction|$stage|${thscodes.joinToString(",")}") {
+            marketDataRepository.fetchAuctionSnapshot(thscodes.joinToString(","), stage)
+        }
+    }
+
+    /** 短线风向标竞价基准（原始 JSON）。60s 缓存。 */
+    suspend fun getShortTermBenchmark(date: String? = null): JsonObject? =
+        cachedMarket("benchmark|$date") { marketDataRepository.fetchShortTermBenchmark(date) }
+
+    /** 同花顺指数清单（tag=cn_concept/region/tszs/industry）。60s 缓存。 */
+    suspend fun getThsIndexList(tag: String = "cn_concept"): List<FuyaoThsIndexItem> =
+        cachedMarket("thsIndex|$tag") { marketDataRepository.fetchThsIndexList(tag) }
+
+    /** 指数成分股（thscode 如 886042.TI / 000300.SH）。60s 缓存。 */
+    suspend fun getIndexConstituents(thscode: String): List<FuyaoTickerItem> =
+        cachedMarket("constituents|$thscode") { marketDataRepository.fetchIndexConstituents(thscode) }
+
+    /** 指数日K（无复权；大盘/行业走势图用）。60s 缓存。 */
+    suspend fun getIndexDailyBars(thscode: String, days: Int = 400): List<KlineBar> =
+        cachedMarket("indexBars|$thscode|$days") { marketDataRepository.fetchIndexDailyBars(thscode, days) }
+
+    /** 全量代码表（asset_type=a-share/fund-etf/fund-lof 等）。60s 缓存。 */
+    suspend fun getTickerList(assetType: String? = null, limit: Int = 1000, offset: Int = 0): List<FuyaoTickerItem> =
+        cachedMarket("tickerList|$assetType|$limit|$offset") {
+            marketDataRepository.fetchTickerList(assetType, limit, offset)
+        }
+
+    // ── 基金扩展数据（扶摇独有；输入 App 代码 sh.510880，fund_type 恒 exchange）──
+
+    /** 扶摇基金域能否使用（key 已配置）。UI 可据此提示配置入口。 */
+    fun isFundDataEnabled(): Boolean = fundDataRepository.isEnabled()
+
+    /** 基金基本资料（规模/成立/管理人/经理任职/费率）。 */
+    suspend fun getFundProfile(fundCode: String): FuyaoFundProfileItem? =
+        fundDataRepository.getProfile(fundCode)
+
+    /** 基金重仓持仓（定期披露；含股票仓位/集中度/主营行业汇总）。 */
+    suspend fun getFundHoldings(fundCode: String): FuyaoFundHoldingsData? =
+        fundDataRepository.getHoldings(fundCode)
+
+    /** 基金行业配置（部分基金无数据返回空表）。 */
+    suspend fun getFundIndustryAllocation(fundCode: String): List<FuyaoFundIndustryItem> =
+        fundDataRepository.getIndustryAllocation(fundCode)
+
+    /** 基金资产配置（股票/债券/存款/其他比例）。 */
+    suspend fun getFundAssetAllocation(fundCode: String): List<FuyaoAssetAllocationItem> =
+        fundDataRepository.getAssetAllocation(fundCode)
+
+    /** 多周期最大回撤矩阵。 */
+    suspend fun getFundDrawdowns(fundCode: String): FuyaoFundDrawdownItem? =
+        fundDataRepository.getDrawdowns(fundCode)
+
+    /** 区间收益（含同类平均）。 */
+    suspend fun getFundReturns(fundCode: String): FuyaoFundReturnItem? =
+        fundDataRepository.getReturns(fundCode)
+
+    /** 净值序列（range 缺省最新一条）。 */
+    suspend fun getFundNav(fundCode: String, range: String? = null): List<FuyaoFundNavItem> =
+        fundDataRepository.getNav(fundCode, range)
+
+    /** 持有人结构（机构/个人占比等）。 */
+    suspend fun getFundHoldersDetail(fundCode: String, mergeScope: String = "all"): List<FuyaoFundHolderItem> =
+        fundDataRepository.getHoldersDetail(fundCode, mergeScope)
+
+    /** 股票持仓披露报告期。 */
+    suspend fun getFundStockReportDates(fundCode: String): List<FuyaoFundReportDateItem> =
+        fundDataRepository.getStockReportDates(fundCode)
+
+    /** 历史股票持仓（原始 JSON）。 */
+    suspend fun getFundStockHistory(fundCode: String): JsonObject? =
+        fundDataRepository.getStockHistory(fundCode)
+
+    /** 历史债券持仓（原始 JSON）。 */
+    suspend fun getFundBondHistory(fundCode: String): JsonObject? =
+        fundDataRepository.getBondHistory(fundCode)
+
+    /** 债券持仓披露报告期。 */
+    suspend fun getFundBondReportDates(fundCode: String): List<FuyaoFundReportDateItem> =
+        fundDataRepository.getBondReportDates(fundCode)
+
+    /** 历史业绩指标序列（RSI/唐奇安/估值分位；start/end 毫秒）。 */
+    suspend fun getFundPerformanceIndicators(fundCode: String, startMs: Long, endMs: Long): JsonObject? =
+        fundDataRepository.getPerformanceIndicators(fundCode, startMs, endMs)
+
+    /** 前十大持有人（原始 JSON）。 */
+    suspend fun getFundHoldersTop(fundCode: String): JsonObject? =
+        fundDataRepository.getHoldersTop(fundCode)
+
+    /** 基金经理详情/风格/业绩/从业经历（原始 JSON，manager_id 来自资料或持仓数据）。 */
+    suspend fun getFundManagerDetail(managerId: String): JsonObject? =
+        fundDataRepository.getManagerDetail(managerId)
+
+    suspend fun getFundManagerStyle(managerId: String): JsonObject? =
+        fundDataRepository.getManagerStyle(managerId)
+
+    suspend fun getFundManagerPerformance(managerId: String): JsonObject? =
+        fundDataRepository.getManagerPerformance(managerId)
+
+    suspend fun getFundManagerExperience(managerId: String): JsonObject? =
+        fundDataRepository.getManagerExperience(managerId)
+
+    /** 基金公司详情（原始 JSON）。 */
+    suspend fun getFundCompanyDetail(companyId: String): JsonObject? =
+        fundDataRepository.getCompanyDetail(companyId)
+
+    /** 基金诊断（多维评分，原始 JSON）。 */
+    suspend fun getFundDiagnostics(fundCode: String): JsonObject? =
+        fundDataRepository.getDiagnostics(fundCode)
+
+    /** 基金资讯列表（原始 JSON）。 */
+    suspend fun getFundNews(fundCode: String): JsonObject? =
+        fundDataRepository.getNews(fundCode)
+
+    /** 基金募集列表（subscribe=active/upcoming，原始 JSON）。 */
+    suspend fun getFundOfferings(subscribe: String = "active"): JsonObject? =
+        fundDataRepository.getOfferings(subscribe)
+
+    /** 基金利润表/资产负债表/财务指标（原始 JSON）。 */
+    suspend fun getFundIncomeStatements(fundCode: String): JsonObject? =
+        fundDataRepository.getIncomeStatements(fundCode)
+
+    suspend fun getFundBalanceSheets(fundCode: String): JsonObject? =
+        fundDataRepository.getBalanceSheets(fundCode)
+
+    suspend fun getFundFinancialIndicators(fundCode: String): JsonObject? =
+        fundDataRepository.getFinancialIndicators(fundCode)
+
     fun clearSessionCaches() {
         quoteSession.clear()
         bollSession.clear()

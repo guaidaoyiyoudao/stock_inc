@@ -27,6 +27,7 @@ class CacheManagementRepositoryTest {
     private val llmAnalysisCacheDao = mockk<LlmAnalysisCacheDao>(relaxed = true)
     private val dividendDao = mockk<DividendDao>(relaxed = true)
     private val freshnessStore = mockk<DividendFreshnessStore>(relaxed = true)
+    private val fuyaoCacheDao = mockk<com.stock.dividend.data.local.dao.FuyaoCacheDao>(relaxed = true)
 
     private val repository = CacheManagementRepository(
         priceCacheDao = priceCacheDao,
@@ -37,6 +38,7 @@ class CacheManagementRepositoryTest {
         llmAnalysisCacheDao = llmAnalysisCacheDao,
         dividendDao = dividendDao,
         dividendFreshnessStore = freshnessStore,
+        fuyaoCacheDao = fuyaoCacheDao,
     )
 
     @Before
@@ -48,6 +50,7 @@ class CacheManagementRepositoryTest {
         coEvery { financialStatementsCacheDao.count() } returns 4L
         coEvery { llmAnalysisCacheDao.count() } returns 7L
         coEvery { dividendDao.count() } returns 120L
+        coEvery { fuyaoCacheDao.count() } returns 9L
     }
 
     @Test

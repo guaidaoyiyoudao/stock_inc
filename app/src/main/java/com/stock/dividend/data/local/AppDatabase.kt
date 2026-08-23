@@ -27,6 +27,7 @@ import com.stock.dividend.data.local.entity.AchievementEntity
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.DividendIncomeRecordEntity
 import com.stock.dividend.data.local.entity.ErrorLogEntity
+import com.stock.dividend.data.local.entity.FuyaoCacheEntity
 import com.stock.dividend.data.local.entity.FinancialStatementsCacheEntity
 import com.stock.dividend.data.local.entity.FireGoalEntity
 import com.stock.dividend.data.local.entity.FundamentalsCacheEntity
@@ -65,9 +66,10 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         GridPlanEntity::class,
         KlineCacheEntity::class,
         KlineCacheMetaEntity::class,
-        ErrorLogEntity::class
+        ErrorLogEntity::class,
+        FuyaoCacheEntity::class
     ],
-    version = 26,
+    version = 28,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -90,6 +92,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun gridPlanDao(): GridPlanDao
     abstract fun klineCacheDao(): KlineCacheDao
     abstract fun errorLogDao(): ErrorLogDao
+    abstract fun fuyaoCacheDao(): com.stock.dividend.data.local.dao.FuyaoCacheDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -438,6 +441,26 @@ abstract class AppDatabase : RoomDatabase() {
                         "`source` TEXT NOT NULL, " +
                         "`message` TEXT NOT NULL, " +
                         "`detail` TEXT)"
+                )
+            }
+        }
+
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // K 线缓存来源标记：同花顺/腾讯前复权基准不同，换源须全量重建（KlineRepository）
+                db.execSQL(
+                    "ALTER TABLE kline_cache_meta ADD COLUMN source TEXT NOT NULL DEFAULT 'tencent'"
+                )
+            }
+        }
+
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 扶摇数据持久缓存（交易日历/指数日K/基金持仓等不可变历史的离线可用，§4.2A）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `fuyao_cache` (" +
+                        "`key` TEXT NOT NULL, `payload` TEXT NOT NULL, " +
+                        "`fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`key`))"
                 )
             }
         }

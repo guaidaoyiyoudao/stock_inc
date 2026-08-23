@@ -6,7 +6,9 @@ import com.stock.dividend.data.remote.BondYieldApi
 import com.stock.dividend.data.remote.DividendApi
 import com.stock.dividend.data.remote.FundamentalApi
 import com.stock.dividend.data.remote.FundDividendApi
+import com.stock.dividend.data.remote.FuyaoApi
 import com.stock.dividend.data.remote.LlmApi
+import com.stock.dividend.data.repository.FuyaoConfig
 import com.stock.dividend.data.remote.MarketApi
 import com.stock.dividend.data.remote.QuoteApi
 import com.stock.dividend.data.remote.ResearchApi
@@ -46,6 +48,11 @@ annotation class TencentDividendSource
 @Retention(AnnotationRetention.BINARY)
 annotation class LlmClient
 
+/** 标记同花顺扶摇专用 client（X-api-key 认证；不加东财 Referer，与共享 client 隔离）。 */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class FuyaoClient
+
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
@@ -58,6 +65,7 @@ object NetworkModule {
     private const val REPORT_API_BASE_URL = "https://reportapi.eastmoney.com/"
     private const val ANNOUNCEMENT_BASE_URL = "https://np-anotice-stock.eastmoney.com/"
     private const val FUND_F10_BASE_URL = "https://fundf10.eastmoney.com/"
+    private const val FUYAO_BASE_URL = "https://fuyao.aicubes.cn/"
 
     /** 东财/腾讯系接口共享 Gson（容错 "-" 占位，见 [LenientDoubleDeserializer]）。LLM 接口不共享。 */
     private val marketGson: Gson = lenientMarketGson()
@@ -218,6 +226,46 @@ object NetworkModule {
                 HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
             )
             .build()
+    }
+
+    /**
+     * 同花顺扶摇专用 client：`X-api-key` 认证头从 [FuyaoConfig] **每次请求时**动态读取
+     * （设置页保存后立即生效，无需重启）。不复用共享 client——其拦截器会给未知域名
+     * 注入东财 Referer，扶摇不需要且语义不符。
+     */
+    @Provides
+    @Singleton
+    @FuyaoClient
+    fun provideFuyaoOkHttpClient(fuyaoConfig: FuyaoConfig): OkHttpClient {
+        return OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                val key = fuyaoConfig.apiKey
+                val request = if (key.isBlank()) {
+                    chain.request()
+                } else {
+                    chain.request().newBuilder()
+                        .header("X-api-key", key)
+                        .build()
+                }
+                chain.proceed(request)
+            }
+            .addInterceptor(
+                HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
+            )
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideFuyaoApi(@FuyaoClient client: OkHttpClient): FuyaoApi {
+        return Retrofit.Builder()
+            .baseUrl(FUYAO_BASE_URL)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create(marketGson))
+            .build()
+            .create(FuyaoApi::class.java)
     }
 
     @Provides

@@ -37,6 +37,7 @@ class MarketDataPlaneTest {
     private val marketDataRepository = mockk<MarketDataRepository>()
     private val bondYieldRepository = mockk<BondYieldRepository>()
     private val researchRepository = mockk<ResearchRepository>()
+    private val fundDataRepository = mockk<com.stock.dividend.data.repository.FundDataRepository>(relaxed = true)
     private val errorLogRepository = mockk<ErrorLogRepository>(relaxed = true)
     private val store = FakeFreshnessStore()
 
@@ -57,6 +58,7 @@ class MarketDataPlaneTest {
             fundamentalsCacheRepository = fundamentalsCacheRepository,
             financialStatementsRepository = financialStatementsRepository,
             marketDataRepository = marketDataRepository,
+            fundDataRepository = fundDataRepository,
             bondYieldRepository = bondYieldRepository,
             researchRepository = researchRepository,
             dividendFreshnessStore = store,

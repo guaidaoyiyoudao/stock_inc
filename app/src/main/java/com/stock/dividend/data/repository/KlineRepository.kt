@@ -5,6 +5,9 @@ import com.stock.dividend.data.local.dao.KlineCacheDao
 import com.stock.dividend.data.local.entity.KlineCacheEntity
 import com.stock.dividend.data.local.entity.KlineCacheMetaEntity
 import com.stock.dividend.data.remote.TencentDividendApi
+import com.stock.dividend.data.remote.dto.FUYAO_ZONE
+import com.stock.dividend.data.remote.dto.fuyaoMsToDateStringOrNull
+import com.stock.dividend.data.remote.dto.toFuyaoThscodeOrNull
 import com.stock.dividend.di.TencentDividendSource
 import java.time.DayOfWeek
 import java.time.Instant
@@ -76,25 +79,59 @@ private fun List<*>.parseDouble(index: Int): Double? =
     (getOrNull(index) as? String)?.toDoubleOrNull()?.takeIf { it.isFinite() }
 
 /**
- * K 线仓库：腾讯 fqkline 网络源 + Room 本地缓存（**永久缓存**：历史不可变数据持久化）。
+ * K 线仓库：网络源 + Room 本地缓存（**永久缓存**：历史不可变数据持久化）。
+ *
+ * **主源分层**（2026-08-23 起）：股票走同花顺扶摇日K（前复权 adjust=forward，窗口 ≤10 年，
+ * 一次拉全）；扶摇**只有日线**，周线/月线由 [KlineAggregator] 从日线本地聚合。基金（ETF/LOF）
+ * 保持腾讯——扶摇基金日K恒为未复权（adjust 不支持），与 BOLL/网格回测的前复权口径不符。
+ * 扶摇失败降级腾讯；未配置 key 时全部走腾讯（现状路径）。
  *
  * 读取编排（[loadBars]）：
  * 1. 缓存尾部已覆盖「本周期正在形成的最新一根」（日线=今天/周线=本周/月线=本月），或今日已同步过
  *    → 直接返回缓存，零网络——历史永不因时间过期重拉；
- * 2. 尾部落后且今日未同步 → **每日最多一次**小窗口增量补尾（从最后一根缓存日期含拉到今天，覆盖盘中变动的尾根）；
- * 3. 无缓存 / [forceRefresh] / 出现新除权日（前复权全历史漂移，增量合并会算错 BOLL）→ 全量拉取并重建缓存
+ * 2. 尾部落后且今日未同步 → **每日最多一次**小窗口增量补尾（日线从最后日期、周/月线从所在
+ *    周期首日拉到今天重算当期部分周期 K，覆盖盘中变动的尾根）；
+ * 3. 无缓存 / [forceRefresh] / 出现新除权日（前复权全历史漂移，增量合并会算错 BOLL）/ **换源**
+ *    （同花顺与腾讯的前复权因子舍入不同，基准混用会在增量边界产生价格跳变）→ 全量拉取并重建缓存
  *    （固定按 [FULL_FETCH_BARS] 深窗口拉取，与调用方请求条数解耦——浅窗口调用者不得截断缓存深度）；
  * 4. 任一网络失败 → 回退缓存（红线 #2，断网 BOLL/回测仍可用）；无缓存返回空表（历史行为）。
  *
  * 前复权漂移检测：[KlineCacheMetaEntity.lastExDividendDate] 记录写入缓存时该股最新除权日，
  * 与 dividends 表当前最新除权日比对——除权后所有历史价格整体位移，必须全量重建（约每股每年 1-2 次）。
+ *
+ * 扶摇故障冷却（[fuyaoFailureAt]）：主源失败后 [FUYAO_FAILURE_COOLDOWN_MS] 内主源视同腾讯——
+ * 否则「缓存 source=tencent ≠ 主源 fuyao」的换源判定会在扶摇故障期间把每次读取都变成全量重拉（热循环）。
  */
 @Singleton
 class KlineRepository @Inject constructor(
     @TencentDividendSource private val tencentApi: TencentDividendApi,
+    private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi,
+    private val fuyaoConfig: FuyaoConfig,
     private val klineCacheDao: KlineCacheDao,
     private val dividendDao: DividendDao
 ) {
+    /** 扶摇最近一次失败时刻（epoch ms，0=健康）；@Volatile 供并发读取。 */
+    @Volatile
+    private var fuyaoFailureAt: Long = 0L
+
+    private fun fuyaoInCooldown(now: Long = System.currentTimeMillis()): Boolean =
+        now - fuyaoFailureAt < FUYAO_FAILURE_COOLDOWN_MS
+
+    private fun markFuyaoFailure() {
+        fuyaoFailureAt = System.currentTimeMillis()
+    }
+
+    private fun markFuyaoHealthy() {
+        fuyaoFailureAt = 0L
+    }
+
+    /** 当前生效主源：股票且扶摇启用且不在故障冷却 → fuyao；否则腾讯（基金恒腾讯）。 */
+    private fun effectivePrimarySource(stockCode: String): String =
+        if (fuyaoConfig.enabled &&
+            !FundDividendParser.isExchangeTradedFund(stockCode) &&
+            !fuyaoInCooldown()
+        ) SOURCE_FUYAO else SOURCE_TENCENT
+
     suspend fun fetchCloses(
         stockCode: String,
         period: KlinePeriod,
@@ -140,10 +177,12 @@ class KlineRepository @Inject constructor(
         val latestExDate = runCatching { dividendDao.getLatestExDividendDate(stockCode) }.getOrNull()
             ?.takeIf { it <= LocalDate.now().toString() }
 
+        val primary = effectivePrimarySource(stockCode)
         val qfqShifted = meta != null && latestExDate != meta.lastExDividendDate
+        val sourceShifted = meta != null && meta.source != primary
 
         // 永久缓存：尾部已是本周期最新 / 今日已同步过（含停牌/长假期空结果）→ 零网络直读
-        if (!forceRefresh && !qfqShifted && cachedBars.isNotEmpty()) {
+        if (!forceRefresh && !qfqShifted && !sourceShifted && cachedBars.isNotEmpty()) {
             val today = LocalDate.now()
             val tailCurrent = klineTailIsCurrent(cachedBars.last().date, period, today)
             val syncedToday = meta != null && sameDay(meta.fetchedAt, today)
@@ -152,24 +191,68 @@ class KlineRepository @Inject constructor(
             }
         }
 
-        if (forceRefresh || qfqShifted || cachedBars.isEmpty()) {
-            // 全量路径：首拉 / 强刷 / 前复权漂移。窗口固定按 [FULL_FETCH_BARS]（最深消费方网格回测
+        if (forceRefresh || qfqShifted || sourceShifted || cachedBars.isEmpty()) {
+            // 全量路径：首拉 / 强刷 / 前复权漂移 / 换源。窗口固定按 [FULL_FETCH_BARS]（最深消费方网格回测
             // 的需求）拉取，与调用方 bars 解耦——否则图表等小窗口调用者触发的重建只会落浅历史，
             // replaceBars 覆盖掉已有深缓存且不会自愈（增量只向前追加），违背「历史不可变数据永久缓存」。
-            // 窗口折算 ≈ 543 交易日（周线 500 根/月线全量），均在腾讯单次上限 640 内，无截尾歧义。
-            val remote = fetchByParam(buildParam(tencentCode, period, FULL_FETCH_BARS), period)
-                ?: return cachedBars.takeLast(bars)      // 网络失败：回退缓存（无缓存时空表）
-            if (remote.isEmpty()) return cachedBars.takeLast(bars)  // 接口确无数据：不动缓存
+            // 扶摇主源：日线直出，周/月线由日线聚合；失败标记冷却并整体降级腾讯全量（一次）。
+            val fuyaoDaily = if (primary == SOURCE_FUYAO) {
+                runCatching { fetchDailyBarsFromFuyao(stockCode, fuyaoFullWindowDays(period)) }
+                    .getOrNull()
+                    ?.takeIf { it.isNotEmpty() }
+            } else null
+            if (fuyaoDaily == null && primary == SOURCE_FUYAO) markFuyaoFailure()
+
+            val remote: List<KlineBar>
+            val usedSource: String
+            if (fuyaoDaily != null) {
+                markFuyaoHealthy()
+                remote = KlineAggregator.aggregate(fuyaoDaily, period)
+                usedSource = SOURCE_FUYAO
+            } else {
+                val tencentRemote = fetchByParam(buildParam(tencentCode, period, FULL_FETCH_BARS), period)
+                    ?: return cachedBars.takeLast(bars)      // 网络失败：回退缓存（无缓存时空表）
+                if (tencentRemote.isEmpty()) return cachedBars.takeLast(bars)  // 接口确无数据：不动缓存
+                remote = tencentRemote
+                usedSource = SOURCE_TENCENT
+            }
             runCatching {
                 klineCacheDao.replaceBars(stockCode, periodKey, remote.map { it.toEntity(stockCode, periodKey) })
                 klineCacheDao.upsertMeta(
-                    KlineCacheMetaEntity(stockCode, periodKey, System.currentTimeMillis(), latestExDate)
+                    KlineCacheMetaEntity(stockCode, periodKey, System.currentTimeMillis(), latestExDate, usedSource)
                 )
             }
             return remote.takeLast(bars)
         }
 
-        // 增量补尾（每日最多一次）：从最后一根缓存日期（含）拉到今天，覆盖更新盘中变动的尾根
+        // 增量补尾（每日最多一次）：日线从最后一根缓存日期（含）拉到今天；周/月线从最后一根
+        // 所在周期首日拉——当期部分周期 K 需用完整日线重算（upsert 按日期覆盖旧尾根）
+        if (primary == SOURCE_FUYAO) {
+            val from = incrementalStartDate(period, cachedBars.last().date)
+            val windowDays = java.time.temporal.ChronoUnit.DAYS.between(from, LocalDate.now()) + 1
+            val daily = runCatching { fetchDailyBarsFromFuyao(stockCode, windowDays.toInt()) }
+                .getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+            if (daily == null) {
+                markFuyaoFailure()
+                return cachedBars.takeLast(bars)   // 扶摇增量失败：回退缓存（冷却期内走腾讯增量）
+            }
+            markFuyaoHealthy()
+            val tail = KlineAggregator.aggregate(daily, period)
+            runCatching {
+                klineCacheDao.upsertBars(tail.map { it.toEntity(stockCode, periodKey) })
+                if (period == KlinePeriod.DAILY) {
+                    klineCacheDao.trimToRecent(stockCode, periodKey, MAX_CACHED_BARS)
+                }
+                klineCacheDao.upsertMeta(
+                    KlineCacheMetaEntity(stockCode, periodKey, System.currentTimeMillis(), latestExDate, SOURCE_FUYAO)
+                )
+            }
+            val merged = (cachedBars.associateBy { it.date } + tail.associateBy { it.date })
+                .values.sortedBy { it.date }
+            return merged.takeLast(bars)
+        }
+
         val tail = fetchByParam(
             buildIncrementalParam(tencentCode, period, cachedBars.last().date),
             period
@@ -180,12 +263,54 @@ class KlineRepository @Inject constructor(
                 klineCacheDao.trimToRecent(stockCode, periodKey, MAX_CACHED_BARS)
             }
             klineCacheDao.upsertMeta(
-                KlineCacheMetaEntity(stockCode, periodKey, System.currentTimeMillis(), latestExDate)
+                KlineCacheMetaEntity(stockCode, periodKey, System.currentTimeMillis(), latestExDate, SOURCE_TENCENT)
             )
         }
         val merged = (cachedBars.associateBy { it.date } + tail.associateBy { it.date })
             .values.sortedBy { it.date }
         return merged.takeLast(bars)
+    }
+
+    /**
+     * 扶摇日K（前复权）：窗口 [windowDays] 日历天（内部钳制 ≤ [FUYAO_MAX_WINDOW_DAYS]，接口上限 10 年）。
+     * 失败/信封非 0/空结果返回 null（调用方降级腾讯）。行过滤与 [parseKlineBars] 同规则：
+     * close 缺失/≤0 丢整行，volume 缺失补 0，open/high/low 缺失回退 close。
+     * ⚠️ volume 单位换算：扶摇为**股**，腾讯 K 线为**手**（2026-08-23 审计 M2 实测：茅台
+     * 扶摇 3347231 股 = 腾讯 33472 手）——[KlineBar.volume] 语义沿用腾讯手口径，此处 ÷100。
+     */
+    private suspend fun fetchDailyBarsFromFuyao(stockCode: String, windowDays: Int): List<KlineBar>? {
+        val thscode = stockCode.toFuyaoThscodeOrNull() ?: return null
+        val window = windowDays.toLong().coerceIn(1, FUYAO_MAX_WINDOW_DAYS.toLong())
+        val startMs = LocalDate.now().minusDays(window)
+            .atStartOfDay(FUYAO_ZONE).toInstant().toEpochMilli()
+        val envelope = fuyaoApi.getDailyBars(thscode = thscode, startMs = startMs, endMs = System.currentTimeMillis())
+        if (!envelope.isOk) return null
+        return envelope.data?.item.orEmpty().mapNotNull { bar ->
+            val date = bar.dateMs.fuyaoMsToDateStringOrNull() ?: return@mapNotNull null
+            val close = bar.close?.takeIf { it.isFinite() && it > 0.0 } ?: return@mapNotNull null
+            KlineBar(
+                date = date,
+                open = bar.open?.takeIf { it.isFinite() } ?: close,
+                close = close,
+                high = bar.high?.takeIf { it.isFinite() } ?: close,
+                low = bar.low?.takeIf { it.isFinite() } ?: close,
+                volume = bar.volume?.takeIf { it.isFinite() }?.div(100.0) ?: 0.0   // 股→手
+            )
+        }
+    }
+
+    /** 全量拉取的扶摇日K窗口（日历天）：日线/周线按 [FULL_FETCH_BARS] 折算，月线取满窗口（250 月≈20 年超接口上限）。 */
+    internal fun fuyaoFullWindowDays(period: KlinePeriod): Int =
+        period.lookbackDays(FULL_FETCH_BARS).coerceAtMost(FUYAO_MAX_WINDOW_DAYS)
+
+    /** 增量起始日：日线=最后缓存日；周线=其所在周的周一；月线=其所在月 1 号（当期部分周期 K 整段重算）。 */
+    internal fun incrementalStartDate(period: KlinePeriod, lastBarDate: String): LocalDate {
+        val last = runCatching { LocalDate.parse(lastBarDate) }.getOrNull() ?: LocalDate.now()
+        return when (period) {
+            KlinePeriod.DAILY -> last
+            KlinePeriod.WEEKLY -> last.with(DayOfWeek.MONDAY)
+            KlinePeriod.MONTHLY -> last.withDayOfMonth(1)
+        }
     }
 
     /** 网络请求并解析；异常或响应缺数据键返回 null（与「成功但空」区分，前者回退缓存）。 */
@@ -217,6 +342,16 @@ class KlineRepository @Inject constructor(
         const val ADJUST_QFQ = "qfq"
         /** 每股每周期缓存上限，防增量写入无限增长。 */
         const val MAX_CACHED_BARS = 800
+
+        /** K 线缓存数据来源标识（kline_cache_meta.source，换源触发全量重建）。 */
+        const val SOURCE_FUYAO = "fuyao"
+        const val SOURCE_TENCENT = "tencent"
+
+        /** 扶摇日K窗口上限（接口限制 10 自然年，留余量）。 */
+        const val FUYAO_MAX_WINDOW_DAYS = 3600
+
+        /** 扶摇失败冷却：期间主源视同腾讯，避免换源判定热循环（每次读取都全量重拉）。 */
+        const val FUYAO_FAILURE_COOLDOWN_MS = 10 * 60 * 1000L
 
         /**
          * 全量拉取（首拉/强刷/除权重建）的固定回看条数，与调用方请求条数解耦：

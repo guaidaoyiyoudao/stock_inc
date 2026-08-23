@@ -19,9 +19,11 @@ import java.time.LocalDate
 class KlineRepositoryTest {
 
     private val tencentApi: TencentDividendApi = mockk()
+    private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi = mockk()
+    private val fuyaoConfig: FuyaoConfig = mockk(relaxed = true)
     private val klineCacheDao: KlineCacheDao = mockk(relaxed = true)
     private val dividendDao: DividendDao = mockk(relaxed = true)
-    private val repository = KlineRepository(tencentApi, klineCacheDao, dividendDao)
+    private val repository = KlineRepository(tencentApi, fuyaoApi, fuyaoConfig, klineCacheDao, dividendDao)
 
     @Before
     fun setUp() {
@@ -29,6 +31,8 @@ class KlineRepositoryTest {
         coEvery { klineCacheDao.getBars(any(), any()) } returns emptyList()
         coEvery { klineCacheDao.getMeta(any(), any()) } returns null
         coEvery { dividendDao.getLatestExDividendDate(any()) } returns null
+        // 默认扶摇未配置（relaxed Boolean=false），存量用例全部走腾讯现状路径
+        coEvery { fuyaoConfig.enabled } returns false
     }
 
     @Test
@@ -547,4 +551,137 @@ class KlineRepositoryTest {
         msg = null,
         data = mapOf("sh600036" to TencentKlineResponse.StockData(qfqday = null, qfqweek = rows))
     )
+
+    // ── 扶摇主源（股票日K + 周/月线本地聚合 + 换源全量重建 + 故障冷却）──────
+
+    private fun fuyaoDaily(vararg dateToClose: Pair<String, Double>) =
+        com.stock.dividend.data.remote.dto.FuyaoEnvelope(
+            code = 0, message = "success", requestId = "t",
+            data = com.stock.dividend.data.remote.dto.FuyaoHistoricalData(
+                item = dateToClose.map { (date, close) ->
+                    com.stock.dividend.data.remote.dto.FuyaoBarItem(
+                        dateMs = java.time.LocalDate.parse(date)
+                            .atStartOfDay(java.time.ZoneId.of("Asia/Shanghai"))
+                            .toInstant().toEpochMilli(),
+                        open = close - 0.1, close = close, high = close + 0.2, low = close - 0.3,
+                        volume = 100.0
+                    )
+                }
+            )
+        )
+
+    @Test
+    fun `fuyao enabled stock first fetch aggregates daily to weekly and marks source`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        coEvery { fuyaoApi.getDailyBars(any(), any(), any(), any(), any()) } returns fuyaoDaily(
+            "2026-08-10" to 10.0, "2026-08-11" to 10.5, "2026-08-12" to 10.8,   // W33
+            "2026-08-17" to 11.0, "2026-08-18" to 11.4                           // W34（本周）
+        )
+
+        val bars = repository.fetchKlines("sh.600036", KlinePeriod.WEEKLY)
+
+        // 两根周线：W33 close=10.8（末日）、W34 close=11.4（末日）
+        assertThat(bars.map { it.close }).containsExactly(10.8, 11.4).inOrder()
+        // volume 股→手 ÷100（审计 M2：fuyaoDaily 每根 100 股 → W33 三天合计 300 股 = 3 手）
+        assertThat(bars[0].volume).isWithin(1e-9).of(3.0)
+        coVerify(exactly = 0) { tencentApi.getKline(any()) }
+        coVerify {
+            klineCacheDao.upsertMeta(match { it.source == KlineRepository.SOURCE_FUYAO })
+        }
+    }
+
+    @Test
+    fun `fuyao daily failure falls back to tencent full and cools down`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        coEvery { fuyaoApi.getDailyBars(any(), any(), any(), any(), any()) } throws java.io.IOException("fuyao down")
+        coEvery { tencentApi.getKline(any()) } returns klineResponse(
+            listOf(listOf(today.minusDays(7).toString(), "9.0", "9.5", "9.8", "8.9", "500"))
+        )
+
+        val closes = repository.fetchCloses("sh.600036", KlinePeriod.WEEKLY)
+
+        // 整体降级腾讯：拿到腾讯周线
+        assertThat(closes).containsExactly(9.5).inOrder()
+        coVerify { klineCacheDao.upsertMeta(match { it.source == KlineRepository.SOURCE_TENCENT }) }
+
+        // 第二次读取（尾部落后 + 今日未同步）：冷却期内主源视同腾讯 → 直接走腾讯增量，不再打扶摇
+        coVerify(exactly = 1) { fuyaoApi.getDailyBars(any(), any(), any(), any(), any()) }
+        repository.fetchCloses("sh.600036", KlinePeriod.WEEKLY)
+        coVerify(exactly = 1) { fuyaoApi.getDailyBars(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `source shift triggers full rebuild via fuyao`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        // 存量腾讯缓存（尾=今天、今日已同步——若无换源判定本应零网络直读）
+        coEvery { klineCacheDao.getBars("sh.600036", "DAILY") } returns listOf(
+            cacheBar(today.toString(), 10.0, "DAILY")
+        )
+        coEvery { klineCacheDao.getMeta("sh.600036", "DAILY") } returns
+            KlineCacheMetaEntity("sh.600036", "DAILY", System.currentTimeMillis(), null, "tencent")
+        coEvery { fuyaoApi.getDailyBars(any(), any(), any(), any(), any()) } returns fuyaoDaily(
+            today.toString() to 10.5
+        )
+
+        val closes = repository.fetchCloses("sh.600036", KlinePeriod.DAILY)
+
+        // 换源（tencent→fuyao）必须全量重建，不允许新旧基准混合
+        assertThat(closes).containsExactly(10.5).inOrder()
+        coVerify(exactly = 1) { klineCacheDao.replaceBars("sh.600036", "DAILY", any()) }
+        coVerify(exactly = 0) { tencentApi.getKline(any()) }
+    }
+
+    @Test
+    fun `fund stays on tencent even when fuyao enabled`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        coEvery { tencentApi.getKline(any()) } returns klineResponse(
+            listOf(listOf("2026-08-14", "9.5", "9.8", "10.0", "9.4", "800"))
+        )
+
+        val closes = repository.fetchCloses("sh.510880", KlinePeriod.WEEKLY)
+
+        assertThat(closes).containsExactly(9.8).inOrder()
+        coVerify(exactly = 0) { fuyaoApi.getDailyBars(any(), any(), any(), any(), any()) }  // 基金恒腾讯
+    }
+
+    @Test
+    fun `fuyao incremental weekly refetches from week start and replaces partial week`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        // 末根落在过去某周（尾落后于本周一）→ 触发增量
+        coEvery { klineCacheDao.getBars("sh.600036", "WEEKLY") } returns listOf(
+            cacheBar("2026-07-24", 10.0)
+        )
+        coEvery { klineCacheDao.getMeta("sh.600036", "WEEKLY") } returns
+            KlineCacheMetaEntity("sh.600036", "WEEKLY", System.currentTimeMillis() - 86_400_000L, null, "fuyao")
+        coEvery { fuyaoApi.getDailyBars(any(), any(), any(), any(), any()) } returns fuyaoDaily(
+            "2026-07-27" to 10.1, "2026-07-31" to 10.6,   // 该周完整日线 → 整周重算
+            today.with(java.time.DayOfWeek.MONDAY).toString() to 10.8  // 本周（部分周）
+        )
+
+        val closes = repository.fetchCloses("sh.600036", KlinePeriod.WEEKLY)
+
+        coVerify { klineCacheDao.upsertBars(any()) }
+        coVerify(exactly = 0) { klineCacheDao.replaceBars(any(), any(), any()) }  // 增量而非全量
+        // 合并后包含旧缓存根 + 重建周根 + 本周部分根
+        assertThat(closes).hasSize(3)
+    }
+
+    @Test
+    fun `fuyao full window days follow period lookback with monthly clamp`() {
+        assertThat(repository.fuyaoFullWindowDays(KlinePeriod.DAILY)).isEqualTo(380)
+        assertThat(repository.fuyaoFullWindowDays(KlinePeriod.WEEKLY)).isEqualTo(1750)
+        // 250 月 ≈ 20 年超扶摇 10 年窗口 → 钳制到满窗
+        assertThat(repository.fuyaoFullWindowDays(KlinePeriod.MONTHLY))
+            .isEqualTo(KlineRepository.FUYAO_MAX_WINDOW_DAYS)
+    }
+
+    @Test
+    fun `incremental start date rolls back to period start`() {
+        assertThat(repository.incrementalStartDate(KlinePeriod.DAILY, "2026-08-19").toString())
+            .isEqualTo("2026-08-19")
+        assertThat(repository.incrementalStartDate(KlinePeriod.WEEKLY, "2026-08-19").toString())
+            .isEqualTo("2026-08-17")   // 周三 → 本周一
+        assertThat(repository.incrementalStartDate(KlinePeriod.MONTHLY, "2026-08-19").toString())
+            .isEqualTo("2026-08-01")
+    }
 }

@@ -26,7 +26,7 @@
 | 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.1.20-1.0.32 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 26** |
+| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 28** |
 | AI Agent | Google ADK Kotlin（AI Tab，OpenAI 兼容协议适配） | 0.6.0 |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
@@ -392,6 +392,7 @@ MarketDataPlane（data/plane/）
 - 基本面：`getFundamentals(code, force)` 返回**已补派息率**的产物（enrichPayoutRatio 收敛于平面内）；分红更新后可用 `enrichFundamentals(f, code)` 幂等重算（不重读缓存）。
 - 市场：指数/板块/榜单/资金流 60s 内存缓存（今日页 + 简报 + 工具同会话共享一次请求）。
 - 本地观察透传：`observeAllStocks/observeStock/observeDividends/observeAllDividends`（只读页面免于同时注入两个入口）。
+- **扶摇独有能力（2026-08-23 全量接入，东财/腾讯无对应、禁用即不可用）**：估值/交易日历/龙虎榜（⚠️ change/net_rate 小数分数 ×100）/涨跌停·炸板池·连板天梯/热股榜四件套/异动/集合竞价/同花顺指数目录·成分·指数日K/代码表 + 基金域 24 端点（`FundDataRepository`）。市场类走 60s `cachedMarket`；原始 JSON 透传方法返回 `JsonObject?`。**持久缓存（DB v28 `fuyao_cache` + `FuyaoCacheStore` 三语义：合并式/覆盖式/按日缓存优先）**——历史不可变数据离线可读。
 
 **平面文件**：`MarketDataPlane.kt`（门面）+ `PlanePolicy.kt`（TTL 常量）+ `DividendFreshnessStore.kt`（分红新鲜度 prefs 记账）+ `PlaneInFlight.kt`（同 key 并发请求合并）；DI 绑定 `di/PlaneModule.kt`。测试参考 `MarketDataPlaneTest`（16 用例：写透/去重/新鲜度/退避/口径）。
 
@@ -449,7 +450,7 @@ MarketDataPlane（data/plane/）
 
 ### 4.6 数据库（Room）纪律 —— 关键
 
-- **DB version 当前 = 26**，`exportSchema = false`（共 20 张表 / 25 个迁移步 `MIGRATION_1_2` … `MIGRATION_25_26`）。
+- **DB version 当前 = 28**，`exportSchema = false`（21 张表 / 27 个迁移步 `MIGRATION_1_2` … `MIGRATION_27_28`）。
 - 改 schema（加表/加列/改类型）**必须**：① 在 `AppDatabase` 的 `entities`/`version` 同步；② 新增 `MIGRATION_N_(N+1)` 并在 `DatabaseModule` 注册；③ `version` +1。
 - 历史迁移全部手写 `ALTER`/`CREATE`，保持这个风格。
 - 表名/列名用下划线（`dividend_income_records`、`stockCode`），实体字段用驼峰，靠 Room 注解映射。
@@ -458,7 +459,9 @@ MarketDataPlane（data/plane/）
 
 - 所有 Retrofit client 在 `di/NetworkModule.kt` 统一装配，**共享 OkHttpClient**（自动注入 `Referer`/`User-Agent` 反爬头）。
 - 多数据源用 `@Qualifier` 区分（已有 `EastMoneyDividendApi`、`TencentDividendSource`、`LlmClient`）。LLM 走独立 client（60s 超时）且 `@Url` 动态传 base。
-- 数据源：东方财富（搜索 `searchapi`、行情 `push2`、数据中心 `datacenter(-web)`）、腾讯 `web.ifzq.gtimg.cn`（K线/BOLL）、10Y 国债、OpenAI 兼容 LLM。
+- 数据源（**分层：同花顺扶摇为权威主源，东财/腾讯候补**，2026-08-23 起）：
+  - **同花顺扶摇 `fuyao.aicubes.cn`**（行情快照/指数/搜索/股票+ETF·LOF 分红/股票日K/财务三表/财务指标）：`X-api-key` 认证（`FuyaoConfig` SharedPreferences，设置 → 数据 → 数据源页填写，未配置则整体禁用走候补）；**东财并行补齐缺失字段**，扶摇失败整体降级；**股票日K主源（周/月线 `KlineAggregator` 本地聚合），基金 K 线恒腾讯**（扶摇基金日K未复权）。
+  - 东方财富（搜索/行情/财务候补 + 分红排期补充 + 板块·榜单·资金流·龙虎榜·研报·公告）、腾讯 `web.ifzq.gtimg.cn`（K线/股票分红候补）、10Y 国债、OpenAI 兼容 LLM。
 
 ### 4.8 通知 / 后台任务
 
@@ -510,7 +513,15 @@ MarketDataPlane（data/plane/）
 - **`qt.gtimg.cn/q=sh600519`**（实时行情）：`v_sh600519="1~贵州茅台~600519~1350.60~..."`，第 4 字段=现价、含涨跌额/涨跌幅/成交额/主力净流入。**接入东货行情前，用腾讯同时刻值交叉验证 ÷100 规则是否正确**（见 `QuoteSnapshotTest` 注释）。
 - **`web.ifzq.gtimg.cn/`（fqkline）**：前复权 K 线 + 分红明细，`KlineRepository`/`DividendRepository` 使用。注意：单次上限约 640 交易日（≈2.5 年），覆盖 5 年需按日期窗口分块请求（见 `DividendRepository.fetchAllDividendsFromTencent`）。
 
-#### 4.9.5 解析层实践（强制）
+#### 4.9.5 同花顺扶摇单位与接口纪律（权威主源，实测 2026-08-23）
+
+- **全部真实值**：价格/百分比/金额无 ÷100/÷1000 规则（腾讯同刻交叉验证）；唯一换算：快照成交量**股→手 ÷100**、K线成交量**股→手 ÷100**（审计 M2）、基金分红**每10份 ÷10**。
+- **统一信封**：业务错误也 HTTP 200，`FuyaoEnvelope.code != 0` 即失败（1002 标的/参数错、3001 不存在、5003 未就绪、429/4001 频率超限）→ 降级候补源。
+- ⚠️ **整批毒代码**：ETF 混入 A 股批量接口整批报 1002，股票/基金必须拆分请求。
+- ⚠️ **报告期取 `period_end_ms`**（`report_date_ms` 是公告日）；**营业总收入扶摇无此口径**（=营业收入，审计 M1，由东财并行回填）；财务指标 value 为字符串数值。
+- **只有日线**：周/月线本地聚合；基金日K恒未复权→基金 K 线保持腾讯。K线换源须全量重建（`kline_cache_meta.source`）+ 故障冷却 10 分钟。
+
+#### 4.9.6 解析层实践（强制）
 
 1. **每个新 DTO 必须配真实 JSON fixture 单测**——fixture 取自实测响应（脱敏裁剪无关字段），断言每个字段的解析值与单位。例：`MarketDtoParseTest`、`FinancialStatementDtoParseTest`、`BondYieldResponseParseTest`、`QuoteSnapshotTest`。
 2. **÷100 / takeIfFinite 等转换封装为 private 扩展**，集中一处，禁止散落多份复制。注意可空性：可空字段（`Double?`）调扩展要用 `Double?.takeIfFinite()`（接收者也声明可空），`item.field?.takeIfFinite()` 的写法才编译通过。
@@ -653,3 +664,4 @@ CI（`android.yml`）用 JDK 17 temurin，且显式 `USE_CHINA_MIRROR=false` 直
 - 2026-08-16：**集成 GLM-4.6V-Flash 视觉模型：同花顺持仓 + 交易记录截图智能导入**。① **多模态 DTO**：`LlmMessage.content` String→Any（Gson 按运行时类型序列化，文本路径零改动；响应侧 `LlmChatResponse.content` 用 `as? String` 兜底）；新增 `LlmContentPart`/`LlmImageUrl`（image_url=data:image/jpeg;base64,…）；`responseFormat` 改可空（视觉请求省略——vision 模型对 response_format 支持不稳）+ 可空 `max_tokens`（视觉传 4096 防长表截断）。② **视觉配置**：`llm_prefs` 新增 `vision_api_key`/`vision_model`（默认 glm-4.6v-flash，baseUrl 固定智谱）；**key 为空且全局 LLM 也是智谱时自动复用全局 key**（存量智谱用户零配置）；设置页「AI 与策略」新增「视觉识别模型」分组。③ **视觉导入编排** `VisionImportRepository`：bitmap→1600px/80% JPEG base64（`bitmapToJpegDataUrl`）→ content parts 请求 → `VisionImportParser`（纯函数：日期 20260801/2026年8月1日/MM-dd 归一化、方向「证券买入/卖出」→BUY/SELL、非交易行 type=null 交用户选、数字字符串去千分位）；**自动重试 5 次**（可重试：网络错/429/5xx/返回格式异常；401/403 直接报错；指数退避 1/2/4/8/8s，onRetry 回调 UI 显示「正在重试 n/5」）。④ **持仓导入双引擎**：`PortfolioImportScreen` 顶部 FilterChip「本地识别（不上传）/AI 智能识别」，视觉已配置默认 AI；隐私文案按引擎切换（⚠ 原「图片不会上传」承诺改为按模式如实标注）。⑤ **交易记录导入**（新页面）：`TransactionImportViewModel/Screen` + 路由 `transactionImport` + 交易流水页顶栏相机入口；`StockRepository.importTransactions`（事务内按日期升序：resolveStock→缺股建自选 0 股→**五元组去重**（同股同日同向同价同股数跳过）→插入→recomputeHolding，note="截图导入"）；手续费不计入（无该列，UI 明示）。测试净增 33：Parser 12/Repository 10（含重试链 401 不重试/IO 重试成功/耗尽 6 次请求/5xx 可重试/Invalid 重试/Empty 不重试）/配置回退 4/StockRepo importTransactions 3/PortfolioImport VM AI 引擎 3/TransactionImport VM 6/BitmapLoader 2；修复 `TodayBriefingCoordinatorTest` 因 content:Any 的编译连带。**不改 schema**。
 - 2026-08-17：**网格支持按股息率分档（YIELD 模式）**。用户输入股息率区间（如 5.5%→6.5%）+ 档数，每档买入价 = 年度每股分红(DPS) ÷ 该档股息率（`P = DPS/(yield/100)`，与 GridAnchorCalculator 股息底同公式），股息率等差递增 → 价格双曲线递减，天然满足 low < base。① **计算层**：`GridType` 第三种 `YIELD("YIELD")`（fromRaw 三分支）；`GridCalculator.generate` 尾参 `dps`（YIELD 必填，null/≤0 → validationError；股息率由两端价格反推 dps/base、dps/low，中间档股息率等差，首末档价格精确闭合）；`GridLevel.yieldPercent`/`GridResult.yieldStepPercent` 仅 YIELD 填充。② **持久层**：DB v22→23（grid_plans 加 `dpsPerShare REAL` 可空——**建计划时的 DPS 快照**，分红变化不使档位漂移；normalizeGridPlans 无需修补：可空列 Gson→null 不撞约束，旧备份不存在 gridType="YIELD"）。③ **VM**：UiState 加 yieldStartInput/yieldEndInput/generatorDps；`onStockSelected` 拉本地分红 DPS（竞态防护：仅选中标的未变时写入）；recalculatePreview YIELD 分支换算三价（参考上界=买入起点，股息率低于起始%即不追买）；savePlan 存 gridType="YIELD"+dpsPerShare 快照+targetYieldPercent=结束股息率；**editPlan 回填股息率区间（由存档 DPS 反推，档位与存库一致）+ 顺手补 targetYieldInput 既有回填缺口**；YIELD 一键重锚定=不拉 BOLL、重拉最新 DPS 沿原股息率区间重算三价（ReanchorDiff.newDpsPerShare 随确认保存，分红增长→网格整体上移）。④ **UI**：生成器第三个 FilterChip「按股息率」（YIELD 下隐藏锚定区与三价输入，改显起始/结束股息率+DPS 信息行三态：未选标的/有 DPS/无分红数据警示）；档位表标题 YIELD 展示「股息率 a%→b%（每档 +x）」；档位行最后一列 YIELD 以「息 x.xx%」替换偏离% 列；计划卡副标题「按股息率 a%→b%」标记。⑤ **全链路透传**（否则 YIELD 计划在通知/信号/小组件/Agent/回测中报「需要分红数据」）：GridNotifyEvaluator/TodaySignalAggregator/WidgetDataRepository/GridTools（get_grid_plans 补 yieldRange 描述）/PortfolioAnalysisTools/GridBacktestCalculator 均传 `dps = plan.dpsPerShare`。测试 +12（GridCalculatorTest 7：金标准 5.5/6.0/6.5 用例、端点精确、dps 校验、反比权重、nextBuyHint/触发标记兼容、非 YIELD null；GridPlanViewModelTest 5：预览换算、保存实体断言、无分红数据可见错误、编辑回填、YIELD 重锚定）。**不改备份载体**（直存实体自动覆盖新列）。
 - 2026-08-17：**历史不可变数据本地缓存（缓存增强三线改造）**——K线/财报/分红全部持久化到 Room，离线可用、历史永不丢失。① **K线永久缓存**（最大缺口：此前零持久化，每次 BOLL/回测都发腾讯请求）：DB v23→24（新增 `kline_cache`（PK=stockCode+period+date 的 OHLCV 行）+ `kline_cache_meta`（每股每周期 fetchedAt + lastExDividendDate），`MIGRATION_23_24`）；`KlineRepository` 缓存编排（签名不变、全调用点自动受益，新增 `forceRefresh` 尾参）：尾部已覆盖「本周期正在形成的最新一根」（新纯函数 `klineTailIsCurrent`：日线=今天/周线=本周/月线=本月）**或今日已同步过 → 零网络直读**；尾部落后且今日未同步 → **每日最多一次**小窗口增量补尾（从最后一根含拉到今天，覆盖盘中变动的尾根，`buildIncrementalParam`）；**前复权漂移检测**——meta 存写入时最新除权日，与 dividends 表比对，出现新除权日（除权后全历史价格整体位移，增量合并会算错 BOLL）→ 强制全量重建（约每股每年 1-2 次）；`trimToRecent(800)` 防增量无限增长；网络失败回退缓存（断网 BOLL/回测/图表仍可用）。② **分红历史保留式写入**：原「deleteByStockCode 整表清空+重插」有两大历史丢失风险——腾讯窗口仅 ~6 年窗口外历史被删、双源空结果（多为反爬抖动）也清库；改为**按 id/除权日定点删除**（`deleteByIds`/`deleteByStockAndExDates`，腾讯 id=code_exDate 与东财 id=code_reportDate 两种方案跨源去重）+insertAll，窗口外历史行永续累积；双源空结果不清库（`Result.success` 直返）；东财全量路径额外 `deleteStalePendingByStock` 清洗失效预案行（exDate=null 且不在本次结果中；腾讯不携带预案信息不清洗）。⚠️ Room `IN ()` 空列表是非法 SQL，repo 层 `takeIf { isNotEmpty() }` 守卫。③ **财报/基本面历史期次合并**：新纯函数 `mergeByReportDate`（远端同报告期覆盖缓存、缓存独有旧期永续保留、升序返回）——原 7 天 TTL 过期整体覆盖会因远端窗口缩短/部分接口失败丢旧期次，现 `FundamentalsCacheRepository`/`FinancialStatementsRepository` 刷新时 merge 后落库（TTL 仍 7 天，变的只是不再丢历史）。**不改备份载体**（kline_cache 与其他 cache 表一致视为可再生缓存，不进备份）。测试：KlineRepositoryTest 改造+新增 10 用例（首拉落库/尾部完整零网络/本周周线零网络/当日已同步跳过/增量窗口起点/断网回退/除权全量重建/空响应标记已同步/klineTailIsCurrent 边界）、DividendRepositoryTest 改造+新增 3 用例（定点替换不清史/东财路径清洗预案/腾讯路径不清洗）、新 HistoryCacheMergeTest 5 用例、新 FinancialStatementsRepositoryTest 4 用例、FundamentalsCacheRepositoryTest +1 merge 用例。
+- 2026-08-23：接入同花顺扶摇官方金融数据 API 为**权威第一数据源**（行情/指数/搜索/股票+ETF·LOF 分红/股票日K+周月线聚合/财务三表/财务指标），东财/腾讯候补并行补齐（`supplementedFrom` 范式）；key 设置页运行时填写；K线换源全量重建（DB v26→27）。同日全量接入扶摇独有能力（估值/日历/龙虎榜/涨跌停/热榜/异动/竞价/指数目录·成分·指数日K/代码表 + 基金域 24 端点，数据平面 +~50 方法）；落地永久缓存层 `fuyao_cache`（DB v27→28，`FuyaoCacheStore` 三语义）离线可读。横向验证三方同刻 31 PASS/0 FAIL（docs/audit/2026-08-23），修复 M1 营业总收入口径、M2 K线成交量股→手。

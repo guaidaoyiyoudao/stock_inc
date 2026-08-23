@@ -1,6 +1,8 @@
 package com.stock.dividend.data.repository
 
+import com.stock.dividend.data.remote.dto.FuyaoPriceItem
 import com.stock.dividend.data.remote.dto.QuoteItem
+import com.stock.dividend.data.remote.dto.fuyaoThscodeToAppCodeOrNull
 
 /**
  * 单股实时行情快照（已转单位：价格元、百分比 %、量纲见各字段注释）。
@@ -92,6 +94,65 @@ fun toQuoteSnapshot(item: QuoteItem): QuoteSnapshot {
 
 /** 裸值 ÷100；非有限值（NaN/Infinity）降为 null，避免污染下游计算。internal 供同包解析点共用（§4.9.5-2 单点封装）。 */
 internal fun Double.div100OrNull(): Double? = takeIf { it.isFinite() }?.div(100.0)
+
+/**
+ * 同花顺扶摇快照 item → [QuoteSnapshot]（真实值口径，§4.9 同花顺小节）：
+ * 价格/涨跌额/百分比/成交额均为原值不换算；**成交量股→手 ÷100** 对齐 App 语义
+ * （实测 2026-08-23：茅台 volume=3347231 股 = 腾讯同刻 33472 手）。
+ *
+ * 字段缺口：A 股快照无振幅/换手率/量比/PE/PB/市值（基金快照含振幅/换手率）——
+ * 置 null，由调用方以 [supplementedFrom] 用东财 ulist 并行补齐。
+ * thscode 无法映射 App 格式（BJ/场外）时返回 null，调用方跳过。
+ */
+fun toQuoteSnapshotFromFuyao(item: FuyaoPriceItem): QuoteSnapshot? {
+    val stockCode = item.thscode?.fuyaoThscodeToAppCodeOrNull() ?: return null
+    return QuoteSnapshot(
+        stockCode = stockCode,
+        price = item.lastPrice?.takeIfFinite(),
+        changePct = item.changePct?.takeIfFinite(),
+        change = item.priceChange?.takeIfFinite(),
+        open = item.open?.takeIfFinite(),
+        prevClose = item.prevClose?.takeIfFinite(),
+        high = item.high?.takeIfFinite(),
+        low = item.low?.takeIfFinite(),
+        volume = item.volumeShares?.takeIfFinite()?.div(100.0),
+        amount = item.turnover?.takeIfFinite(),
+        amplitude = item.amplitudePct?.takeIfFinite(),
+        turnoverRate = item.turnoverRatePct?.takeIfFinite(),
+        volumeRatio = null,
+        pe = null,
+        pb = null,
+        totalMarketCap = null,
+        circMarketCap = null
+    )
+}
+
+/**
+ * 权威源（扶摇）+ 候补源（东财）字段级合并：接收者为权威值，仅当字段为 null 时
+ * 从 [other] 回填（东财补齐扶摇缺失的市值/换手率/量比/振幅/PE/PB 等）。
+ * [other] 为 null（东财补齐失败）时原样返回，不影响主源结果。
+ */
+fun QuoteSnapshot.supplementedFrom(other: QuoteSnapshot?): QuoteSnapshot {
+    if (other == null || other === this) return this
+    return copy(
+        price = price ?: other.price,
+        changePct = changePct ?: other.changePct,
+        change = change ?: other.change,
+        open = open ?: other.open,
+        prevClose = prevClose ?: other.prevClose,
+        high = high ?: other.high,
+        low = low ?: other.low,
+        volume = volume ?: other.volume,
+        amount = amount ?: other.amount,
+        amplitude = amplitude ?: other.amplitude,
+        turnoverRate = turnoverRate ?: other.turnoverRate,
+        volumeRatio = volumeRatio ?: other.volumeRatio,
+        pe = pe ?: other.pe,
+        pb = pb ?: other.pb,
+        totalMarketCap = totalMarketCap ?: other.totalMarketCap,
+        circMarketCap = circMarketCap ?: other.circMarketCap
+    )
+}
 
 /**
  * 价格类裸值按标的类型选除数：场内基金（ETF/LOF）÷1000、其余 ÷100。

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CandlestickChart
 import androidx.compose.material.icons.outlined.Paid
@@ -369,6 +370,7 @@ private fun cacheKindIcon(kind: CacheKind): ImageVector = when (kind) {
     CacheKind.STATEMENTS -> Icons.AutoMirrored.Outlined.ReceiptLong
     CacheKind.DIVIDENDS -> Icons.Outlined.Paid
     CacheKind.LLM_ANALYSIS -> Icons.Outlined.AutoAwesome
+    CacheKind.FUYAO -> Icons.Filled.CloudSync
 }
 
 /**
@@ -386,6 +388,7 @@ private fun cacheKindColor(kind: CacheKind): Color {
         CacheKind.STATEMENTS -> extended.negative
         CacheKind.DIVIDENDS -> scheme.error
         CacheKind.LLM_ANALYSIS -> scheme.outline
+        CacheKind.FUYAO -> scheme.primaryContainer
     }
 }
 

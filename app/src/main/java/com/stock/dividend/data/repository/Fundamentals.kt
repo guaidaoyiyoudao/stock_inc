@@ -29,6 +29,40 @@ data class Fundamentals(
 enum class FundamentalsTrend { Up, Down, Flat, Insufficient }
 
 /**
+ * 主源（扶摇）+ 候补（东财）单期字段级合并：仅回填接收者为 null 的字段
+ * （东财补齐 dividendPlan 分红方案 / announceYield 公告股息率 等扶摇没有的字段）。
+ * [other] 为 null 原样返回（东财补齐失败不影响主源结果）。
+ */
+fun Fundamentals.Period.supplementedFrom(other: Fundamentals.Period?): Fundamentals.Period {
+    if (other == null || other === this) return this
+    return copy(
+        roe = roe ?: other.roe,
+        debtToAssetRatio = debtToAssetRatio ?: other.debtToAssetRatio,
+        revenueYoy = revenueYoy ?: other.revenueYoy,
+        netProfitYoy = netProfitYoy ?: other.netProfitYoy,
+        basicEps = basicEps ?: other.basicEps,
+        announceYield = announceYield ?: other.announceYield,
+        dividendPlan = dividendPlan ?: other.dividendPlan
+    )
+}
+
+/**
+ * 主源期次 + 候补期次按报告期合并：同期字段级补齐（[Fundamentals.Period.supplementedFrom]），
+ * 候补独有的期次（扶摇窗口未覆盖的旧期）追加；升序返回。payoutRatio 不在此合并
+ * （恒由 enrichPayoutRatio 幂等重算）。
+ */
+fun mergeFundamentalsPeriods(
+    primary: List<Fundamentals.Period>,
+    supplement: List<Fundamentals.Period>
+): List<Fundamentals.Period> {
+    if (supplement.isEmpty()) return primary
+    val supplementByDate = supplement.associateBy { it.reportDate }
+    val merged = primary.map { it.supplementedFrom(supplementByDate[it.reportDate]) }
+    val knownDates = primary.map { it.reportDate }.toSet()
+    return (merged + supplement.filter { it.reportDate !in knownDates }).sortedBy { it.reportDate }
+}
+
+/**
  * DTO → [Fundamentals] 解析（纯函数）。
  *
  * 只解析 ROE / 资产负债率 / 营收同比 / 净利同比；[Fundamentals.Period.payoutRatio] 在此阶段恒为 null，

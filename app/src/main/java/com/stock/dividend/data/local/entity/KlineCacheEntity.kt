@@ -21,5 +21,11 @@ data class KlineCacheMetaEntity(
     val stockCode: String,
     val period: String,
     val fetchedAt: Long,
-    val lastExDividendDate: String?
+    val lastExDividendDate: String?,
+    /**
+     * 缓存数据来源（[com.stock.dividend.data.repository.KlineRepository] 的 SOURCE_* 常量）。
+     * 同花顺与腾讯的前复权基准不同：source ≠ 当前主源时必须全量重建（增量合并会在边界
+     * 产生价格跳变）。v26 及以前的存量缓存无此标记，迁移默认 "tencent"。
+     */
+    val source: String = "tencent"
 )
