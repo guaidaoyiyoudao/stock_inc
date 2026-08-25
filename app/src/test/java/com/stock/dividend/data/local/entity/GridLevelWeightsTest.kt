@@ -43,8 +43,8 @@ class GridLevelWeightsTest {
     }
 
     @Test
-    fun `toJson omits trailing zeros noise`() {
-        // 权重是用户输入的相对比例（如 20/30/50），序列化保持数值本身
+    fun `toJson serializes plain decimal values`() {
+        // 权重是用户输入的相对比例（如 20/30/50），序列化保留数值本身（20.0，无科学计数或精度噪声）
         assertThat(GridLevelWeights.toJson(listOf(20.0, 30.0)))
             .isEqualTo("[20.0,30.0]")
     }

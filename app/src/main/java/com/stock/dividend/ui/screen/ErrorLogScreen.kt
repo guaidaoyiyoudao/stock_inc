@@ -120,7 +120,9 @@ fun ErrorLogScreen(
                 if (state.logs.isEmpty()) {
                     item {
                         EmptyStateView(
-                            modifier = Modifier.fillParentMaxWidth()
+                            modifier = Modifier.fillParentMaxWidth(),
+                            title = "暂无失败日志",
+                            subtitle = "数据获取一切正常，若有异常会记录在此",
                         )
                     }
                 } else {

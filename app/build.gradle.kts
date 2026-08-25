@@ -66,6 +66,14 @@ android {
         unitTests {
             // Robolectric 需要读取 manifest/resources 才能提供真实 Android 环境
             isIncludeAndroidResources = true
+            // Compose UI 测试依赖 debug 变体 manifest 里的 test-manifest
+            // （ComponentActivity），release 变体没有——只跑 debug；新增 Compose UI
+            // 测试类时在此追加排除
+            all { test ->
+                if (test.name.contains("Release")) {
+                    test.filter.excludeTestsMatching("*AiChatScrollToBottomTest*")
+                }
+            }
         }
     }
 
@@ -77,6 +85,13 @@ android {
         }
     }
 
+}
+
+// Room schema 导出（2026-08-24 评审 M3）：app/schemas/…/32.json 基线已生成。⚠️ exportSchema
+// 当前为 false——开启时 room-compiler 内置 kotlinx-serialization 与依赖图更高版本
+// serialization-core ABI 冲突（AbstractMethodError），修复依赖图后改回 true 即可续用此配置。
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -180,6 +195,9 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.test.runner)
     testImplementation(libs.mockwebserver)
+    // Robolectric 内跑 Compose UI 测试（配方：junit4 走 test；test-manifest 只在 debug
+    // 变体合并进 manifest，故 Compose UI 测试仅 debug 变体运行，release 在下方排除）
+    testImplementation(libs.compose.junit)
     debugImplementation(libs.compose.test.manifest)
     androidTestImplementation(composeBom)
     androidTestImplementation(libs.compose.junit)

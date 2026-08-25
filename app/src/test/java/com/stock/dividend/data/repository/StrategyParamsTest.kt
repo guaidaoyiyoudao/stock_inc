@@ -149,4 +149,49 @@ class StrategyParamsTest {
         assertThat(params).isNull()
         assertThat(error).isNull()
     }
+
+    // ── 2026-08-24 评审修复：decode 兜底不变量闭合 + 整数输入不静默截断 ──
+
+    @Test
+    fun `decodeTakeProfit 脏组合兜底后仍满足 all 大于 half`() {
+        // 只带 half=50：all 回退默认 25 仍 ≤ half → 必须抬高 all 闭合不变量，
+        // 否则涨幅 25% 即 SELL_ALL 清仓，违背存档 half=50 的意图
+        val fixed = StrategyParams.decodeTakeProfit("""{"halfGainPercent":50}""")
+        assertThat(fixed.halfGainPercent).isEqualTo(50.0)
+        assertThat(fixed.allGainPercent).isEqualTo(60.0)   // max(25, 50+10)
+        // 只带 all=10：half 回退默认 15 > all → all 抬到 max(25, 15+10)=25
+        val fixed2 = StrategyParams.decodeTakeProfit("""{"allGainPercent":10}""")
+        assertThat(fixed2.halfGainPercent).isEqualTo(15.0)
+        assertThat(fixed2.allGainPercent).isEqualTo(25.0)
+    }
+
+    @Test
+    fun `decodeDualMa 脏组合兜底后仍满足 slow 大于 fast`() {
+        // 只带 fast=300：slow 回退默认 250 仍 ≤ fast → 必须抬 slow，否则快慢线语义颠倒
+        val fixed = StrategyParams.decodeDualMa("""{"fastPeriod":300}""")
+        assertThat(fixed.fastPeriod).isEqualTo(300)
+        assertThat(fixed.slowPeriod).isEqualTo(350)   // max(250, 300+50)
+    }
+
+    @Test
+    fun `fromInputs 整数字段拒绝小数而非静默截断`() {
+        // "50.5" 此前经 toDoubleOrNull().toInt() 偷偷变 50；现在必须报错让用户改输入
+        val (_, e1) = StrategyParams.fromInputs(
+            STRATEGY_TYPE_DUAL_MA,
+            mapOf("fastPeriod" to "50.5", "slowPeriod" to "250")
+        )
+        assertThat(e1).isEqualTo("快线周期须为整数")
+        val (_, e2) = StrategyParams.fromInputs(
+            STRATEGY_TYPE_DIVIDEND_REINVEST,
+            mapOf("lookaheadDays" to "2.9")
+        )
+        assertThat(e2).isEqualTo("展望天数须为整数")
+        // 合法整数输入不受影响
+        val (params, e3) = StrategyParams.fromInputs(
+            STRATEGY_TYPE_DUAL_MA,
+            mapOf("fastPeriod" to "50", "slowPeriod" to "250")
+        )
+        assertThat(e3).isNull()
+        assertThat(params).isNotNull()
+    }
 }

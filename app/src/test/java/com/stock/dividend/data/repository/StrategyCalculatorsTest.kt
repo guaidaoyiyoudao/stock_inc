@@ -59,26 +59,31 @@ class StrategyCalculatorsTest {
     fun `股息率带 达加仓线买入 跌破卖出线清仓 带内持有`() {
         val params = StrategyParams.YieldBand(buyYieldPercent = 6.0, addYieldPercent = 6.5, sellYieldPercent = 4.0)
         // 价 10.0 × DPS 0.6 → 息恰 6.0%（== 计为达线）
-        val buy = YieldBandStrategyCalculator.evaluate(10.0, 0.6, 1000.0, params)!!
+        val buy = YieldBandStrategyCalculator.evaluate(10.0, 0.6, 300, 1000.0, params)!!
         assertThat(buy.action).isEqualTo(StrategyAction.BUY)
         assertThat(buy.buyShares).isEqualTo(lot(1))   // 1000 ÷ 10 = 100 股
         // 价 10.0 × DPS 0.65 → 息恰 6.5% 达加仓线
-        val add = YieldBandStrategyCalculator.evaluate(10.0, 0.65, 1000.0, params)!!
+        val add = YieldBandStrategyCalculator.evaluate(10.0, 0.65, 300, 1000.0, params)!!
         assertThat(add.action).isEqualTo(StrategyAction.BUY)
         assertThat(add.headline).contains("加仓")
-        // 价 10.0 × DPS 0.4 → 息恰 4.0% 跌破卖出线
-        val sell = YieldBandStrategyCalculator.evaluate(10.0, 0.4, 1000.0, params.copy())!!
+        // 价 10.0 × DPS 0.4 → 息恰 4.0% 跌破卖出线：清仓信号带股数（一键记账按钮依赖 sellShares>0）
+        val sell = YieldBandStrategyCalculator.evaluate(10.0, 0.4, 300, 1000.0, params)!!
         assertThat(sell.action).isEqualTo(StrategyAction.SELL_ALL)
+        assertThat(sell.sellShares).isEqualTo(300)
         assertThat(sell.notifyTier).isEqualTo("ALL")
+        // 无持仓跌破卖出线 → 仅跟踪（不推送 0 股卖出提醒）
+        val sellNoHolding = YieldBandStrategyCalculator.evaluate(10.0, 0.4, 0, 1000.0, params)!!
+        assertThat(sellNoHolding.action).isEqualTo(StrategyAction.HOLD)
+        assertThat(sellNoHolding.notifyTier).isNull()
         // 价 10.0 × DPS 0.5 → 息 5% 带内
-        val hold = YieldBandStrategyCalculator.evaluate(10.0, 0.5, 1000.0, params)!!
+        val hold = YieldBandStrategyCalculator.evaluate(10.0, 0.5, 300, 1000.0, params)!!
         assertThat(hold.action).isEqualTo(StrategyAction.HOLD)
     }
 
     @Test
     fun `股息率带 无分红数据返回 null`() {
         assertThat(
-            YieldBandStrategyCalculator.evaluate(8.0, null, 1000.0, StrategyParams.YieldBand())
+            YieldBandStrategyCalculator.evaluate(8.0, null, 0, 1000.0, StrategyParams.YieldBand())
         ).isNull()
     }
 
@@ -125,18 +130,33 @@ class StrategyCalculatorsTest {
     @Test
     fun `偏离回归 低于均线分档买入 回归均线卖出`() {
         val params = StrategyParams.MaDeviation(maPeriod = 250, stepPercent = 5.0, buyLevels = 3)
-        // 价 9.4 → 偏离 -6% → 第 2 档
+        // 恰达边界：价 9.5 → 偏离恰 -5% → 第 1 档（恰达阈值计触发；2026-08-24 修复：此前报第 2 档）
+        val exact = MaDeviationStrategyCalculator.evaluate(flatDeviationCloses, 9.5, 300, 1000.0, params)!!
+        assertThat(exact.action).isEqualTo(StrategyAction.BUY)
+        assertThat(exact.headline).contains("第 1 档")
+        // 价 9.4 → 偏离 -6% → (-6/5)=1.2 floor → 第 1 档（此前 toInt()+1 误报第 2 档）
         val buy = MaDeviationStrategyCalculator.evaluate(flatDeviationCloses, 9.4, 300, 1000.0, params)!!
         assertThat(buy.action).isEqualTo(StrategyAction.BUY)
-        assertThat(buy.headline).contains("2")
+        assertThat(buy.headline).contains("第 1 档")
         assertThat(buy.buyShares).isEqualTo(lot(1))   // 1000 ÷ 9.4 ≈ 106 → 100
         assertThat(buy.notifyTier).isNull()           // 买入方向只展示不推送
+        // 价 9.0 → 偏离 -10% → 恰达第 2 档
+        val second = MaDeviationStrategyCalculator.evaluate(flatDeviationCloses, 9.0, 300, 1000.0, params)!!
+        assertThat(second.headline).contains("第 2 档")
+        // 价 8.5 → 偏离 -15% → 恰达最深第 3 档（未超出，仍是第 3 档低吸）
+        val deepestExact = MaDeviationStrategyCalculator.evaluate(flatDeviationCloses, 8.5, 300, 1000.0, params)!!
+        assertThat(deepestExact.headline).contains("第 3 档")
+        assertThat(deepestExact.headline).doesNotContain("最深")
 
         // 价 10.0 = 回归均线 → 卖出低吸部分（一半整手）
         val sell = MaDeviationStrategyCalculator.evaluate(flatDeviationCloses, 10.0, 300, 1000.0, params)!!
         assertThat(sell.action).isEqualTo(StrategyAction.SELL_HALF)
         assertThat(sell.sellShares).isEqualTo(lot(1))
         assertThat(sell.notifyTier).isEqualTo("HALF")
+        // 无持仓回归均线 → 仅跟踪（2026-08-24 修复：不再推「卖出 0 股」）
+        val sellNoHolding = MaDeviationStrategyCalculator.evaluate(flatDeviationCloses, 10.0, 0, 1000.0, params)!!
+        assertThat(sellNoHolding.action).isEqualTo(StrategyAction.HOLD)
+        assertThat(sellNoHolding.notifyTier).isNull()
 
         // 价 9.8 → 偏离 -2% 未到第一档 → 持有
         val hold = MaDeviationStrategyCalculator.evaluate(flatDeviationCloses, 9.8, 300, 1000.0, params)!!

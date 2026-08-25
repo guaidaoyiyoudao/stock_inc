@@ -206,11 +206,12 @@ class StrategyPlanViewModel @Inject constructor(
 
     fun onStockSelected(code: String) {
         _uiState.update { it.copy(selectedStockCode = code, saveError = null) }
-        // 选中后立刻拉该标的现价，驱动列表与预览
+        // 选中后立刻拉该标的现价，驱动列表与预览（merge 而非整体替换——
+        // 其他计划标的的价格不再闪断显示"—"，2026-08-24 评审修复）
         viewModelScope.launch {
             runCatching {
                 marketDataPlane.getPricesForCodes(listOf(code)).takeIf { it.isNotEmpty() }
-                    ?.let { pricesByCode.value = it }
+                    ?.let { pricesByCode.value = pricesByCode.value + it }
             }
             refreshPreview()
         }
@@ -268,7 +269,7 @@ class StrategyPlanViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 marketDataPlane.getPricesForCodes(listOf(plan.stockCode)).takeIf { it.isNotEmpty() }
-                    ?.let { pricesByCode.value = it }
+                    ?.let { pricesByCode.value = pricesByCode.value + it }
             }
             refreshPreview()
         }

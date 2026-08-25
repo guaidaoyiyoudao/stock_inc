@@ -83,6 +83,48 @@ data class MarketClistResponse(
 }
 
 /**
+ * 东方财富 push2 `api/qt/ulist.np/get` 按 secid 精确拉取的**个股资金流响应**（2026-08-24 接入）。
+ *
+ * 实测口径（2026-08-24 push2delay 与 push2 同族同字段语义，中国移动 600941）：
+ * - `fltt=2` 时**全部真实值**：净额 f62/f66/f72/f78/f84 为「元」原值，占比 f184/f69/f75/f81/f87
+ *   为 % 原值（如 f69=8.62 表示 8.62%）——与 clist(fltt=2) 同口径，无任何 ÷100/÷1000；
+ * - ⚠️ 不带 fltt 时占比类为 ×100 整数（f69=862），故本接口固定 fltt=2，勿删；
+ * - 恒等式自检：f62 主力净额 = f66 超大单 + f72 大单（实测 122411585 = 107338497 + 15073088 精确成立）。
+ */
+data class CapitalFlowResponse(
+    val data: CapitalFlowData?
+) {
+    data class CapitalFlowData(
+        val diff: List<CapitalFlowItem>? = null
+    )
+
+    data class CapitalFlowItem(
+        @SerializedName("f12")
+        val code: String? = null,
+        @SerializedName("f62")
+        val mainNetInflow: Double? = null,
+        @SerializedName("f184")
+        val mainNetInflowPct: Double? = null,
+        @SerializedName("f66")
+        val superLargeNetInflow: Double? = null,
+        @SerializedName("f69")
+        val superLargeNetInflowPct: Double? = null,
+        @SerializedName("f72")
+        val largeNetInflow: Double? = null,
+        @SerializedName("f75")
+        val largeNetInflowPct: Double? = null,
+        @SerializedName("f78")
+        val mediumNetInflow: Double? = null,
+        @SerializedName("f81")
+        val mediumNetInflowPct: Double? = null,
+        @SerializedName("f84")
+        val smallNetInflow: Double? = null,
+        @SerializedName("f87")
+        val smallNetInflowPct: Double? = null
+    )
+}
+
+/**
  * 东方财富 push2 `api/qt/stock/get` 单标的详情响应壳（用于指数 / ETF 行情）。
  *
  * ⚠️ **与 [MarketClistResponse] 单位规则不同**：stock/get 的价格/百分比类字段（f43/f44/f45/f46/f60/f170）

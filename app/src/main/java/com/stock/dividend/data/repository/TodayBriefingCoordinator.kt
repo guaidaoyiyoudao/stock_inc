@@ -25,12 +25,16 @@ import javax.inject.Singleton
  * 缓存复用 `llm_analysis_cache` 表，scope = [SCOPE]，key = "today_briefing_yyyy-MM-dd"。
  *
  * 数据获取统一走 [MarketDataPlane]（数据平面）；`latestYearlyDividend` 经平面 getDps 装配
- * （自动 ensureFresh），后台信号与前台 [TodayViewModel] 口径一致（2026-08-18 补齐曾缺位的股息率达线信号）。
+ * （自动 ensureFresh）。信号装配与前台 [TodayViewModel] 同口径：股息率达线信号之外，
+ * 交易策略信号（strategyPlans + 经 [StrategyInputAssembler]/[StrategyEvaluator] 统一评估）
+ * 一并传入聚合器——简报里的信号区与今日页不再缺策略项。
  */
 @Singleton
 class TodayBriefingCoordinator @Inject constructor(
     private val marketDataPlane: MarketDataPlane,
     private val gridPlanRepository: GridPlanRepository,
+    private val strategyPlanRepository: StrategyPlanRepository,
+    private val strategyInputAssembler: StrategyInputAssembler,
     private val transactionRepository: TransactionRepository,
     private val diagnosisAssembler: PortfolioDiagnosisAssembler,
     private val llmApi: LlmApi,
@@ -46,6 +50,7 @@ class TodayBriefingCoordinator @Inject constructor(
             val snapshots = runCatching { marketDataPlane.getQuoteSnapshots(stocks, force = true) }.getOrDefault(emptyMap())
             val bond = runCatching { marketDataPlane.get10YBondYield() }.getOrDefault(BondYieldRepository.DEFAULT_YIELD)
             val gridPlans = runCatching { gridPlanRepository.observeAll().first() }.getOrDefault(emptyList())
+            val strategyPlans = runCatching { strategyPlanRepository.observeAll().first() }.getOrDefault(emptyList())
             val dividends = runCatching { marketDataPlane.getAllDividendsWithExDate() }.getOrDefault(emptyList())
             val indices = runCatching { marketDataPlane.getIndexQuotes() }.getOrDefault(emptyList())
 
@@ -61,6 +66,24 @@ class TodayBriefingCoordinator @Inject constructor(
                     buyThresholdMultiplier = entity.buyThresholdMultiplier,
                 )
             }
+            // 策略统一评估：装配器按类型采集输入（日线/DPS/估值/除权/持仓成本），调度器分发计算
+            // （与前台 TodayViewModel.recomputeSignals 同一套装配方式，保证简报与今日页口径一致）
+            val strategyEvaluations: Map<String, StrategyEvaluation> =
+                if (strategyPlans.isEmpty()) emptyMap()
+                else runCatching {
+                    val inputs = strategyInputAssembler.assemble(
+                        strategyPlans,
+                        snapshots.mapNotNull { (code, q) ->
+                            q.price?.takeIf { it > 0.0 }?.let { code to it }
+                        }.toMap(),
+                        today = date,
+                    )
+                    strategyPlans.mapNotNull { plan ->
+                        inputs[plan.id]?.let { input ->
+                            StrategyEvaluator.evaluate(plan, input)?.let { plan.id to it }
+                        }
+                    }.toMap()
+                }.getOrDefault(emptyMap())
             val input = TodaySignalInput(
                 stocks = stockSnapshots,
                 gridPlans = gridPlans,
@@ -70,6 +93,9 @@ class TodayBriefingCoordinator @Inject constructor(
                 // 已买档不再出现在「网格下一档」信号里（每档只买一次）
                 gridTransactionsByStock = runCatching { transactionRepository.getAll() }
                     .getOrDefault(emptyList()).groupBy { it.stockCode },
+                // 策略信号（全部类型统一评估：买点窗口 / 卖出阈值），与今日页信号区同源
+                strategyPlans = strategyPlans,
+                strategyEvaluations = strategyEvaluations,
             )
             val signals = TodaySignalAggregator.aggregate(input)
 

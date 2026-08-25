@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.BollBand
+import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.DividendIncomeRepository
 import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.GridPlanRepository
@@ -20,6 +21,8 @@ import com.stock.dividend.data.repository.PortfolioHealthGrade
 import com.stock.dividend.data.repository.PortfolioRiskDiagnosis
 import com.stock.dividend.data.repository.PortfolioRiskDiagnoser
 import com.stock.dividend.data.repository.QuoteSnapshot
+import com.stock.dividend.data.repository.StrategyEvaluation
+import com.stock.dividend.data.repository.StrategyEvaluator
 import com.stock.dividend.data.repository.StrategyInputAssembler
 import com.stock.dividend.data.repository.StrategyPlanRepository
 import com.stock.dividend.data.repository.TransactionRepository
@@ -87,7 +90,7 @@ data class TodayUiState(
  * - Collector C：AI 简报（按今日读缓存）
  * - Collector D：股息现金流（本年已到账 vs 全年预测，响应式）
  *
- * * *信号口径**：今日页经数据平面并发拉**周线 BOLL**（平面内置 Semaphore(3) 限流）→「跌破周线 BOLL 下轨」信号；
+ * **信号口径**：今日页经数据平面并发拉**周线 BOLL**（平面内置 Semaphore(3) 限流）→「跌破周线 BOLL 下轨」信号；
  * 加「股息率达买入线」+ 网格下一档 + 分红倒计时。三周期共振 BUY 仍留评估页（需日+周+月，重）。
  *
  * **体检口径**：[PortfolioDiagnosisAssembler] 复用本页已刷新行情装配（不重复拉价），
@@ -217,7 +220,7 @@ class TodayViewModel @Inject constructor(
     private suspend fun recomputeSignals(snapshots: Map<String, QuoteSnapshot>) {
         val stocks = lastStocks
         val bond = runCatching { marketDataPlane.get10YBondYield() }
-            .getOrDefault(com.stock.dividend.data.repository.BondYieldRepository.DEFAULT_YIELD)
+            .getOrDefault(BondYieldRepository.DEFAULT_YIELD)
         val dividends = runCatching { marketDataPlane.getAllDividendsWithExDate() }.getOrDefault(emptyList())
         val gridPlans = runCatching { gridPlanRepository.observeAll().first() }
             .getOrDefault(emptyList())
@@ -225,7 +228,7 @@ class TodayViewModel @Inject constructor(
             .getOrDefault(emptyList())
         val transactions = runCatching { transactionRepository.getAll() }.getOrDefault(emptyList())
         // 策略统一评估：装配器按类型采集输入（日线/DPS/估值/除权/持仓），调度器分发计算
-        val strategyEvaluations: Map<String, com.stock.dividend.data.repository.StrategyEvaluation> =
+        val strategyEvaluations: Map<String, StrategyEvaluation> =
             if (strategyPlans.isEmpty()) emptyMap()
             else runCatching {
                 val inputs = strategyInputAssembler.assemble(
@@ -236,7 +239,7 @@ class TodayViewModel @Inject constructor(
                 )
                 strategyPlans.mapNotNull { plan ->
                     inputs[plan.id]?.let { input ->
-                        com.stock.dividend.data.repository.StrategyEvaluator.evaluate(plan, input)
+                        StrategyEvaluator.evaluate(plan, input)
                             ?.let { plan.id to it }
                     }
                 }.toMap()

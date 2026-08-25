@@ -1,0 +1,63 @@
+{
+  "include": [
+    "app/src/test/**/*.kt",
+    "gradle/libs.versions.toml"
+  ],
+  "rules": [
+    {
+      "path": "app/src/test/**",
+      "merge_system_rule": true,
+      "rule": "【测试约定（§6）】纯函数/计算器/Parser 用纯 JUnit4+Truth，无 Android 依赖；ViewModel 用 Robolectric+MockK+Dispatchers.setMain(StandardTestDispatcher)+runTest{advanceUntilIdle()}；Flow 用 Turbine；测试包结构与 main 对齐。重点核查：本次 diff 若改了 data/repository/ 下的纯函数/计算器而测试无对应改动，属于违反「改了纯函数或新增决策逻辑必须补/改单测」。"
+    },
+    {
+      "path": "**/data/local/AppDatabase.kt",
+      "merge_system_rule": true,
+      "rule": "【红线·数据库纪律】改 schema 必须三件事同步：① entities/version 更新；② 新增 MIGRATION_N_(N+1)（手写 ALTER/CREATE）并在 DatabaseModule 注册；③ version +1。逐条核对 diff：新增/修改的每个 entity 是否有对应迁移、迁移 SQL 的列定义与实体注解是否一致（含非空与默认值）、迁移编号是否连续无跳号。漏改会触发 Room cannot verify the data integrity。"
+    },
+    {
+      "path": "**/di/DatabaseModule.kt",
+      "merge_system_rule": true,
+      "rule": "【红线·迁移注册】新增 Migration 必须在此注册且编号连续；注册的迁移集合必须与 AppDatabase 的 version 匹配。"
+    },
+    {
+      "path": "**/data/local/entity/**",
+      "merge_system_rule": true,
+      "rule": "【实体纪律】表名/列名下划线、字段驼峰、Room 注解映射完整；修改字段可空性/默认值时核对 NOT NULL 约束与旧备份恢复兼容——恢复时 Gson 会给缺失字段填 null，可能撞约束使整个事务失败，必要时同步改 BackupData.normalizeXxx 按 dbVersion 分支修补。"
+    },
+    {
+      "path": "**/data/remote/dto/**",
+      "merge_system_rule": true,
+      "rule": "【红线·数据单位纪律（AGENTS.md §4.9）】单位换算只允许「每10股→每股」与展示格式化；东财 ulist/stock/get 的价格/百分比 ×100 整数需 ÷100、场内基金价格 ×1000 需 ÷1000、clist(fltt=2) 全字段真实值不除——三接口规则相反，解析函数必须独立切勿混用；÷ 类转换封装为 private 扩展集中一处；可空字段用 Double?.takeIfFinite()；金额一律「元」、缺失字段 null 绝不臆造；报告期日期 substringBefore(\" \") 归一化；clist 脏值 \"-\" 依赖已注册的 LenientDoubleDeserializer。新增 DTO 必须配真实 JSON fixture 单测锁定每个字段的解析值与单位。新增 Gson 模型若放本包之外，必须同步在 proguard-rules.pro 加 keep。"
+    },
+    {
+      "path": "**/data/remote/**",
+      "merge_system_rule": true,
+      "rule": "【网络约定】新 Retrofit 接口必须在 di/NetworkModule.kt 统一装配并确保对应 Retrofit 注册了 LenientDoubleDeserializer；多数据源用 @Qualifier 区分；同花顺扶摇走 @FuyaoClient 独立 client（不复用共享 client）；LLM 走独立 client + @Url 动态 base。【红线·数据接入唯一出口】新增行情/股息/K线/BOLL/基本面/榜单等外部数据端点后，必须同步在 MarketDataPlane 增加对应门面方法——任何数据接入的出口都是平面接口，禁止消费方直连新端点。"
+    },
+    {
+      "path": "**/data/plane/**",
+      "merge_system_rule": true,
+      "rule": "【数据平面语义】行情任何获取必须写透 price_cache；getDps 自动 ensureDividendsFresh（表空/距上次成功超 7 天拉网，失败 5 分钟退避）；BOLL 走内置 Semaphore(3) 限流，不得自建并发限制；股息率全 App 唯一口径 getCurrentDividendYield = DPS÷平面现价×100；扶摇原始 JSON 透传方法不做任何单位换算。【红线·接入落位】所有新增数据接入一律落在本平面：新端点经 Repository 实现后必须在此封装门面方法并注明缓存/新鲜度/限流语义，禁止在别处另立平行入口。"
+    },
+    {
+      "path": "**/data/repository/**",
+      "merge_system_rule": true,
+      "rule": "【红线·仓储与纯函数】网络/DB 失败必须吞异常返回安全空值（emptyMap/emptyList/null），绝不冒泡到 UI；缓存写入失败静默跳过；静默失败可埋点 ErrorLogRepository.record。返回 Result 的方法把异常包成 Exception(e.toUserMessage(), e)；事务用 appDatabase.withTransaction。新增决策/计算逻辑必须抽成无 Android 依赖的纯函数（object 或顶层函数，放 data/repository/ 下）并配单测；不对东财原始数据做换算（除「每10股→每股」与展示格式化）。【红线·数据接入唯一出口】新增外部股市数据接入时，Repository 取数方法只作为 MarketDataPlane 的内部实现，必须同步在平面封装公共门面方法（含缓存写透/TTL/退避语义），不得为消费方新增直连 Repository 取数的路径。"
+    },
+    {
+      "path": "**/{viewmodel,data/notification,data/widget,data/agent}/**",
+      "merge_system_rule": true,
+      "rule": "【红线·数据平面唯一入口】获取外部股市数据（行情/股息/K线/BOLL/基本面/财务三表/榜单/资金流/国债/研报/搜索）必须注入 MarketDataPlane，禁止直接注入行情类 Repository 或行情类 Dao；写操作与纯本地域数据（标签/行业目标/交易流水）仍走原 Repository。ViewModel 用单个 data class UiState(@Stable) + MutableStateFlow.asStateFlow()；多数据源用多个独立 collector；isLoading 请求前置 true、结束（含失败）必须复位；价格刷新订阅 allStocksFlow 而非 holdingsFlow（自选股 shares=0 也要能拉现价）。"
+    },
+    {
+      "path": "**/ui/**",
+      "merge_system_rule": true,
+      "rule": "【UI/Compose 约定（§4.5）】新组件优先用 ui/component/AppComponents.kt；AppCard 不带内边距，内容外层必须自加 padding(16.dp)（列表行 horizontal=16.dp）；财务正负色走 LocalExtendedColors.current.positive/negative，禁止 import 裸 FinanceGreen/FinanceRed；金额/百分比一律 MoneyFormatter/PercentFormatter 禁止私有 formatXxx；等宽数字用 tabularNumberStyle 或 AmountText/PercentText；圆角走 MaterialTheme.shapes 禁止硬编码 RoundedCornerShape(N.dp)；所有面向用户文本必须中文；空状态用 EmptyStateView。"
+    },
+    {
+      "path": "**/*.gradle.kts",
+      "merge_system_rule": true,
+      "rule": "【构建纪律】依赖版本只改 gradle/libs.versions.toml，禁止在 build.gradle.kts 写裸版本号；调整 Kotlin/ADK 版本必须同步检查 resolutionStrategy.force 对 kotlin-stdlib 全系的锁定（ADK 传递依赖会顶高 kotlinx-coroutines 导致 Kotlin 2.1 编译失败）；Release 签名信息只允许来自环境变量，不得硬编码。"
+    }
+  ]
+}

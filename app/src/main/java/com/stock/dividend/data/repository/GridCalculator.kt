@@ -475,18 +475,24 @@ object GridCalculator {
 
         for (tx in ordered) {
             if (tx.type == "BUY") {
-                // 唯一阻断条件：波段部分已在持（全量或波段补买均不允许重复）；
-                // 底仓已建、波段已释放的档可再买（只补波段股数，实盘由用户按提示执行）
-                val level = result.levels
-                    .filter {
-                        it.price !in swingHeld &&
-                            kotlin.math.abs(tx.price - it.price) <= halfStep
-                    }
+                val candidates = result.levels
+                    .filter { kotlin.math.abs(tx.price - it.price) <= halfStep }
+                // 未在持：占用该档（底仓 + 波段）；已在持（同档分批的第二笔买入）：不改占用
+                // 状态但**必须累计 buyFills**——波段净投入 = ΣbuyFills − ΣsellFills 完全依赖
+                // 成交事件，静默丢弃会让净投入低估、剩余资金虚高（2026-08-24 评审修复）
+                val fresh = candidates
+                    .filter { it.price !in swingHeld }
                     .minByOrNull { kotlin.math.abs(tx.price - it.price) }
-                    ?: continue
-                if (level.baseShares > 0) baseHeld += level.price
-                swingHeld += level.price
-                buyFills += GridLevelTrade(level.price, tx.price, tx.shares, tx.date)
+                if (fresh != null) {
+                    if (fresh.baseShares > 0) baseHeld += fresh.price
+                    swingHeld += fresh.price
+                    buyFills += GridLevelTrade(fresh.price, tx.price, tx.shares, tx.date)
+                } else {
+                    candidates
+                        .filter { it.price in swingHeld }
+                        .minByOrNull { kotlin.math.abs(tx.price - it.price) }
+                        ?.let { held -> buyFills += GridLevelTrade(held.price, tx.price, tx.shares, tx.date) }
+                }
             } else if (tx.type == "SELL" && result.swingMode) {
                 val level = result.levels
                     .filter {

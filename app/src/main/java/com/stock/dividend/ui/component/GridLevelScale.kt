@@ -1,6 +1,6 @@
 package com.stock.dividend.ui.component
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -19,10 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -110,14 +107,18 @@ fun GridLevelScale(
             .map { abs(basePrice - it.price) / basePrice }
             .maxOrNull()?.coerceAtLeast(0.0001) ?: 0.0001
 
-        // 入场：刻度柱自底向上生长（外壳高度固定，无布局抖动；落点 = 完整高度）
-        var grown by remember(levels) { mutableStateOf(false) }
-        val growProgress by animateFloatAsState(
-            targetValue = if (grown) 1f else 0f,
-            animationSpec = tween(Motion.DurationMedium, easing = Motion.EmphasizedDecelerate),
-            label = "gridScaleGrow",
-        )
-        LaunchedEffect(levels) { grown = true }
+        // 入场：刻度柱自底向上生长（外壳高度固定，无布局抖动；落点 = 完整高度）。
+        // Animatable snapTo(0) + animateTo(1)：levels 变化时先归零再生长，避免
+        // animateFloatAsState 在 key 重建时从旧值回缩再生长的闪烁
+        val grow = remember { Animatable(0f) }
+        LaunchedEffect(levels) {
+            grow.snapTo(0f)
+            grow.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(Motion.DurationMedium, easing = Motion.EmphasizedDecelerate),
+            )
+        }
+        val growProgress = grow.value
 
         // 价格从左到右递增：最便宜档（资金用完位）在左，买入起点在右
         Row(

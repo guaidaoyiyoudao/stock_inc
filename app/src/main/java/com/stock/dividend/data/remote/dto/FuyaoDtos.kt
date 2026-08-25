@@ -85,7 +85,7 @@ data class FuyaoAdjustmentItem(
     @SerializedName("ex_date_ms") val exDateMs: Long? = null,
     /** 每股现金分红（税前，元）——**已是每股口径，无每10股换算**。 */
     @SerializedName("dividend_per_share") val dividendPerShare: Double? = null,
-    /** 每股送股比例（App 无字段承载，忽略）。 */
+    /** 每股送转比例：DividendRepository 落库 bonusPerShare（纯送转行现金 0）。 */
     @SerializedName("per_share_bonus") val perShareBonus: Double? = null
 )
 
@@ -140,7 +140,7 @@ data class FuyaoIncomeItem(
     @SerializedName("report_date_ms") val reportDateMs: Long? = null,
     @SerializedName("fiscal_year") val fiscalYear: Int? = null,
     @SerializedName("fiscal_period") val fiscalPeriod: String? = null,
-    /** 营业总收入（元）。 */
+    /** 营业收入（元）——扶摇无「营业总收入」口径（审计 M1），映射产物 totalOperateIncome 恒 null、由东财并行回填。 */
     @SerializedName("operating_income") val operatingIncome: Double? = null,
     /** 营业成本（元）。 */
     @SerializedName("operating_costs") val operatingCosts: Double? = null,

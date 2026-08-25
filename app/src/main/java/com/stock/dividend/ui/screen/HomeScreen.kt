@@ -1,26 +1,42 @@
 package com.stock.dividend.ui.screen
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,12 +51,17 @@ import nl.dionsegijn.konfetti.core.Position
 import nl.dionsegijn.konfetti.core.emitter.Emitter
 import java.util.concurrent.TimeUnit
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stock.dividend.R
 import com.stock.dividend.data.local.entity.StockEntity
+import com.stock.dividend.data.repository.MoneyFormatter
+import com.stock.dividend.ui.component.AppButton
 import com.stock.dividend.ui.component.AppCardDefaults
 import com.stock.dividend.ui.component.CategorizedAchievementList
 import com.stock.dividend.ui.component.IncomeBreakdownChart
@@ -49,8 +70,10 @@ import com.stock.dividend.ui.component.IncomeTimelineCard
 import com.stock.dividend.ui.component.IncomeTrendChart
 import com.stock.dividend.ui.component.SectionHeader
 import com.stock.dividend.ui.component.YearSelector
+import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.viewmodel.AchievementUiState
 import com.stock.dividend.viewmodel.AchievementViewModel
+import com.stock.dividend.viewmodel.DividendIncomeRecordWithStock
 import com.stock.dividend.viewmodel.DividendIncomeUiState
 import com.stock.dividend.viewmodel.DividendIncomeViewModel
 import com.stock.dividend.ui.component.AppTextButton
@@ -62,10 +85,7 @@ fun IncomeScreen(
     viewModel: DividendIncomeViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    var showAddIncomeDialog by remember { mutableStateOf(false) }
-    var showCorrectDialog by remember { mutableStateOf(false) }
-    var correctAmount by remember { mutableStateOf("") }
-    var correctNote by remember { mutableStateOf("") }
+    var showAddIncomeSheet by remember { mutableStateOf(false) }
     // 二级 Tab：0 = 收入记录，1 = 分红日历（原「日历」tab 合并至此）
     var selectedTab by remember { mutableIntStateOf(0) }
     val incomeTabs = listOf("收入", "日历")
@@ -85,7 +105,7 @@ fun IncomeScreen(
             IncomeTabContent(
                 state = state,
                 viewModel = viewModel,
-                onAddIncomeClick = { showAddIncomeDialog = true }
+                onAddIncomeClick = { showAddIncomeSheet = true }
             )
         } else {
             // 原独立「日历」tab 内容；其内部的 registerTabRefresh 会在该视图激活时
@@ -94,72 +114,31 @@ fun IncomeScreen(
         }
     }
 
-    if (showAddIncomeDialog) {
-            AddIncomeDialog(
+    if (showAddIncomeSheet) {
+            AddIncomeSheet(
                 stocks = state.stocks,
-                onDismiss = { showAddIncomeDialog = false },
+                onDismiss = { showAddIncomeSheet = false },
                 onConfirm = { date, amount, stockCode, note ->
                     viewModel.addManualRecord(date, amount, stockCode, note)
-                    showAddIncomeDialog = false
+                    showAddIncomeSheet = false
                 }
             )
         }
 
         if (state.showCorrectDialog) {
-            if (!showCorrectDialog) {
-                showCorrectDialog = true
-                correctAmount = "%.2f".format(state.correctCurrentAmount)
-                correctNote = ""
-            }
-            AlertDialog(
-                onDismissRequest = {
-                    viewModel.dismissCorrectDialog()
-                    showCorrectDialog = false
-                },
-                title = { Text("修正金额") },
-                text = {
-                    Column {
-                        AppTextField(
-                            value = correctAmount,
-                            onValueChange = { correctAmount = it },
-                            label = { Text("金额 (元)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        AppTextField(
-                            value = correctNote,
-                            onValueChange = { correctNote = it },
-                            label = { Text("备注 (可选)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxSize()
-                        )
+            val target = state.records.firstOrNull { it.record.id == state.correctTargetId }
+            if (target != null) {
+                CorrectAmountSheet(
+                    target = target,
+                    onDismiss = viewModel::dismissCorrectDialog,
+                    onConfirm = { amount, note ->
+                        viewModel.correctRecord(state.correctTargetId, amount, note)
                     }
-                },
-                confirmButton = {
-                    AppTextButton(
-                        onClick = {
-                            val amount = correctAmount.toDoubleOrNull() ?: return@AppTextButton
-                            viewModel.correctRecord(
-                                state.correctTargetId,
-                                amount,
-                                correctNote.ifBlank { null }
-                            )
-                            showCorrectDialog = false
-                        },
-                        text = "确认",
-                    )
-                },
-                dismissButton = {
-                    AppTextButton(
-                        onClick = {
-                            viewModel.dismissCorrectDialog()
-                            showCorrectDialog = false
-                        },
-                        text = "取消",
-                    )
-                }
-            )
+                )
+            } else {
+                // 目标记录已不在当前列表（理论不可达）：复位状态避免修正弹层悬挂
+                LaunchedEffect(state.correctTargetId) { viewModel.dismissCorrectDialog() }
+            }
         }
 }
 
@@ -177,6 +156,8 @@ fun AchievementScreen(
             celebrate = true
             kotlinx.coroutines.delay(4000)
             celebrate = false
+            // 一次性事件消费（2026-08-24 评审修复）：清空后重进成就页/配置重建不再重复撒花
+            viewModel.consumeNewlyUnlocked()
         }
     }
 
@@ -263,7 +244,8 @@ private fun IncomeTabContent(
         }
         item(key = "breakdown") {
             // 占比图默认收起：饼图+图例约一屏高，展开即占满视口；点标题行按需展开
-            var breakdownExpanded by remember { mutableStateOf(false) }
+            // rememberSaveable：条目滚出视口被回收后展开态保留（2026-08-24 评审修复）
+            var breakdownExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
             Column {
                 SectionHeader(
                     title = "股票占比",
@@ -354,51 +336,309 @@ private fun AchievementTabContent(
     }
 }
 
+/**
+ * 添加收入底部弹层（M3 ModalBottomSheet，形态同网格生成器）：可选关联自选股
+ * （不关联记作「其他收入」），到账日期默认当天、可点日历补记历史；
+ * 金额输入校验与修正弹层一致（数字键盘 + 非法标错 + 无效禁用确认）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddIncomeDialog(
+private fun AddIncomeSheet(
     stocks: List<StockEntity>,
     onDismiss: () -> Unit,
     onConfirm: (date: String, amount: Double, stockCode: String?, note: String?) -> Unit
 ) {
+    var selectedStockCode by remember { mutableStateOf<String?>(null) }
     var amountText by remember { mutableStateOf("") }
     var noteText by remember { mutableStateOf("") }
-    val today = remember {
-        java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+    var selectedDate by remember {
+        mutableStateOf(java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE))
     }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val parsedAmount = amountText.toDoubleOrNull()
+    val amountInvalid = amountText.isNotBlank() && parsedAmount == null
 
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text("添加收入") },
-        text = {
-            Column {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                text = "添加收入",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            IncomeStockPicker(
+                stocks = stocks,
+                selectedCode = selectedStockCode,
+                onSelect = { selectedStockCode = it }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AppTextField(
+                value = amountText,
+                onValueChange = { amountText = it },
+                label = { Text("金额") },
+                prefix = { Text("¥") },
+                singleLine = true,
+                isError = amountInvalid,
+                supportingText = if (amountInvalid) {
+                    { Text("请输入有效金额") }
+                } else null,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 只读日期框 + 日历弹窗（enabled=false 需外层 clickable 接管点击）
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showDatePicker = true }
+            ) {
                 AppTextField(
-                    value = amountText,
-                    onValueChange = { amountText = it },
-                    label = { Text("金额 (元)") },
+                    value = selectedDate,
+                    onValueChange = {},
+                    label = { Text("到账日期") },
+                    modifier = Modifier.fillMaxWidth(),
+                    readOnly = true,
+                    enabled = false,
+                    leadingIcon = {
+                        Icon(Icons.Default.DateRange, contentDescription = null)
+                    },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AppTextField(
-                    value = noteText,
-                    onValueChange = { noteText = it },
-                    label = { Text("备注 (可选)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    colors = OutlinedTextFieldDefaults.colors(
+                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                        disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 )
             }
-        },
-        confirmButton = {
-            AppTextButton(
-                onClick = {
-                    val amount = amountText.toDoubleOrNull() ?: return@AppTextButton
-                    onConfirm(today, amount, null, noteText.ifBlank { null })
-                },
-                text = "确认",
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AppTextField(
+                value = noteText,
+                onValueChange = { noteText = it },
+                label = { Text("备注 (可选)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
             )
-        },
-        dismissButton = {
-            AppTextButton(onClick = onDismiss, text = "取消")
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                AppTextButton(onClick = onDismiss, modifier = Modifier.weight(1f), text = "取消")
+                AppButton(
+                    onClick = {
+                        parsedAmount?.let {
+                            onConfirm(selectedDate, it, selectedStockCode, noteText.ifBlank { null })
+                        }
+                    },
+                    enabled = parsedAmount != null && parsedAmount > 0,
+                    modifier = Modifier.weight(1f),
+                    text = "确认",
+                )
+            }
         }
-    )
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            // M3 DatePicker 内部按 UTC 日界换算：用系统时区（东八区）换算会把初始高亮日
+            // 推早一天、直接确认即静默回退一天（2026-08-24 评审修复）——两侧统一按 UTC
+            initialSelectedDateMillis = try {
+                java.time.LocalDate.parse(selectedDate)
+                    .atStartOfDay(java.time.ZoneOffset.UTC)
+                    .toInstant().toEpochMilli()
+            } catch (_: Exception) { null }
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                AppTextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            selectedDate = java.time.Instant.ofEpochMilli(millis)
+                                .atZone(java.time.ZoneOffset.UTC)
+                                .toLocalDate()
+                                .toString()
+                        }
+                        showDatePicker = false
+                    },
+                    text = "确认",
+                )
+            },
+            dismissButton = {
+                AppTextButton(
+                    onClick = { showDatePicker = false },
+                    text = "取消",
+                )
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
+
+/** 添加收入的股票选择：下拉选自选股，首项「不关联（其他收入）」可回退为空。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun IncomeStockPicker(
+    stocks: List<StockEntity>,
+    selectedCode: String?,
+    onSelect: (String?) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedName = stocks.firstOrNull { it.code == selectedCode }?.name
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        AppTextField(
+            value = selectedName ?: "不关联（其他收入）",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("关联股票 (可选)") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("不关联（其他收入）") },
+                onClick = {
+                    onSelect(null)
+                    expanded = false
+                }
+            )
+            stocks.forEach { stock ->
+                DropdownMenuItem(
+                    text = { Text("${stock.name} (${stock.code})") },
+                    onClick = {
+                        onSelect(stock.code)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 修正金额底部弹层（M3 ModalBottomSheet，形态同网格生成器）：推算记录（auto）
+ * 修正为实际到账金额；手动记录（manual）复用为「编辑收入」。展示记录上下文
+ * （股票 · 日期）与原金额参考，金额输入限制数字键盘、非法输入标错并禁用确认。
+ * 弹层随 showCorrectDialog 离开组合即重置输入。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CorrectAmountSheet(
+    target: DividendIncomeRecordWithStock,
+    onDismiss: () -> Unit,
+    onConfirm: (amount: Double, note: String?) -> Unit
+) {
+    val isManual = target.record.source == "manual"
+    var amountText by remember { mutableStateOf("%.2f".format(target.record.amount)) }
+    // 回填原备注（2026-08-24 评审修复）：DAO 是 SET note = :note 全量覆盖，空初始会在
+    // 编辑手动记录时把已有备注静默清空
+    var noteText by remember { mutableStateOf(target.record.note ?: "") }
+    val parsedAmount = amountText.toDoubleOrNull()
+    val amountInvalid = amountText.isNotBlank() && parsedAmount == null
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                text = if (isManual) "编辑收入" else "修正金额",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "${target.stockName ?: "其他收入"} · ${target.record.date}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 原金额参考条：修正时对照推算值，编辑时对照当前值
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isManual) "当前金额" else "推算金额",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = MoneyFormatter.withSymbol(target.record.amount),
+                    style = MaterialTheme.typography.labelMedium.merge(tabularNumberStyle),
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AppTextField(
+                value = amountText,
+                onValueChange = { amountText = it },
+                label = { Text(if (isManual) "金额" else "实际到账金额") },
+                prefix = { Text("¥") },
+                singleLine = true,
+                isError = amountInvalid,
+                supportingText = if (amountInvalid) {
+                    { Text("请输入有效金额") }
+                } else null,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            AppTextField(
+                value = noteText,
+                onValueChange = { noteText = it },
+                label = { Text("备注 (可选)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                AppTextButton(onClick = onDismiss, modifier = Modifier.weight(1f), text = "取消")
+                AppButton(
+                    onClick = { parsedAmount?.let { onConfirm(it, noteText.ifBlank { null }) } },
+                    enabled = parsedAmount != null && parsedAmount > 0,
+                    modifier = Modifier.weight(1f),
+                    text = "确认",
+                )
+            }
+        }
+    }
 }

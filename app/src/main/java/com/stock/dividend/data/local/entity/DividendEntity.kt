@@ -25,6 +25,8 @@ data class DividendEntity(
     val stockCode: String,
     val reportDate: String,
     val cashPerShare: Double = 0.0,
+    /** 每股送转比例（送股+转增合计，股/股）。纯送转行 cashPerShare=0——**必须落库**：K 线漂移检测按 MAX(exDividendDate) 感知除权，送转同样整体位移前复权历史（审计 M4-1）。 */
+    val bonusPerShare: Double? = null,
     val dividendYield: Double? = null,
     val exDividendDate: String? = null,
     val recordDate: String? = null,

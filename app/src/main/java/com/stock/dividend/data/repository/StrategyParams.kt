@@ -79,7 +79,13 @@ object StrategyParams {
         return p.copy(
             halfGainPercent = p.halfGainPercent.takeIf { it > 0.0 } ?: 15.0,
             allGainPercent = p.allGainPercent.takeIf { it > 0.0 } ?: 25.0
-        ).let { if (it.allGainPercent <= it.halfGainPercent) TakeProfit(halfGainPercent = it.halfGainPercent) else it }
+        ).let {
+            // 兜底必须闭合不变量 all > half（2026-08-24 评审修复）：脏 JSON 只带 half=50 时
+            // 此前回退默认 25 仍 ≤ half，涨幅 25% 即 SELL_ALL 违背存档意图
+            if (it.allGainPercent <= it.halfGainPercent)
+                it.copy(allGainPercent = maxOf(25.0, it.halfGainPercent + 10.0))
+            else it
+        }
     }
 
     fun decodeYieldBand(raw: String?): YieldBand {
@@ -107,7 +113,11 @@ object StrategyParams {
             fastPeriod = p.fastPeriod.takeIf { it >= 2 } ?: 50,
             slowPeriod = p.slowPeriod.takeIf { it >= 2 } ?: 250
         )
-        return if (fixed.slowPeriod <= fixed.fastPeriod) DualMa(fastPeriod = fixed.fastPeriod) else fixed
+        // 兜底必须闭合不变量 slow > fast（2026-08-24 评审修复）：脏 JSON 只带 fast=300 时
+        // 此前回退默认 250 仍 ≤ fast，快慢线语义颠倒、金叉死叉反向
+        return if (fixed.slowPeriod <= fixed.fastPeriod)
+            fixed.copy(slowPeriod = maxOf(250, fixed.fastPeriod + 50))
+        else fixed
     }
 
     fun decodeMaDeviation(raw: String?): MaDeviation {
@@ -220,6 +230,8 @@ object StrategyParams {
      */
     fun fromInputs(strategyType: String, inputs: Map<String, String>): Pair<String?, String?> {
         fun num(key: String): Double? = inputs[key]?.trim()?.toDoubleOrNull()
+        // 整数字段专用：拒绝小数输入而非静默截断（"50.5" 报错，不再 toInt() 偷偷变 50）
+        fun int(key: String): Int? = inputs[key]?.trim()?.toIntOrNull()
         return when (strategyType) {
             STRATEGY_TYPE_TAKE_PROFIT -> {
                 val half = num("halfGainPercent") ?: return null to "卖出一半涨幅须为数字"
@@ -238,16 +250,16 @@ object StrategyParams {
                 encode(YieldBand(buy, add, sell)) to null
             }
             STRATEGY_TYPE_DUAL_MA -> {
-                val fast = num("fastPeriod")?.toInt() ?: return null to "快线周期须为整数"
-                val slow = num("slowPeriod")?.toInt() ?: return null to "慢线周期须为整数"
+                val fast = int("fastPeriod") ?: return null to "快线周期须为整数"
+                val slow = int("slowPeriod") ?: return null to "慢线周期须为整数"
                 if (fast < 2) return null to "快线周期至少 2 日"
                 if (slow <= fast) return null to "慢线周期必须大于快线周期"
                 encode(DualMa(fast, slow)) to null
             }
             STRATEGY_TYPE_MA_DEVIATION -> {
-                val ma = num("maPeriod")?.toInt() ?: return null to "均线周期须为整数"
+                val ma = int("maPeriod") ?: return null to "均线周期须为整数"
                 val step = num("stepPercent") ?: return null to "偏离步长须为数字"
-                val levels = num("buyLevels")?.toInt() ?: return null to "买入档数须为整数"
+                val levels = int("buyLevels") ?: return null to "买入档数须为整数"
                 if (ma < 2) return null to "均线周期至少 2 日"
                 if (step <= 0.0) return null to "偏离步长必须大于 0"
                 if (levels !in 1..10) return null to "买入档数须在 1~10"
@@ -270,7 +282,7 @@ object StrategyParams {
                 encode(ValuationBand(metric, low, high)) to null
             }
             STRATEGY_TYPE_DIVIDEND_REINVEST -> {
-                val days = num("lookaheadDays")?.toInt() ?: return null to "展望天数须为整数"
+                val days = int("lookaheadDays") ?: return null to "展望天数须为整数"
                 if (days !in 1..90) return null to "展望天数须在 1~90"
                 encode(DividendReinvest(days)) to null
             }

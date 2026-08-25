@@ -113,9 +113,12 @@ object VisionImportParser {
     /**
      * 日期归一化为 yyyy-MM-dd（解析失败返回 null）。
      * 支持：2026-08-01 / 2026/8/1 / 2026.8.1 / 2026年8月1日 / 20260801 / 0801（补当年）。
+     * 带时分秒后缀（券商成交时间如 "2026-08-01 09:30:15"）先剥掉再解析
+     * （§4.9.6 报告期归一化 substringBefore(" ") 先例）——此前整条归 null。
      */
     internal fun normalizeDate(raw: String): String? {
-        val s = raw.trim().replace("年", "-").replace("月", "-").replace("日", "")
+        val s = raw.trim().substringBefore(" ")
+            .replace("年", "-").replace("月", "-").replace("日", "")
         return runCatching {
             val date = when {
                 Regex("""^\d{8}$""").matches(s) ->

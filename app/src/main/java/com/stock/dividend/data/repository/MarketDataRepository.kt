@@ -156,25 +156,24 @@ class MarketDataRepository @Inject constructor(
     /**
      * 个股资金流向（主力/超大/大/中/小单净流入额+占比）。
      *
-     * ⚠️ 数据源用 clist（`fs=m:{market}+t:{board}+s:{code}`）而非 stock/get——
-     * 实测 stock/get 对资金流字段（f66/f69/f72/f75 等）返回不完整，clist 才有全套。
-     * clist 单位：净额（元）原值不除；占比（%）真实值不除（如 6.04 表示 6.04%）。
-     *
-     * ⚠️ **行归属校验（2026-08-20 审计实测）**：clist 的 `s:` 单股筛选**实际不生效**
-     * （`fs=m:1+t:2+s:600941` 返回 total=1628 全沪市列表按 fid 排序），必须请求 f12
-     * 并按代码精确匹配，否则拿到的是「当日涨幅第一名」的资金流（张冠李戴，比崩溃更隐蔽）。
+     * 数据源为 ulist 按 secid 精确拉取（2026-08-24 接入；实测口径见 [CapitalFlowResponse]：
+     * fltt=2 全真实值——净额元原值、占比 % 原值，无任何换算；恒等式 f62=f66+f72 自检通过）。
+     * 此前用 clist `fs=...+s:{code}` 方案有两层坑（均已弃用）：①`s:` 单股筛选实际不生效，
+     * 返回全市场列表（2026-08-20 审计实测）；②按 fid=f3 拉前 5 名再客户端匹配，普通个股
+     * （不在涨幅榜前列）恒 miss——功能失效。
      *
      * @param stockCode `sh.600036` / `sz.000001`。失败或响应不含该股返回 null。
      */
     suspend fun fetchCapitalFlow(stockCode: String): CapitalFlow? {
-        val fs = toClistFs(stockCode) ?: return null
         val code6 = stockCode.substringAfter(".")
+        val secid = when (stockCode.substringBefore(".")) {
+            "sh" -> "1.$code6"
+            "sz" -> "0.$code6"
+            else -> return null
+        }
         return runCatching {
-            val item = marketApi.getClist(
-                pz = "5", fid = "f3", fs = fs,
-                fields = "f12,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87"
-            ).data?.diff
-                // 行归属校验：只认 f12 与请求代码一致的记录（s: 筛选失效，见上）
+            val item = marketApi.getCapitalFlow(secids = secid).data?.diff
+                // 行归属校验（防接口语义变化的最后防线）：只认 f12 与请求代码一致的记录
                 ?.firstOrNull { it.code == code6 }
                 ?: return@runCatching null
             CapitalFlow(
@@ -338,7 +337,16 @@ class MarketDataRepository @Inject constructor(
         // 同花顺扶摇主源：一次批量拉全部主要指数（东财为 7 次单查）；失败降级东财
         if (fuyaoConfig.enabled) {
             runCatching { fetchIndexQuotesFromFuyao() }
-                .onSuccess { return it }
+                .onSuccess { fetched ->
+                    // 空结果也视为失败走东财降级（对齐 fetchSnapshotsFromFuyao 纪律）：
+                    // 信封 ok 但快照缺失时返回空会让上游误判「无数据」而非「源故障」
+                    if (fetched.isNotEmpty()) return fetched
+                    errorLogRepository.record(
+                        source = "同花顺",
+                        message = "指数主源返回为空，已降级东财",
+                        throwable = null,
+                    )
+                }
                 .onFailure {
                     errorLogRepository.record(
                         source = "同花顺",
@@ -385,7 +393,11 @@ class MarketDataRepository @Inject constructor(
                 .getOrNull()
                 ?.let { return it }
         }
-        val secid = guessSecidByCode6(code6) ?: return null
+        // 东财降级：secid 同样先精确匹配 MAIN_INDICES（000 开头沪市指数按通用规则会猜成
+        // 0.000001 深市个股，如「上证指数」拿到平安银行，2026-08-24 评审修复）
+        val secid = MAIN_INDICES.firstOrNull { it.third.substringBefore(".") == code6 }?.second
+            ?: guessSecidByCode6(code6)
+            ?: return null
         return runCatching { marketApi.getIndexQuote(secid).toIndexQuote(code6) }
             .onFailure {
                 errorLogRepository.record(
@@ -397,12 +409,17 @@ class MarketDataRepository @Inject constructor(
             .getOrNull()
     }
 
-    /** 扶摇单只指数/基金快照 + 名称检索。基金走基金接口；000/399 走指数接口；其余按 A 股快照。 */
+    /**
+     * 扶摇单只指数/基金快照 + 名称检索。基金走基金接口；000/399 走指数接口；其余按 A 股快照。
+     * ⚠️ thscode 市场位先精确匹配 [MAIN_INDICES]（000 开头的沪市指数如 000001 上证、000300 沪深300
+     * 若按「6/5 开头沪、其余深」的规则会被误判为 .SZ，扶摇查不到、东财降级再拿到平安银行个股行情，
+     * 2026-08-24 评审修复）；清单未命中再退回通用规则。
+     */
     private suspend fun fetchIndexOrEtfQuoteFromFuyao(code6: String): IndexQuote? {
         if (!code6.matches(Regex("\\d{6}"))) return null
         val isFund = FundDividendParser.isExchangeTradedFundCode(code6)
-        // 市场判定与 guessSecidByCode6 一致：6 开头沪股票 / 5 开头沪基金 → 沪，其余深
-        val thscode = if (code6.startsWith("6") || code6.startsWith("5")) "$code6.SH" else "$code6.SZ"
+        val thscode = MAIN_INDICES.firstOrNull { it.third.substringBefore(".") == code6 }?.third
+            ?: if (code6.startsWith("6") || code6.startsWith("5")) "$code6.SH" else "$code6.SZ"
         return kotlinx.coroutines.coroutineScope {
             val quoteDeferred = async {
                 val envelope = when {
@@ -499,7 +516,8 @@ class MarketDataRepository @Inject constructor(
                     // yyyyMMdd → yyyy-MM-dd
                     if (d.length == 8) "${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}" else null
                 } }
-            } ?: emptyList()
+                // 禁用/失败返回 null 走缓存回退（勿 ?: emptyList() 伪装成成功空）
+            }
         } ?: emptyList()
 
     /** 扶摇龙虎榜榜单（过去日期按日缓存优先——历史榜单不可变零网络；缺省日期恒拉最新）。 */
@@ -589,7 +607,8 @@ class MarketDataRepository @Inject constructor(
                 val envelope = fuyaoApi.getHotStockList(period)
                 check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
                 envelope.data?.item.orEmpty()
-            } ?: emptyList()
+                // 禁用/失败返回 null 走 fetchFirstReplace 回退缓存（勿 ?: emptyList() 伪装成成功空覆盖缓存）
+            }
         } ?: emptyList()
 
     /** 热度飙升榜 Top30（覆盖式缓存兜底）。 */
@@ -599,7 +618,8 @@ class MarketDataRepository @Inject constructor(
                 val envelope = fuyaoApi.getSkyrocketList(period)
                 check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
                 envelope.data?.item.orEmpty()
-            } ?: emptyList()
+                // 禁用/失败返回 null 走 fetchFirstReplace 回退缓存（勿 ?: emptyList() 伪装成成功空覆盖缓存）
+            }
         } ?: emptyList()
 
     /** 历史热股榜（按自然日不可变：过去日期命中缓存零网络）。 */
@@ -613,7 +633,9 @@ class MarketDataRepository @Inject constructor(
                 val envelope = fuyaoApi.getHotStockListHistory(date)
                 check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
                 envelope.data?.item.orEmpty()
-            } ?: emptyList()
+                // 禁用/失败返回 null 走按日缓存回退（勿 ?: emptyList() 伪装成成功空——会把当日
+                // 缓存位污染成空表，断网后历史可读的承诺失效）
+            }
         } ?: emptyList()
 
     /** 个股热度排名走势（原始 JSON 点位序列）。 */
@@ -657,7 +679,8 @@ class MarketDataRepository @Inject constructor(
                 val envelope = fuyaoApi.getThsIndexList(tag)
                 check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
                 envelope.data?.item.orEmpty()
-            } ?: emptyList()
+                // 禁用/失败返回 null 走 fetchFirstReplace 回退缓存（勿 ?: emptyList() 伪装成成功空覆盖缓存）
+            }
         } ?: emptyList()
 
     /** 指数成分股（覆盖式缓存兜底；成分半年调整一次）。 */
@@ -667,7 +690,8 @@ class MarketDataRepository @Inject constructor(
                 val envelope = fuyaoApi.getIndexConstituents(thscode)
                 check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
                 envelope.data?.item.orEmpty()
-            } ?: emptyList()
+                // 禁用/失败返回 null 走 fetchFirstReplace 回退缓存（勿 ?: emptyList() 伪装成成功空覆盖缓存）
+            }
         } ?: emptyList()
 
     /**
@@ -680,7 +704,7 @@ class MarketDataRepository @Inject constructor(
         val cached = cacheStore.loadEntry<List<KlineBar>>(key, fuyaoCacheTypeOf<List<KlineBar>>())
         val today = java.time.LocalDate.now().toString()
         val syncedToday = cached != null && java.time.Instant.ofEpochMilli(cached.fetchedAt)
-            .atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString() == today
+            .atZone(com.stock.dividend.data.remote.dto.FUYAO_ZONE).toLocalDate().toString() == today
         if (cached != null && cached.value.isNotEmpty() &&
             (cached.value.last().date >= today || syncedToday)
         ) {
@@ -691,7 +715,8 @@ class MarketDataRepository @Inject constructor(
             fuyaoCacheTypeOf<List<KlineBar>>(),
             merge = { c, fresh ->
                 if (c == null) fresh
-                else (fresh.associateBy { it.date } + c.associateBy { it.date })
+                // Map + 右侧覆盖左侧：缓存放左、远端放右——远端覆盖同期（含当日盘中价被收盘价修正）
+                else (c.associateBy { it.date } + fresh.associateBy { it.date })
                     .values.toList().sortedBy { it.date }
             }
         ) {
@@ -717,7 +742,8 @@ class MarketDataRepository @Inject constructor(
                         volume = bar.volume?.takeIf { it.isFinite() }?.div(100.0) ?: 0.0
                     )
                 }
-            } ?: emptyList()
+                // 禁用/失败返回 null 走 fetchFirstMerge 回退缓存（勿 ?: emptyList() 伪装成成功空）
+            }
         } ?: cached?.value ?: emptyList()
     }
 
@@ -733,23 +759,7 @@ class MarketDataRepository @Inject constructor(
             envelope.data?.item.orEmpty()
         } ?: emptyList()
 
-    // ── 辅助：secid / fs / 单位换算 ──
-
-    /**
-     * `sh.600036` → clist 的 `fs` 筛选串：`m:1+t:2+s:600036`（沪主板）/ `m:0+t:2+s:000001`（深主板）。
-     * t:2 = 主板（含 600/000）；创业板 300 用 t:0，科创 688 用 t:1，但 clist 资金流接口对 t 不敏感，
-     * 统一用 t:2 即可命中（实测 600519/000001 均能返回）。无法识别返回 null。
-     */
-    private fun toClistFs(stockCode: String): String? {
-        val code6 = stockCode.substringAfter(".", missingDelimiterValue = stockCode)
-        val market = when {
-            stockCode.startsWith("sh.", ignoreCase = true) -> 1
-            stockCode.startsWith("sz.", ignoreCase = true) -> 0
-            else -> guessMarketByCode6(code6)
-        } ?: return null
-        if (!code6.matches(Regex("\\d{6}"))) return null
-        return "m:$market+t:2+s:$code6"
-    }
+    // ── 辅助：secid / 单位换算 ──
 
     /** 规范化股票 code：纯 6 位数字按前缀猜市场，带前缀原样返回。 */
     private fun normalizeStockCode(raw: String): String? {
@@ -787,15 +797,16 @@ class MarketDataRepository @Inject constructor(
         /** 全市场榜单带过滤条件时的候选集大小（客户端过滤仅作用于榜单前列）。 */
         private const val RANKING_SCAN_SIZE = 200
 
-        /** 主要指数：显示名 → (push2 secid, 扶摇 thscode)。扶摇 thscode 实测全部可用（2026-08-23）。 */
+        /** 主要指数：显示名 → (push2 secid, 扶摇 thscode)。扶摇 thscode 实测全部可用（2026-08-23）。
+         *  ⚠️ 中证系列（500/1000）挂沪市，secid 市场位为 1（2026-08-24 评审修正：此前误写 0. 导致东财降级恒拿不到）。 */
         val MAIN_INDICES: List<Triple<String, String, String>> = listOf(
             Triple("上证指数", "1.000001", "000001.SH"),
             Triple("深证成指", "0.399001", "399001.SZ"),
             Triple("沪深300", "1.000300", "000300.SH"),
             Triple("创业板指", "0.399006", "399006.SZ"),
             Triple("科创50", "1.000688", "000688.SH"),
-            Triple("中证500", "0.000905", "000905.SH"),
-            Triple("中证1000", "0.000852", "000852.SH")
+            Triple("中证500", "1.000905", "000905.SH"),
+            Triple("中证1000", "1.000852", "000852.SH")
         )
     }
 }

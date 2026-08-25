@@ -23,7 +23,7 @@
 | 构建 | AGP + KSP + Gradle Kotlin DSL | AGP 8.7.3, KSP 2.1.20-1.0.32 |
 | UI | Jetpack Compose + Material Design 3 | BOM 2024.12.01, M3 1.3.1 |
 | DI | Hilt | 2.53.1 |
-| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 31** |
+| 本地存储 | Room (SQLite) | 2.8.4，**当前 DB version = 32** |
 | AI Agent | Google ADK Kotlin（AI Tab，OpenAI 兼容协议适配） | 0.6.0 |
 | 网络 | Retrofit + OkHttp + Gson | 2.11.0 / 4.12.0 |
 | 异步 | Coroutines + Flow | 1.9.0 |
@@ -127,7 +127,7 @@ docs/                                   # 设计文档 + audit/（数据一致�
 | `PortfolioRiskDiagnoser` | 组合风险诊断（集中度 HHI+CR / 股息可持续 / 估值水位利差）+ `grade()` 三维红绿灯 |
 | `MarketMoodCalculator` | 市场情绪分组：板块列表本地排序取领涨/领跌 TopN |
 | `BollCalculator` | 收盘价 → BOLL 带（MA20 ± 2σ） |
-| `ForecastCalculator` | 历史分红 → 年均每股 + 预测收入。**口径：`rollingYearlyTotals` 按除权日的滚动 12 个月窗口（TTM），已排期未除权（exDate 已定 ≤365 天）计入，预案不计入；`latestYearlyCashPerShare`(TTM) 与 `calculateAvgCashPerShare`(N 年均) 共享锚点——全 App 股息率/预测收入同源，勿再造平行口径** |
+| `ForecastCalculator` | 历史分红 → 年均每股 + 预测收入。**口径：`rollingYearlyTotals` 按除权日的滚动 12 个月窗口（TTM），已排期未除权（exDate 已定 ≤365 天）计入，预案不计入；窗口内同周期去重（除权日间隔 10~14 个月的两笔视为同周期、新笔替代旧笔，2026-08 中国平安「旧中期+末期+新中期」1.5 周期双计修复）；`latestYearlyCashPerShare`(TTM) 与 `calculateAvgCashPerShare`(N 年均) 共享锚点——全 App 股息率/预测收入同源，勿再造平行口径** |
 | `BuyThresholdCalculator` | 10Y 国债 × 倍数 → 买入价 |
 | `DripCalculator` | 分红再投资复利模拟（再投价为单值简化口径，UI 明示假设） |
 | `HoldingCalculator` | 摊薄成本法持仓成本（已实现盈亏藏入成本） |
@@ -162,7 +162,7 @@ docs/                                   # 设计文档 + audit/（数据一致�
 
 ### 4.6 数据库（Room）纪律 —— 关键
 
-- **DB version = 31**（22 张表 / `MIGRATION_1_2` … `MIGRATION_30_31`），`exportSchema = false`。
+- **DB version = 32**（22 张表 / `MIGRATION_1_2` … `MIGRATION_31_32`），`exportSchema = false`。
 - 改 schema 必须三件事同步：① `AppDatabase` 的 entities/version；② 新增 `MIGRATION_N_(N+1)` 并在 `DatabaseModule` 注册；③ version +1。历史迁移全部手写 `ALTER`/`CREATE`。
 - 表名/列名下划线，实体字段驼峰，Room 注解映射。
 - **备份恢复注意**：恢复旧版本备份时 Gson 会给缺失字段填 null，可能撞 Room NOT NULL 约束使整个事务失败——`BackupData.normalizeXxx` 按 `dbVersion` 分支修补（先例：normalizeGridPlans）。
@@ -215,7 +215,7 @@ docs/                                   # 设计文档 + audit/（数据一致�
 - ⚠️ **报告期取 `period_end_ms`**：`report_date_ms` 是公告日（同季度再公告会同值），作报告期会撞期（`FuyaoStatementsBuilder`）。
 - 时间戳毫秒 Unix、时区 Asia/Shanghai（`fuyaoMsToDateStringOrNull`）；代码格式 `600519.SH`（`toFuyaoThscodeOrNull` / `fuyaoThscodeToAppCodeOrNull`）；搜索中文必须 URL 编码、同 thscode 有重复行需去重、只支持 SH/SZ。
 - **只有日线**（interval=1d，窗口 ≤10 年）：周/月线由 `KlineAggregator` 从日线本地聚合（同时保证三周期前复权基准同源）；基金日K恒未复权，**基金 K 线保持腾讯**。
-- 股票分红事件流**只有已除权事件**（无预案/排期状态、无报告期）——报告期由东财 enrich 按除权日对齐回填，「已排期未除权」仍走东财通道（`DividendRepository.enrichAndMergeFromEastMoney`）。
+- 股票分红事件流**只有已除权事件**（无预案/排期状态、无报告期）——报告期由东财 enrich 按除权日对齐回填，「已排期未除权」仍走东财通道（`DividendRepository.enrichAndMergeFromEastMoney`）。事件流带 `per_share_bonus` 每股送转比例：现金与送转**任一 > 0 即落行**（纯送转行 cashPerShare=0 + bonusPerShare，各计算器按 cashPerShare>0 过滤不受污染），送转除权由此进入 `MAX(exDividendDate)` K 线漂移检测（2026-08-20 审计 M4-1 盲区修复；腾讯/东财候补路径无送转字段，维持已知限制）。
 - K 线换源纪律：`kline_cache_meta.source` 记录缓存来源（DB v27），与当前主源不一致时**必须全量重建**（两家前复权基准不同，增量混用会产生价格跳变）；扶摇故障有 10 分钟冷却（防换源判定热循环）。
 
 #### 4.9.6 解析层实践（强制）
@@ -284,6 +284,7 @@ CI 用 JDK 17 temurin，显式 `USE_CHINA_MIRROR=false` 直连官方仓库；本
 | 想做什么 | 先看 |
 |---|---|
 | 理解整体架构 | `MainActivity.kt` → `AppNavigation.kt` → `MainScaffold.kt` |
+| 快速定位符号 / 调用链 / 改动影响面 | codegraph 查图（§10，优先于 grep/Read） |
 | 取股市数据（任何场景） | `data/plane/MarketDataPlane.kt`（§4.2A，唯一入口） |
 | 持仓/评估主流程 | `PortfolioViewModel.kt` + `HoldingRecommender.kt` / `PortfolioAdvisor.kt` |
 | 加一张数据表 | `AppDatabase.kt`（Migration，红线 #1）+ `dao/` + `entity/` + `DatabaseModule.kt` |
@@ -291,3 +292,14 @@ CI 用 JDK 17 temurin，显式 `USE_CHINA_MIRROR=false` 直连官方仓库；本
 | 加一个页面 | `ui/screen/XxxScreen.kt` + `viewmodel/XxxViewModel.kt` + 注册 `AppNavigation.kt` |
 | 复用 UI 样式 | `DESIGN.md` + `AppComponents.kt` + `ui/theme/` |
 | 通知/后台 | `data/notification/` + `StockDividendApp.kt` |
+
+---
+
+## 10. CodeGraph 代码图谱（仓库已建索引）
+
+仓库根 `.codegraph/`（已 gitignore）是预建代码知识图谱（SQLite，455 文件 / 1.2 万符号 / 2.6 万关系）。agent **探索/定位代码优先查图**，替代多轮 grep/Read：
+
+- **优先入口**：MCP 工具 `codegraph_explore`——一次调用返回相关符号的逐行源码 + 调用链 + 影响面（blast radius）；**返回源码等价于已 Read，同一文件勿重复 Read**。无 MCP 环境用 CLI 等价命令：`codegraph explore "<符号名>"` / `node` / `callers` / `callees` / `impact` / `affected`（改动文件 → 受影响测试）。
+- **查询带符号名**：类/方法/文件名（可混少量中文词），纯中文自然语言查询命中率低。
+- **可信度（实测 2026-08-24）**：符号定位与调用方解析准确（已经 grep 交叉验证）；但「no covering tests」警告对 `object` 纯函数有误报（如 `GridCalculatorTest` 存在却被漏判）——以它为准跳过补测试前，先 grep 确认 `*Test.kt` 是否真的不存在。
+- **维护**：索引随文件保存自动增量同步，日常零维护；切大分支后如怀疑过期，`codegraph index` 强制重建（本项目 <1s）。

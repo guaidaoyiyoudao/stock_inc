@@ -22,6 +22,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -83,7 +84,7 @@ fun KlineYieldChart(
         reveal.snapTo(0f)
         reveal.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 800, easing = Motion.EmphasizedDecelerate),
+            animationSpec = tween(durationMillis = Motion.DurationLong, easing = Motion.EmphasizedDecelerate),
         )
     }
 
@@ -92,9 +93,10 @@ fun KlineYieldChart(
     val first = display.first()
     val high = display.maxOf { it.high }
     val low = display.minOf { it.low }
-    val periodChangePct = runCatching {
-        (last.close - first.open) / first.open * 100.0
-    }.getOrDefault(0.0)
+    // 区间涨跌：起点开盘价无效（≤0）时无意义（Double/0.0 得 Infinity 不抛异常，原 runCatching 是死代码）
+    val periodChangePct = first.open.takeIf { it > 0.0 }
+        ?.let { (last.close - it) / it * 100.0 }
+        ?: 0.0
 
     // 股息率网格线（区间内整档；dps 无效降级空表，蜡烛图照常渲染）
     val yieldLines = remember(display, dps, currentPrice) {
@@ -123,21 +125,47 @@ fun KlineYieldChart(
         .copy(fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     val dateBaseColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    // 图例：dps 有效时计算器保证 ≥3 档（窄区间也不缩水），无需「无档位」降级文案
-    val legendText = buildString {
-        append(
-            when {
-                dps == null || dps <= 0.0 -> "暂无分红数据，未画股息率线"
-                else -> "虚线 = 股息率价位（年分红 ${MoneyFormatter.withSymbol(dps, decimals = 4)} ÷ 股息率）"
-            }
-        )
+    // 绘制期文本测量提升到组合期 remember（按数据/样式键失效），避免逐帧 textMeasurer.measure
+    val measuredYieldLabels = remember(yieldLines, yieldLabelStyle) {
+        yieldLines.map { textMeasurer.measure(yieldLineLabelText(it), yieldLabelStyle) }
+    }
+    val measuredMaEndLabel = remember(hasMa, maLabel, maDisplay, maLabelStyle) {
+        if (hasMa && maLabel != null) {
+            maDisplay.lastNotNullOrNull()
+                ?.let { textMeasurer.measure(maLineLabelText(maLabel, it), maLabelStyle) }
+        } else {
+            null
+        }
+    }
+    val measuredDateLabels = remember(display, dateStyle) {
+        textMeasurer.measure(klineDateLabel(display.first().date), dateStyle) to
+            textMeasurer.measure(klineDateLabel(display.last().date), dateStyle)
+    }
+    // 均线 Path 复用（绘制期 reset 重画，几何依赖画布尺寸无法整体前移）；股息率虚线
+    // dashPattern 只依赖密度，组合期算好，避免每帧新建 PathEffect
+    val maPath = remember { Path() }
+    val density = LocalDensity.current
+    val yieldDashEffect = remember(density) {
+        with(density) {
+            PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 4.dp.toPx()))
+        }
+    }
+
+    // 图例：股息率网格线非空才解释「虚线」含义；dps 缺失才提示降级；
+    // 退化区间（dps 有效但无档位）两段都不加，不误导「虚线 = 股息率价位」
+    val legendText = buildList {
+        if (yieldLines.isNotEmpty() && dps != null) {
+            add("虚线 = 股息率价位（年分红 ${MoneyFormatter.withSymbol(dps, decimals = 4)} ÷ 股息率）")
+        } else if (dps == null || dps <= 0.0) {
+            add("暂无分红数据，未画股息率线")
+        }
         if (hasMa && maLabel != null) {
             maDisplay.lastNotNullOrNull()?.let { latest ->
-                append(" · 实线 = $maLabel ${MoneyFormatter.amount(latest)}")
+                add("实线 = $maLabel ${MoneyFormatter.amount(latest)}")
             }
         }
-        append(" · 底部柱为成交量（手）")
-    }
+        add("底部柱为成交量（手）")
+    }.joinToString(" · ")
 
     AppCard(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(AppCardDefaults.ListPadding)) {
@@ -206,13 +234,8 @@ fun KlineYieldChart(
                 fun yFor(price: Double): Float = ((yMax - price) / (yMax - yMin) * priceH).toFloat()
 
                 // 右侧 gutter：按最宽标签自适应（股息率档位 / 均线值；两者皆无时为 0，蜡烛占满全宽）
-                val maEndLabel = if (hasMa && maLabel != null) {
-                    maDisplay.lastNotNullOrNull()
-                        ?.let { v -> textMeasurer.measure(maLineLabelText(maLabel, v), maLabelStyle) }
-                } else null
-                val measuredLabels = yieldLines.map {
-                    textMeasurer.measure(yieldLineLabelText(it), yieldLabelStyle)
-                }
+                val maEndLabel = measuredMaEndLabel
+                val measuredLabels = measuredYieldLabels
                 val gutter = (measuredLabels.maxOfOrNull { it.size.width } ?: 0)
                     .coerceAtLeast(maEndLabel?.size?.width ?: 0)
                     .takeIf { it > 0 }?.plus(8.dp.roundToPx()) ?: 0
@@ -223,7 +246,7 @@ fun KlineYieldChart(
 
                 // 1) 股息率水平虚线 + 右侧标签（随入场进度淡入）
                 if (measuredLabels.isNotEmpty()) {
-                    val dash = PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 4.dp.toPx()))
+                    val dash = yieldDashEffect
                     yieldLines.zip(measuredLabels).forEach { (line, label) ->
                         val y = yFor(line.price)
                         drawLine(
@@ -271,14 +294,14 @@ fun KlineYieldChart(
                 // 3) 均线：实线折线（null 断开），与蜡烛同步浮现——年线定投策略的锚定基准
                 if (hasMa) {
                     val slotMa = plotW / n
-                    val path = Path()
+                    maPath.reset() // 复用组合期 Path 对象，逐帧重画
                     var started = false
                     maDisplay.forEachIndexed { i, v ->
                         if (v != null) {
                             val x = slotMa * i + slotMa / 2f
                             val y = yFor(v)
-                            if (started) path.lineTo(x, y) else {
-                                path.moveTo(x, y)
+                            if (started) maPath.lineTo(x, y) else {
+                                maPath.moveTo(x, y)
                                 started = true
                             }
                         } else {
@@ -286,7 +309,7 @@ fun KlineYieldChart(
                         }
                     }
                     drawPath(
-                        path = path,
+                        path = maPath,
                         color = maColor.copy(alpha = progress),
                         style = Stroke(width = 1.5.dp.toPx())
                     )
@@ -321,11 +344,11 @@ fun KlineYieldChart(
                     }
                 }
 
-                // 5) 首末日期标签（MM-dd，对齐绘图区两端；入场尾声淡入）
+                // 5) 首末日期标签（MM-dd，对齐绘图区两端；入场尾声淡入；标签为组合期测量缓存）
                 val dateAlpha = ((progress - 0.6f) / 0.4f).coerceIn(0f, 1f)
                 if (dateAlpha > 0f) {
-                    val firstLabel = textMeasurer.measure(klineDateLabel(display.first().date), dateStyle)
-                    val lastLabel = textMeasurer.measure(klineDateLabel(display.last().date), dateStyle)
+                    val firstLabel = measuredDateLabels.first
+                    val lastLabel = measuredDateLabels.second
                     val dateColor = dateBaseColor.copy(alpha = dateAlpha)
                     drawText(firstLabel, color = dateColor, topLeft = Offset(0f, dateY))
                     drawText(

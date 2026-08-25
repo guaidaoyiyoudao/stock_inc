@@ -1,6 +1,7 @@
 package com.stock.dividend.data.plane
 
 import com.google.common.truth.Truth.assertThat
+import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BondYieldRepository
@@ -39,6 +40,7 @@ class MarketDataPlaneTest {
     private val researchRepository = mockk<ResearchRepository>()
     private val fundDataRepository = mockk<com.stock.dividend.data.repository.FundDataRepository>(relaxed = true)
     private val errorLogRepository = mockk<ErrorLogRepository>(relaxed = true)
+    private val stockDao = mockk<StockDao>()
     private val store = FakeFreshnessStore()
 
     private lateinit var plane: MarketDataPlane
@@ -62,7 +64,8 @@ class MarketDataPlaneTest {
             bondYieldRepository = bondYieldRepository,
             researchRepository = researchRepository,
             dividendFreshnessStore = store,
-            errorLogRepository = errorLogRepository
+            errorLogRepository = errorLogRepository,
+            stockDao = stockDao,
         )
         plane.nowProvider = { now }
     }
@@ -320,6 +323,59 @@ class MarketDataPlaneTest {
         coVerify(exactly = 1) { marketDataRepository.fetchIndexQuotes() }
     }
 
+    // ── getPricesForCodes：单次批量查询取齐实体（替代逐 code N 次查库） ──
+
+    @Test
+    fun `getPricesForCodes resolves entities via single batch dao query`() = runTest {
+        val peer = stock.copy(code = "sz.000001", marketCode = "0")
+        coEvery { stockDao.getByCodes(listOf("sh.600036", "sz.000001")) } returns listOf(stock, peer)
+        coEvery { stockRepository.fetchQuoteSnapshots(any()) } returns mapOf(
+            "sh.600036" to snapshot, "sz.000001" to snapshot.copy(stockCode = "sz.000001")
+        )
+
+        val prices = plane.getPricesForCodes(listOf("sh.600036", "sz.000001"))
+
+        assertThat(prices).containsExactly("sh.600036", 10.0, "sz.000001", 10.0)
+        // 实体解析一次 IN 查询取齐，不再逐 code 串行 getStock
+        coVerify(exactly = 1) { stockDao.getByCodes(any()) }
+        coVerify(exactly = 0) { stockRepository.getStock(any()) }
+    }
+
+    @Test
+    fun `getPricesForCodes with dao failure degrades to empty without crash`() = runTest {
+        coEvery { stockDao.getByCodes(any()) } throws java.io.IOException("db busy")
+
+        val prices = plane.getPricesForCodes(listOf("sh.600036"))
+
+        assertThat(prices).isEmpty()
+        coVerify(exactly = 0) { stockRepository.fetchQuoteSnapshots(any()) }
+    }
+
+    // ── marketSession：写入时清扫过期 + 容量上限淘汰最旧 ──
+
+    @Test
+    fun `market session evicts expired entries on subsequent write`() = runTest {
+        // 用 getIndexOrEtfQuote 造两个互不相同的 key（per-code key）
+        coEvery { marketDataRepository.fetchIndexOrEtfQuote(any()) } returns null
+        plane.getIndexOrEtfQuote("000001")
+        plane.getIndexOrEtfQuote("000002")
+        assertThat(plane.marketSessionSize()).isEqualTo(2)
+
+        now += PlanePolicy.MARKET_TTL_MS + 1     // 两条都过期
+        plane.getIndexOrEtfQuote("000003")       // 新写入顺带清扫
+
+        assertThat(plane.marketSessionSize()).isEqualTo(1)   // 只剩最新写入的那条
+    }
+
+    @Test
+    fun `market session caps size by evicting oldest entries`() = runTest {
+        coEvery { marketDataRepository.fetchIndexOrEtfQuote(any()) } returns null
+        // 写入 70 个不同 key（超过上限 64）：每次写入顺带淘汰最旧
+        repeat(70) { i -> plane.getIndexOrEtfQuote(i.toString().padStart(6, '0')) }
+
+        assertThat(plane.marketSessionSize()).isEqualTo(64)
+    }
+
     // ── 测试夹具 ──────────────────────────────────────────
 
     private fun dividend(
@@ -336,8 +392,8 @@ class MarketDataPlaneTest {
     private class FakeFreshnessStore : DividendFreshnessStore {
         val success = mutableMapOf<String, Long>()
         val attempt = mutableMapOf<String, Long>()
-        override fun lastSuccessAt(stockCode: String): Long = success[stockCode] ?: 0L
-        override fun lastAttemptAt(stockCode: String): Long = attempt[stockCode] ?: 0L
+        override suspend fun lastSuccessAt(stockCode: String): Long = success[stockCode] ?: 0L
+        override suspend fun lastAttemptAt(stockCode: String): Long = attempt[stockCode] ?: 0L
         override fun markSuccess(stockCode: String, at: Long) { success[stockCode] = at }
         override fun markAttempt(stockCode: String, at: Long) { attempt[stockCode] = at }
         override fun clear() { success.clear(); attempt.clear() }

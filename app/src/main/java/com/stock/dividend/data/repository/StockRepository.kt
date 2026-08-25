@@ -141,8 +141,12 @@ class StockRepository @Inject constructor(
                     val priceMap = fuyaoPrices ?: runCatching {
                         val secids = items.joinToString(",") { "${it.marketCode}.${it.code.substringAfter(".")}" }
                         quoteApi.getQuotes(secids = secids).data?.diff?.associate {
-                            "${it.market}.${it.code}" to
-                                it.price.divPriceScaleOrNull(FundDividendParser.isExchangeTradedFundCode(it.code))
+                            // key 统一 App 的 sh./sz. 格式（f13: 1=沪 0=深），才能与下方 priceMap[item.code]
+                            // 的 sh.600036 形态命中——此前误用 "1.600036" 形态永不匹配（2026-08-24 评审修复）
+                            val code6 = it.code.substringAfter(".")
+                            val prefix = if (it.market == 1) "sh" else "sz"
+                            "$prefix.$code6" to
+                                it.price.divPriceScaleOrNull(FundDividendParser.isExchangeTradedFundCode(code6))
                         } ?: emptyMap()
                     }.getOrDefault(emptyMap())
                     val priced = items.map { item ->
@@ -428,17 +432,22 @@ class StockRepository @Inject constructor(
                     toQuoteSnapshotFromFuyao(item)?.let { snapshots[it.stockCode] = it }
                 }
             }
-            fundCodes.map { fundCode ->
+            // 各 async 只返回自己的局部结果，awaitAll 之后顺序合并——多个基金请求几乎同时返回时
+            // 并发写同一个非线程安全 mutableMap 会丢写（2026-08-24 评审修复）
+            val fundResults: List<Map<String, QuoteSnapshot>> = fundCodes.map { fundCode ->
                 async {
                     val thscode = fundCode.toFuyaoThscodeOrNull()
                         ?: throw IllegalArgumentException("基金代码无法映射扶摇 thscode: $fundCode")
                     val envelope = fuyaoApi.getFundSnapshot(thscode = thscode)
                     check(envelope.isOk) { "扶摇基金快照失败: $fundCode code=${envelope.code} ${envelope.message}" }
-                    envelope.data?.item.orEmpty().forEach { item ->
-                        toQuoteSnapshotFromFuyao(item)?.let { snapshots[it.stockCode] = it }
+                    buildMap {
+                        envelope.data?.item.orEmpty().forEach { item ->
+                            toQuoteSnapshotFromFuyao(item)?.let { put(it.stockCode, it) }
+                        }
                     }
                 }
             }.awaitAll()
+            fundResults.forEach { snapshots.putAll(it) }
             check(snapshots.isNotEmpty()) { "扶摇快照结果为空（${codes.size} 只标的）" }
             snapshots
         }

@@ -171,7 +171,7 @@ class DividendCalendarViewModel @Inject constructor(
             isRefreshing.value = true
             latestStocks.forEach { stock ->
                 try {
-marketDataPlane.refreshDividends(stock.code)
+                    marketDataPlane.refreshDividends(stock.code)
                 } catch (_: Exception) { /* 单股失败不中断其他股的刷新 */ }
             }
             isRefreshing.value = false

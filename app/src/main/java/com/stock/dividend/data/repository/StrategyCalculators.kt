@@ -8,7 +8,8 @@ package com.stock.dividend.data.repository
  * - 恰达阈值计为触发（与 [MaDcaStrategyCalculator] 同语义，含浮点容差）；
  * - 买卖股数一律按 A 股整手（100 股）向下折算；
  * - 买入方向只展示不推送（notifyTier=null）；卖出方向按类型给 HALF/ALL 档
- *   （边沿触发推送语义见 data/notification/StrategyNotifyEvaluator）。
+ *   （边沿触发推送语义见 data/notification/StrategyNotifyEvaluator）；
+ * - ValueAveraging 超额卖出按定投节奏类处理，不推送（notifyTier=null 为有意行为）。
  */
 private const val TIER_HALF = "HALF"
 private const val TIER_ALL = "ALL"
@@ -65,12 +66,13 @@ object TakeProfitStrategyCalculator {
     }
 }
 
-/** 股息率带：股息率 ≥ 加仓线加倍买 / ≥ 买入线买入 / ≤ 卖出线清仓。 */
+/** 股息率带：股息率 ≥ 加仓线提示加仓（金额与买入线同档，加倍买为后续规划）/ ≥ 买入线买入 / ≤ 卖出线清仓。 */
 object YieldBandStrategyCalculator {
 
     fun evaluate(
         price: Double,
         dps: Double?,
+        holdingShares: Int,
         buyAmount: Double,
         params: StrategyParams.YieldBand
     ): StrategyEvaluation? {
@@ -80,6 +82,7 @@ object YieldBandStrategyCalculator {
             StrategyMetric("现价", MoneyFormatter.amount(price)),
             StrategyMetric("年每股分红", MoneyFormatter.withSymbol(dps, decimals = 4)),
             StrategyMetric("当前股息率", MoneyFormatter.amount(yieldPercent) + "%"),
+            StrategyMetric("当前持仓", "$holdingShares 股"),
             StrategyMetric("买入线", MoneyFormatter.amount(params.buyYieldPercent) + "%"),
             StrategyMetric("加仓线", MoneyFormatter.amount(params.addYieldPercent) + "%"),
             StrategyMetric("卖出线", MoneyFormatter.amount(params.sellYieldPercent) + "%")
@@ -91,12 +94,21 @@ object YieldBandStrategyCalculator {
             yieldPercent >= params.buyYieldPercent - DEVIATION_EPS -> buy(
                 "股息率 ${MoneyFormatter.amount(yieldPercent)}% 达买入线", price, buyAmount, metrics
             )
-            yieldPercent <= params.sellYieldPercent + DEVIATION_EPS -> StrategyEvaluation(
-                action = StrategyAction.SELL_ALL,
-                headline = "股息率 ${MoneyFormatter.amount(yieldPercent)}% 跌破卖出线",
-                metrics = metrics,
-                notifyTier = TIER_ALL
-            )
+            yieldPercent <= params.sellYieldPercent + DEVIATION_EPS -> {
+                // 无持仓仅跟踪（与 TakeProfit/DualMa 守卫一致），有持仓才给清仓信号与股数
+                // （sellShares 供「卖出 N 股（一键记账）」按钮，恒 0 会导致按钮缺失——2026-08-24 评审修复）
+                if (holdingShares <= 0) StrategyEvaluation(
+                    action = StrategyAction.HOLD,
+                    headline = "股息率 ${MoneyFormatter.amount(yieldPercent)}% 跌破卖出线（暂无持仓，仅跟踪）",
+                    metrics = metrics
+                ) else StrategyEvaluation(
+                    action = StrategyAction.SELL_ALL,
+                    headline = "股息率 ${MoneyFormatter.amount(yieldPercent)}% 跌破卖出线",
+                    metrics = metrics,
+                    sellShares = holdingShares,
+                    notifyTier = TIER_ALL
+                )
+            }
             else -> StrategyEvaluation(
                 action = StrategyAction.HOLD,
                 headline = "股息率在带内",
@@ -196,16 +208,25 @@ object MaDeviationStrategyCalculator {
             StrategyMetric("当前持仓", "$holdingShares 股")
         )
         return when {
-            // 回归均线：卖出低吸部分（按持仓一半整手折算——无法精确拆分低吸仓位，保守提示）
-            currentPrice >= ma -> StrategyEvaluation(
-                action = StrategyAction.SELL_HALF,
-                headline = "回归均线，卖出低吸部分",
-                metrics = metrics,
-                sellShares = lotShares(holdingShares / 2),
-                notifyTier = TIER_HALF
-            )
+            // 回归均线：卖出低吸部分（按持仓一半整手折算——无法精确拆分低吸仓位，保守提示）；
+            // 无持仓仅跟踪（2026-08-24 评审修复：不再推「卖出 0 股」的 HALF 提醒）
+            currentPrice >= ma -> {
+                if (holdingShares <= 0) StrategyEvaluation(
+                    action = StrategyAction.HOLD,
+                    headline = "回归均线（暂无持仓，仅跟踪）",
+                    metrics = metrics
+                ) else StrategyEvaluation(
+                    action = StrategyAction.SELL_HALF,
+                    headline = "回归均线，卖出低吸部分",
+                    metrics = metrics,
+                    sellShares = lotShares(holdingShares / 2),
+                    notifyTier = TIER_HALF
+                )
+            }
             deviation <= -params.stepPercent + DEVIATION_EPS -> {
-                val level = ((-deviation) / params.stepPercent).toInt() + 1
+                // 第 k 档 = 偏离 ≤ -k×step%（恰达计触发）：floor 取档，此前 toInt()+1 把恰达边界
+                // 算作已过一档、档号系统性偏大 1（2026-08-24 评审修复）
+                val level = kotlin.math.floor((-deviation) / params.stepPercent + DEVIATION_EPS).toInt()
                 val clamped = level.coerceAtMost(params.buyLevels)
                 val atDeepest = level > params.buyLevels
                 StrategyEvaluation(

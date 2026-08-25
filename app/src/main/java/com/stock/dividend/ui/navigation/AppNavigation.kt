@@ -14,6 +14,9 @@ import com.stock.dividend.ui.screen.TransactionHistoryScreen
 import com.stock.dividend.ui.screen.TransactionImportScreen
 import com.stock.dividend.ui.screen.GridPlanScreen
 import com.stock.dividend.ui.screen.StrategyPlanScreen
+import com.stock.dividend.ui.screen.EditHoldingScreen
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 object Routes {
     const val MAIN = "main"
     const val FIRE_GOAL_SETUP = "fireGoalSetup"
@@ -91,13 +94,44 @@ fun AppNavigation(
         }
         composable(Routes.GRID_PLAN) {
             GridPlanScreen(
-                onBack = { rootNavController.popBackStack() }
+                onBack = { rootNavController.popBackStack() },
+                onAddTransaction = { code, price, shares, isBuy ->
+                    // 与 MainScaffold tab 路由同款「一键记账」闭环：按方向拼预填参数
+                    // （2026-08-24 评审修复：根路由漏传时按钮静默 no-op）
+                    val direction = if (isBuy) "buy" else "sell"
+                    rootNavController.navigate(
+                        "editHolding/$code?${direction}Price=${"%.2f".format(price)}&${direction}Shares=$shares"
+                    )
+                }
             )
         }
         composable(Routes.STRATEGY_PLAN) {
             StrategyPlanScreen(
-                onBack = { rootNavController.popBackStack() }
+                onBack = { rootNavController.popBackStack() },
+                onAddTransaction = { code, price, shares, isBuy ->
+                    // 与 MainScaffold tab 路由同款「一键记账」闭环：按方向拼预填参数
+                    // （2026-08-24 评审修复：根路由漏传时「买入/卖出 N 股」按钮点击无反应）
+                    val direction = if (isBuy) "buy" else "sell"
+                    rootNavController.navigate(
+                        "editHolding/$code?${direction}Price=${"%.2f".format(price)}&${direction}Shares=$shares"
+                    )
+                }
             )
+        }
+        // 根层 editHolding（MainScaffold tab 层已有同名路由，此处供根路由页面的一键记账闭环；
+        // 路由形态/参数与 tab 层完全一致）
+        composable(
+            route = "editHolding/{code}?buyPrice={buyPrice}&buyShares={buyShares}" +
+                "&sellPrice={sellPrice}&sellShares={sellShares}",
+            arguments = listOf(
+                navArgument("code") { type = NavType.StringType },
+                navArgument("buyPrice") { type = NavType.StringType; defaultValue = "" },
+                navArgument("buyShares") { type = NavType.StringType; defaultValue = "" },
+                navArgument("sellPrice") { type = NavType.StringType; defaultValue = "" },
+                navArgument("sellShares") { type = NavType.StringType; defaultValue = "" }
+            )
+        ) {
+            EditHoldingScreen(onBack = { rootNavController.popBackStack() })
         }
     }
 }

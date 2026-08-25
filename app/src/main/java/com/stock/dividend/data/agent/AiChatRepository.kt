@@ -133,6 +133,8 @@ class AiChatRepository @Inject constructor(
     /**
      * 发送一轮用户消息；[imageDataUrls] 为图片 data URL（多模态模型识别用），可为空。
      * 文本与图片都为空时由调用方拦住（这里不再兜底，保持与 UI 校验一致）。
+     * 格式非法的图片不进 parts，但会在消息文本前缀「（N 张图片格式无效已忽略）」提示——
+     * 静默丢弃会让用户误以为图片已送达模型（视觉上下文缺失无感知）。
      */
     fun send(
         sessionId: String,
@@ -143,8 +145,17 @@ class AiChatRepository @Inject constructor(
         Content(
             role = Role.USER,
             parts = buildList {
-                text.trim().takeIf { it.isNotEmpty() }?.let { add(Part(text = it)) }
-                imageDataUrls.forEach { url -> imageDataUrlToPart(url)?.let { add(it) } }
+                var invalidImages = 0
+                imageDataUrls.forEach { url ->
+                    imageDataUrlToPart(url)?.let(::add) ?: invalidImages++
+                }
+                val trimmed = text.trim()
+                val finalText = if (invalidImages > 0) {
+                    "（${invalidImages} 张图片格式无效已忽略）$trimmed"
+                } else {
+                    trimmed
+                }
+                if (finalText.isNotEmpty()) add(0, Part(text = finalText))   // 文本 part 置顶
             }
         )
     )

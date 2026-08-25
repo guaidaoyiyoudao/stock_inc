@@ -281,7 +281,12 @@ class GetPortfolioDiagnosisTool(
                             plan.grids, plan.totalCapital,
                             gridType = GridType.fromRaw(plan.gridType),
                             dps = plan.dpsPerShare,
-                        levelWeights = GridLevelWeights.parse(plan.levelWeights)
+                            levelWeights = GridLevelWeights.parse(plan.levelWeights),
+                            // 波段三参数（2026-08-24 评审修复补传）：漏传时波段计划 SELL 回款
+                            // 不回流弹药库，gridUninvestedCash 系统性失真
+                            swingMode = plan.swingMode,
+                            swingStepPercent = plan.swingStepPercent,
+                            swingRatioPercent = plan.swingRatioPercent
                         ),
                         planTxs
                     )

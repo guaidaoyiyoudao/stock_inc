@@ -1,6 +1,7 @@
 package com.stock.dividend.data.plane
 
 import androidx.annotation.VisibleForTesting
+import com.stock.dividend.data.local.dao.StockDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.repository.BollBand
@@ -48,6 +49,7 @@ import com.stock.dividend.data.remote.dto.FuyaoTickerItem
 import com.stock.dividend.data.remote.dto.FuyaoThsIndexItem
 import com.stock.dividend.data.remote.dto.FuyaoValuationItem
 import com.stock.dividend.data.remote.dto.toFuyaoThscodeOrNull
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -73,8 +75,8 @@ import javax.inject.Singleton
  * 统一语义（收敛此前多路径的不一致）：
  * - 行情：任何获取路径都**写透 price_cache**（修复主 UI 走 snapshots 不写缓存 → Widget 旧价）；
  * - 股息：`getDps` 自动 `ensureDividendsFresh`（表空/超 7 天自动拉网——修复网格页拿不到股息率的根因）；
- * - 当前股息率：唯一口径 = 最新年度 DPS ÷ 本平面现价（`getCurrentDividendYield`）；
- *   历史股息率曲线仍用 dividends 表除权时点快照，不受影响；
+ * - 当前股息率：唯一口径 = TTM DPS（最近 12 个月已除权分红合计，见 [getDps]）÷ 本平面现价
+ *   （`getCurrentDividendYield`）；历史股息率曲线仍用 dividends 表除权时点快照，不受影响；
  * - BOLL：单一路径（K线仓 + BollCalculator），内置 Semaphore(3) 限流与内存缓存；
  * - 基本面：`getFundamentals` 返回**已补派息率**的产物（收敛 VM/工具/装配器 3 处重复 enrich）。
  */
@@ -91,6 +93,9 @@ class MarketDataPlane @Inject constructor(
     private val researchRepository: ResearchRepository,
     private val dividendFreshnessStore: DividendFreshnessStore,
     private val errorLogRepository: ErrorLogRepository,
+    // stocks 表是本地自选域数据（非行情缓存）：平面直读 Dao 仅限按代码批量解析实体，
+    // 不属于红线 #10 的「行情类 Dao 直连」
+    private val stockDao: StockDao,
 ) {
     /** 测试可替换的时钟（默认真实时间）。 */
     @VisibleForTesting
@@ -159,10 +164,14 @@ class MarketDataPlane @Inject constructor(
             snap.price?.takeIf { it > 0.0 }?.let { code to it }
         }.toMap()
 
-    /** 按代码批量取现价（内部解析自选股实体；非自选股跳过）。网格/通知等只持有代码的场景用。 */
+    /**
+     * 按代码批量取现价（非自选股跳过）。网格/通知等只持有代码的场景用。
+     * 实体经 [StockDao.getByCodes] **单次 IN 查询**取齐，替代逐 code 串行 getStock 的 N 次查库。
+     */
     suspend fun getPricesForCodes(codes: List<String>, force: Boolean = false): Map<String, Double> {
         if (codes.isEmpty()) return emptyMap()
-        val stocks = codes.distinct().mapNotNull { stockRepository.getStock(it) }
+        val stocks = runCatchingKeepingCancellation { stockDao.getByCodes(codes.distinct()) }
+            .getOrDefault(emptyList())
         return getPrices(stocks, force)
     }
 
@@ -186,7 +195,7 @@ class MarketDataPlane @Inject constructor(
     suspend fun ensureDividendsFresh(stockCode: String) {
         dividendFlights.run(stockCode) {
             val now = nowProvider()
-            val rows = runCatching { dividendRepository.getDividends(stockCode) }
+            val rows = runCatchingKeepingCancellation { dividendRepository.getDividends(stockCode) }
                 .getOrDefault(emptyList())
             val successAt = dividendFreshnessStore.lastSuccessAt(stockCode)
             val fresh = rows.isNotEmpty() && successAt > 0L &&
@@ -259,15 +268,15 @@ class MarketDataPlane @Inject constructor(
      * 再按 [ForecastCalculator.latestYearlyCashPerShare] 计算。无分红数据返回 null。
      */
     suspend fun getDps(stockCode: String): Double? {
-        runCatching { ensureDividendsFresh(stockCode) }
-        val dividends = runCatching { dividendRepository.getDividends(stockCode) }
+        runCatchingKeepingCancellation { ensureDividendsFresh(stockCode) }
+        val dividends = runCatchingKeepingCancellation { dividendRepository.getDividends(stockCode) }
             .getOrDefault(emptyList())
         return ForecastCalculator.latestYearlyCashPerShare(dividends)?.takeIf { it > 0.0 }
     }
 
     /**
-     * 当前股息率（**全 App 唯一口径**）：最新年度 DPS ÷ 现价 × 100。
-     * 现价优先取本平面行情快照，无自选股记录时回退 price_cache；两者皆无返回 null。
+     * 当前股息率（**全 App 唯一口径**）：TTM DPS（最近 12 个月已除权分红合计，口径同 [getDps]）
+     * ÷ 现价 × 100。现价优先取本平面行情快照，无自选股记录时回退 price_cache；两者皆无返回 null。
      */
     suspend fun getCurrentDividendYield(stockCode: String): Double? {
         val dps = getDps(stockCode) ?: return null
@@ -298,7 +307,7 @@ class MarketDataPlane @Inject constructor(
         }
         return bollFlights.run(key) {
             val closes = bollSemaphore.withPermit {
-                runCatching { klineRepository.fetchCloses(stockCode, period) }
+                runCatchingKeepingCancellation { klineRepository.fetchCloses(stockCode, period) }
                     .onFailure {
                         errorLogRepository.record(
                             source = "K线",
@@ -331,7 +340,7 @@ class MarketDataPlane @Inject constructor(
         stockCode: String,
         forceRefresh: Boolean = false
     ): Fundamentals? {
-        val raw = runCatching { fundamentalsCacheRepository.getFundamentals(stockCode, forceRefresh) }
+        val raw = runCatchingKeepingCancellation { fundamentalsCacheRepository.getFundamentals(stockCode, forceRefresh) }
             .onFailure {
                 errorLogRepository.record(
                     source = "基本面",
@@ -340,7 +349,7 @@ class MarketDataPlane @Inject constructor(
                 )
             }
             .getOrNull() ?: return null
-        val dividends = runCatching { dividendRepository.getDividends(stockCode) }
+        val dividends = runCatchingKeepingCancellation { dividendRepository.getDividends(stockCode) }
             .getOrDefault(emptyList())
         return enrichPayoutRatio(raw, dividends.cashPerShareByDividendYear())
     }
@@ -350,7 +359,7 @@ class MarketDataPlane @Inject constructor(
         stockCode: String,
         forceRefresh: Boolean = false
     ): FinancialStatements? =
-        runCatching { financialStatementsRepository.getFinancialStatements(stockCode, forceRefresh) }
+        runCatchingKeepingCancellation { financialStatementsRepository.getFinancialStatements(stockCode, forceRefresh) }
             .onFailure {
                 errorLogRepository.record(
                     source = "财务三表",
@@ -365,7 +374,7 @@ class MarketDataPlane @Inject constructor(
      * 详情页订阅到分红更新时调用，保证派息率随分红数据响应式刷新，无需重读 7 天缓存。
      */
     suspend fun enrichFundamentals(fundamentals: Fundamentals, stockCode: String): Fundamentals {
-        val dividends = runCatching { dividendRepository.getDividends(stockCode) }
+        val dividends = runCatchingKeepingCancellation { dividendRepository.getDividends(stockCode) }
             .getOrDefault(emptyList())
         return enrichPayoutRatio(fundamentals, dividends.cashPerShareByDividendYear())
     }
@@ -469,10 +478,19 @@ class MarketDataPlane @Inject constructor(
     // ── 内部工具 ──────────────────────────────────────────
 
     /**
-     * 清空全部内存会话缓存（行情/BOLL/市场）。缓存管理清理持久缓存后由
-     * [com.stock.dividend.viewmodel.CacheManagementViewModel] 联动调用——
-     * 否则 10s/60s 窗口内仍会读到已清库前的旧内存值。网络源与持久缓存不受影响。
+     * runCatching 变体：CancellationException 直接抛出——协程取消不能被当失败吞掉
+     * （吞掉会把取消延迟到下一次挂起点才暴露，违反结构化并发），其余 Throwable 照常包成
+     * 失败结果（红线 #2 吞异常）。本平面所有包裹 suspend 调用的 runCatching 统一用它。
      */
+    private inline fun <T> runCatchingKeepingCancellation(block: () -> T): Result<T> =
+        try {
+            Result.success(block())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
+
     // ══ 扶摇独有能力（2026-08-23 全量接入；东财/腾讯无对应，禁用时返回空/null）═══════
     // 市场类（榜单/池子/目录等）走 cachedMarket 60s 缓存；单实体类（基金资料/持仓等）
     // 直通（数据为定期披露的低频数据，无需会话缓存）。返回的 DTO 为扶摇真实值口径
@@ -678,6 +696,11 @@ class MarketDataPlane @Inject constructor(
     suspend fun getFundFinancialIndicators(fundCode: String): JsonObject? =
         fundDataRepository.getFinancialIndicators(fundCode)
 
+    /**
+     * 清空全部内存会话缓存（行情/BOLL/市场）。缓存管理清理持久缓存后由
+     * [com.stock.dividend.viewmodel.CacheManagementViewModel] 联动调用——
+     * 否则 10s/60s 窗口内仍会读到已清库前的旧内存值。网络源与持久缓存不受影响。
+     */
     fun clearSessionCaches() {
         quoteSession.clear()
         bollSession.clear()
@@ -693,8 +716,37 @@ class MarketDataPlane @Inject constructor(
         }
         // 缓存值按 Any? 存取（fetch 可能返回可空类型），出口统一非受检转回 T
         return marketFlights.run(key) {
-            fetch().also { marketSession[key] = Timed(nowProvider(), it) }
+            fetch().also { value ->
+                marketSession[key] = Timed(nowProvider(), value)
+                evictMarketSession()   // 写入后顺带清扫：过期条目 + 容量上限淘汰最旧
+            }
         } as T
+    }
+
+    /**
+     * marketSession 清扫（cachedMarket 每次写入后顺带执行）：key 含全部参数，
+     * Agent 翻页/多参数组合等场景会让 key 只增不减——先清过期条目，仍超容量上限则按
+     * 写入时间淘汰最旧（Timed.at 即插入序，最新写入的条目不会被本轮淘汰）。
+     */
+    private fun evictMarketSession() {
+        val now = nowProvider()
+        marketSession.entries.removeIf { now - it.value.at >= PlanePolicy.MARKET_TTL_MS }
+        val overflow = marketSession.size - MARKET_SESSION_MAX_ENTRIES
+        if (overflow > 0) {
+            marketSession.entries
+                .sortedBy { it.value.at }
+                .take(overflow)
+                .forEach { marketSession.remove(it.key, it.value) }
+        }
+    }
+
+    /** 测试观察口：marketSession 当前条目数（清扫/容量淘汰断言用）。 */
+    @VisibleForTesting
+    internal fun marketSessionSize(): Int = marketSession.size
+
+    private companion object {
+        /** marketSession 容量上限（条）。 */
+        const val MARKET_SESSION_MAX_ENTRIES = 64
     }
 }
 

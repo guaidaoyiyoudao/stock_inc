@@ -40,7 +40,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.stock.dividend.data.repository.BollBand
-import com.stock.dividend.ui.navigation.stockCardSharedBounds
 import com.stock.dividend.ui.theme.LocalExtendedColors
 import com.stock.dividend.ui.theme.Motion
 import com.stock.dividend.ui.theme.tabularNumberStyle
@@ -222,6 +221,7 @@ fun StockCard(
                                     decimals = 2,
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = color,
+                                    animated = false, // 行情轮询高频刷新的列表行，关闭滚动/闪色动画
                                 )
                             }
                         }
@@ -245,6 +245,7 @@ fun StockCard(
                             style = MaterialTheme.typography.titleMedium,
                             colored = false,
                             color = MaterialTheme.colorScheme.tertiary,
+                            animated = false, // 行情轮询高频刷新的列表行，关闭滚动/闪色动画
                         )
                         Text(
                             text = "市值",
@@ -259,6 +260,7 @@ fun StockCard(
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             colored = false,
                             color = MaterialTheme.colorScheme.primary,
+                            animated = false, // 行情轮询高频刷新的列表行，关闭滚动/闪色动画
                         )
                         Text(
                             text = "预测收入",

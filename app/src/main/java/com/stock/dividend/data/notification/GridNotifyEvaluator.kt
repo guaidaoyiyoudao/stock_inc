@@ -109,19 +109,24 @@ object GridNotifyEvaluator {
                 if (lastNotifiedSell != null && price < lastNotifiedSell) {
                     clearedSellPlanIds += plan.id
                 }
-                // 到达判定：在持档的卖出锚 ≤ 现价中最高的一档（最高到达档）
+                // 到达判定：在持档的卖出锚 ≤ 现价中最高的一档（最高到达档）——
+                // pairedSellPrice 与档位配对取出后全部走局部变量，不重复非空断言
                 val reachedSell = result.levels
-                    .filter { it.triggered && it.pairedSellPrice != null && price >= it.pairedSellPrice!! }
-                    .maxByOrNull { it.pairedSellPrice!! }
-                if (reachedSell != null && reachedSell.pairedSellPrice != lastNotifiedSell) {
-                    signals += GridNotifySignal(
-                        plan = plan,
-                        levelPrice = reachedSell.pairedSellPrice!!,
-                        currentPrice = price,
-                        shares = reachedSell.swingShares,
-                        sell = true
-                    )
-                    notifiedSellLevels[plan.id] = reachedSell.pairedSellPrice!!
+                    .mapNotNull { level -> level.pairedSellPrice?.let { level to it } }
+                    .filter { (level, sellPrice) -> level.triggered && price >= sellPrice }
+                    .maxByOrNull { it.second }
+                if (reachedSell != null) {
+                    val (level, sellPrice) = reachedSell
+                    if (sellPrice != lastNotifiedSell) {
+                        signals += GridNotifySignal(
+                            plan = plan,
+                            levelPrice = sellPrice,
+                            currentPrice = price,
+                            shares = level.swingShares,
+                            sell = true
+                        )
+                        notifiedSellLevels[plan.id] = sellPrice
+                    }
                 }
             }
 

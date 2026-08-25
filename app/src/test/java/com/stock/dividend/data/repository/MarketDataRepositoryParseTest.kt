@@ -167,4 +167,34 @@ class MarketDataRepositoryParseTest {
         assertThat(quote.price).isEqualTo(3962.0)
         assertThat(quote.changePct).isEqualTo(0.30)
     }
+
+    // ── 个股资金流 ulist 响应（2026-08-24 接入，真实 fixture 锁定单位口径）──
+
+    @Test
+    fun `capital flow ulist fixture parses true values without dividing`() {
+        // 实测样本（2026-08-24 push2delay ulist fltt=2，中国移动 600941）：
+        // 净额元原值、占比 % 原值（f69=8.62 即 8.62%）；恒等式 f62 主力 = f66 超大单 + f72 大单
+        // 精确成立（122411585 = 107338497 + 15073088）。不带 fltt 时占比是 ×100 整数（f69=862），
+        // 接口固定 fltt=2 后解析层零换算。
+        val json = """
+        {"rc":0,"rt":11,"svr":177622404,"lt":1,"full":1,"dlmkts":"8,10,128","dsc":"0",
+         "data":{"total":1,"diff":[{"f12":"600941","f62":122411585.0,"f66":107338497.0,
+           "f69":8.62,"f72":15073088.0,"f75":1.21,"f184":9.83}]}}
+        """.trimIndent()
+
+        val gson = com.stock.dividend.data.remote.lenientMarketGson()
+        val responseType = object : com.google.gson.reflect.TypeToken<com.stock.dividend.data.remote.dto.CapitalFlowResponse>() {}.type
+        val response: com.stock.dividend.data.remote.dto.CapitalFlowResponse = gson.fromJson(json, responseType)
+
+        val item = response.data!!.diff!!.single()
+        assertThat(item.code).isEqualTo("600941")
+        assertThat(item.mainNetInflow).isWithin(1e-9).of(122411585.0)
+        assertThat(item.superLargeNetInflow).isWithin(1e-9).of(107338497.0)
+        assertThat(item.largeNetInflow).isWithin(1e-9).of(15073088.0)
+        assertThat(item.superLargeNetInflowPct).isWithin(1e-9).of(8.62)   // % 真实值不 ÷100
+        assertThat(item.largeNetInflowPct).isWithin(1e-9).of(1.21)
+        assertThat(item.mainNetInflowPct).isWithin(1e-9).of(9.83)
+        // 恒等式自检：主力净额 = 超大单 + 大单
+        assertThat(item.mainNetInflow!!).isWithin(0.5).of(item.superLargeNetInflow!! + item.largeNetInflow!!)
+    }
 }

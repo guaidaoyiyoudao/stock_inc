@@ -56,6 +56,25 @@ class FundDataRepository @Inject constructor(
 
     private fun thscodeOf(fundCode: String): String? = fundCode.toFuyaoThscodeOrNull()
 
+    /**
+     * 合并式缓存的通用合并：key 非空行「远端覆盖同期、缓存独有旧期次永续保留」。
+     * 注意 Kotlin Map `+` 是右侧覆盖左侧，必须缓存放左、远端放右（2026-08-24 评审修复：
+     * 此前方向写反导致远端修正永远进不了缓存）。key 为 null 的行无法对齐去重
+     * （associateBy 会把多条 null 键塌缩成一条），仅保留远端侧，防止跨次同步重复累积。
+     */
+    private inline fun <T, K : Any> mergeByKey(
+        cached: List<T>,
+        fresh: List<T>,
+        key: (T) -> K?,
+        sort: (List<T>) -> List<T>
+    ): List<T> {
+        val merged = buildMap {
+            cached.forEach { v -> key(v)?.let { k -> put(k, v) } }
+            fresh.forEach { v -> key(v)?.let { k -> put(k, v) } }   // 远端覆盖同期
+        }.values.toList()
+        return sort(merged + fresh.filter { key(it) == null })
+    }
+
     fun isEnabled(): Boolean = fuyaoConfig.enabled
 
     suspend fun getProfile(fundCode: String): FuyaoFundProfileItem? =
@@ -77,9 +96,12 @@ class FundDataRepository @Inject constructor(
                 if (cached == null) fresh
                 else fresh.copy(
                     // 按报告期 endDateMs 对齐：远端覆盖同期、缓存独有旧报告期永续保留
-                    item = (fresh.item.orEmpty().associateBy { it.endDateMs } +
-                            cached.item.orEmpty().associateBy { it.endDateMs })
-                        .values.toList().sortedByDescending { it.endDateMs }
+                    item = mergeByKey(
+                        cached = cached.item.orEmpty(),
+                        fresh = fresh.item.orEmpty(),
+                        key = { it.endDateMs },
+                        sort = { list -> list.sortedByDescending { it.endDateMs } }
+                    )
                 )
             }
         ) {
@@ -149,8 +171,12 @@ class FundDataRepository @Inject constructor(
             fuyaoCacheTypeOf<List<FuyaoFundNavItem>>(),
             merge = { cached, fresh ->
                 if (cached == null) fresh
-                else (fresh.associateBy { it.navDateMs } + cached.associateBy { it.navDateMs })
-                    .values.filterNotNull().sortedBy { it.navDateMs }
+                else mergeByKey(
+                    cached = cached,
+                    fresh = fresh,
+                    key = { it.navDateMs },
+                    sort = { list -> list.sortedBy { it.navDateMs } }
+                )
             }
         ) {
             fetchFuyao("同花顺", "基金净值获取失败（$fundCode）") {
@@ -187,14 +213,22 @@ class FundDataRepository @Inject constructor(
             }
         } ?: emptyList()
 
-    private suspend fun reportDates(key: String, fundCode: String, fetch: suspend () -> List<FuyaoFundReportDateItem>): List<FuyaoFundReportDateItem> =
+    private suspend fun reportDates(
+        key: String,
+        fundCode: String,
+        fetch: suspend () -> List<FuyaoFundReportDateItem>?
+    ): List<FuyaoFundReportDateItem> =
         cacheStore.fetchFirstMerge(
             key,
             fuyaoCacheTypeOf<List<FuyaoFundReportDateItem>>(),
             merge = { cached, fresh ->
                 if (cached == null) fresh
-                else (fresh.associateBy { it.endDateMs } + cached.associateBy { it.endDateMs })
-                    .values.filterNotNull().sortedByDescending { it.endDateMs }
+                else mergeByKey(
+                    cached = cached,
+                    fresh = fresh,
+                    key = { it.endDateMs },
+                    sort = { list -> list.sortedByDescending { it.endDateMs } }
+                )
             }
         ) { fetch() } ?: emptyList()
 
@@ -206,7 +240,8 @@ class FundDataRepository @Inject constructor(
                 val envelope = fuyaoApi.getFundStockReportDates(fundType = "exchange", thscode = ths)
                 check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
                 envelope.data?.item.orEmpty()
-            } ?: emptyList()
+                // 禁用/失败返回 null 走 fetchFirstMerge 回退缓存（勿 ?: emptyList() 伪装成成功空）
+            }
         }
 
     /** 债券持仓披露报告期（合并式）。 */
@@ -217,7 +252,8 @@ class FundDataRepository @Inject constructor(
                 val envelope = fuyaoApi.getFundBondReportDates(fundType = "exchange", thscode = ths)
                 check(envelope.isOk) { "code=${envelope.code} ${envelope.message}" }
                 envelope.data?.item.orEmpty()
-            } ?: emptyList()
+                // 禁用/失败返回 null 走 fetchFirstMerge 回退缓存（勿 ?: emptyList() 伪装成成功空）
+            }
         }
 
     // ── 原始透传端点（覆盖式缓存 + 失败回退；JsonObject 直接消费）──

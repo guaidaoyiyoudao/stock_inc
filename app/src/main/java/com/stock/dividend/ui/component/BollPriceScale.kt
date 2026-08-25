@@ -32,6 +32,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import com.stock.dividend.data.repository.BollBand
 import com.stock.dividend.data.repository.BollTone
 import com.stock.dividend.data.repository.HoldingRecommender
+import com.stock.dividend.data.repository.MoneyFormatter
 import com.stock.dividend.ui.theme.LocalExtendedColors
 
 /**
@@ -160,7 +161,7 @@ fun BollPriceScale(
                 fontWeight = FontWeight.Bold,
                 fontSize = 10.sp
             )
-            val labelText = "%.2f".format(price)
+            val labelText = MoneyFormatter.amount(price)
             val labelWidth = with(LocalDensity.current) {
                 textMeasurer.measure(AnnotatedString(labelText), labelStyle).size.width.toDp()
             }
@@ -278,7 +279,7 @@ private fun BollTick(
                 .background(color)
         )
         Text(
-            text = "%.2f".format(price),
+            text = MoneyFormatter.amount(price),
             style = MaterialTheme.typography.labelSmall,
             color = color,
             fontWeight = if (isOrigin) FontWeight.Bold else FontWeight.SemiBold,

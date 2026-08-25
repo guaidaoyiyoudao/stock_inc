@@ -12,9 +12,11 @@ import com.stock.dividend.data.repository.ForecastCalculator
 import com.stock.dividend.data.repository.Fundamentals
 import com.stock.dividend.data.repository.KlineBar
 import com.stock.dividend.data.repository.KlinePeriod
+import com.stock.dividend.data.repository.BondYieldRepository
 import com.stock.dividend.data.repository.LlmAnalysisRepository
 import com.stock.dividend.data.repository.MaDcaStrategyCalculator
 import com.stock.dividend.data.repository.QuoteSnapshot
+import com.stock.dividend.data.repository.StockRepository
 import com.stock.dividend.data.repository.StrategyPlanRepository
 import com.stock.dividend.data.repository.StockLlmAnalysisResult
 import com.stock.dividend.data.repository.StockLlmAnalysisState
@@ -88,7 +90,7 @@ class StockDetailViewModel @Inject constructor(
     /** 年线定投策略读取（K 线叠加均线用）。 */
     private val strategyPlanRepository: StrategyPlanRepository,
     /** 仅用于写操作（updateYieldPeriod/updateBuyThresholdMultiplier）；读一律走数据平面。 */
-    private val stockRepository: com.stock.dividend.data.repository.StockRepository
+    private val stockRepository: StockRepository
 ) : ViewModel() {
 
     private val stockCode: String = savedStateHandle["code"] ?: ""
@@ -236,7 +238,12 @@ class StockDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val enriched = runCatching { marketDataPlane.enrichFundamentals(raw, stockCode) }
                 .getOrDefault(raw)
-            _uiState.value = _uiState.value.copy(fundamentals = enriched)
+            // 竞态守卫（2026-08-24 评审修复）：本协程启动到完成之间若 loadFundamentals/
+            // refreshFundamentals 已写入更新的 raw，旧 raw 的结果不得覆盖新值
+            // （否则手动强刷基本面被冲掉显示旧派息率，且下次数据发射前不自愈）
+            if (rawFundamentals === raw) {
+                _uiState.value = _uiState.value.copy(fundamentals = enriched)
+            }
         }
     }
 
@@ -263,7 +270,7 @@ class StockDetailViewModel @Inject constructor(
         val dividends = _uiState.value.dividends
         viewModelScope.launch {
             val bondYield = runCatching { marketDataPlane.get10YBondYield() }
-                .getOrDefault(com.stock.dividend.data.repository.BondYieldRepository.DEFAULT_YIELD)
+                .getOrDefault(BondYieldRepository.DEFAULT_YIELD)
             // 优先复用已加载的行情快照现价；缺失时才单独拉一次（loadQuote 异步，首帧可能未就绪）
             val currentPrice = _uiState.value.quote?.price
                 ?: runCatching { marketDataPlane.getPrices(listOf(stock))[stock.code] }.getOrNull()

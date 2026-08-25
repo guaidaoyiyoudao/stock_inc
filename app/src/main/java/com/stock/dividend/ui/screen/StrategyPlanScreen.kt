@@ -580,8 +580,12 @@ private fun StockPickerSection(
         )
         if (query.isNotBlank()) {
             Spacer(modifier = Modifier.height(6.dp))
-            // 普通 Column + 条数上限：BottomSheet 本身可滚，嵌 LazyColumn 会手势冲突
-            Column(modifier = Modifier.heightIn(max = 220.dp)) {
+            // 普通 Column + 条数上限 + 自身可滚：BottomSheet 本身可滚，嵌 LazyColumn 会手势冲突
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 filtered.take(20).forEach { (code, name) ->
                     Row(
                         modifier = Modifier
@@ -601,6 +605,14 @@ private fun StockPickerSection(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                }
+                if (filtered.size > 20) {
+                    // 超出上限截断提示：告知还有更多匹配，引导输入更精确的关键词
+                    Text(
+                        "仅显示前 20 条，请输入更精确的代码/名称",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
             if (filtered.isEmpty()) {

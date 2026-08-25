@@ -378,6 +378,16 @@ class BackupRepositoryTest {
         // settings 不计入 total（语义上是配置项，非业务记录）
         assertThat(counts.total).isEqualTo(0)
     }
+
+    /** gridPlans/strategyPlans 是业务记录，须计入一句话摘要的 total。 */
+    @Test
+    fun `BackupCounts total includes grid and strategy plan counts`() {
+        val counts = BackupCounts(stocks = 1, gridPlans = 2, strategyPlans = 3)
+        assertThat(counts.total).isEqualTo(6)
+        // 旧路径未传新字段时默认 0，既有摘要文本语义不变
+        assertThat(BackupCounts().gridPlans).isEqualTo(0)
+        assertThat(BackupCounts().strategyPlans).isEqualTo(0)
+    }
     /** v20 旧备份：gridPlans 缺 notifyEnabled/gridType 字段 → Gson 得 false/null，归一化恢复默认值。 */
     @Test
     fun `normalizeGridPlans repairs legacy v20 backup fields`() {

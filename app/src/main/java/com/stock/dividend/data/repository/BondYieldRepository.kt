@@ -1,6 +1,7 @@
 package com.stock.dividend.data.repository
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import com.stock.dividend.data.remote.BondYieldApi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +28,15 @@ class BondYieldRepository @Inject constructor(
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val mutex = Mutex()
 
+    /** 测试可替换的时钟（默认真实时间；退避/缓存 TTL 断言用）。 */
+    @VisibleForTesting
+    @Volatile
+    internal var clock: () -> Long = System::currentTimeMillis
+
+    /** 最近一次远端失败的时间戳（epoch ms）；0 = 无失败记录（进程内负结果退避）。 */
+    @Volatile
+    private var lastFailureAtMs: Long = 0L
+
     @Volatile
     private var memoryCache: Double? = null
 
@@ -36,17 +46,25 @@ class BondYieldRepository @Inject constructor(
      * ⚠️ **仅成功值写缓存**（2026-08-20 审计修复）：此前失败时把回退值（默认 2.5 / 旧缓存）
      * 也写入 memoryCache 与 prefs——断网冷启动后整个进程存活期都返回假基准（当前 10Y 真实值
      * 约 1.8~2.0，2.5 会系统性抬高买入线），且旧缓存被 updated_at 续期成「新鲜」。
-     * 现失败路径不落任何缓存，下次调用自动重试远端。
+     * 现失败路径不落任何缓存，改记 [lastFailureAtMs] 进入 [FAILURE_BACKOFF_MS] 退避窗口
+     * （对齐数据平面 dividends 的 5 分钟负结果退避）：窗口内不再打网络，直接回退旧缓存/默认值；
+     * forceRefresh（用户显式刷新）绕过退避。
      */
     suspend fun fetch10YBondYield(forceRefresh: Boolean = false): Double = withContext(Dispatchers.IO) {
         memoryCache?.let { if (!forceRefresh) return@withContext it }
 
-        val now = System.currentTimeMillis()
+        val now = clock()
         val cachedAt = prefs.getLong(KEY_UPDATED_AT, 0L)
         val cachedValue = prefs.getString(KEY_YIELD, null)?.toDoubleOrNull()
         if (!forceRefresh && memoryCache == null && cachedValue != null && cachedAt > 0 && now - cachedAt < CACHE_TTL_MS) {
             memoryCache = cachedValue
             return@withContext cachedValue
+        }
+
+        // 失败负结果退避：上次失败 5 分钟内不再打网络（断网时每次调用都重试远端只会
+        // 反复超时+刷失败日志），直接回退旧缓存/默认值；forceRefresh 无视退避
+        if (!forceRefresh && lastFailureAtMs > 0 && now - lastFailureAtMs < FAILURE_BACKOFF_MS) {
+            return@withContext cachedValue?.takeIf { it > 0.0 } ?: DEFAULT_YIELD
         }
 
         val remote = mutex.withLock {
@@ -66,6 +84,7 @@ class BondYieldRepository @Inject constructor(
         }
 
         if (remote != null && remote.isFinite() && remote > 0.0) {
+            lastFailureAtMs = 0L   // 成功即清退避
             prefs.edit()
                 .putString(KEY_YIELD, remote.toString())
                 .putLong(KEY_UPDATED_AT, now)
@@ -73,7 +92,9 @@ class BondYieldRepository @Inject constructor(
             memoryCache = remote
             return@withContext remote
         }
-        // 失败：过期旧缓存回退（不刷 updated_at，保持真实新鲜度）；无缓存用默认值——都不落缓存，下次调用重试远端
+        // 失败：记录退避时钟；过期旧缓存回退（不刷 updated_at，保持真实新鲜度）；
+        // 无缓存用默认值——都不落缓存，退避窗口外下次调用重试远端
+        lastFailureAtMs = now
         cachedValue?.takeIf { it > 0.0 } ?: DEFAULT_YIELD
     }
 
@@ -103,6 +124,9 @@ class BondYieldRepository @Inject constructor(
         private const val KEY_YIELD = "bond_yield_10y"
         private const val KEY_UPDATED_AT = "bond_yield_10y_updated_at"
         private const val CACHE_TTL_MS = 24L * 60 * 60 * 1000
+
+        /** 远端失败后的负结果退避窗口（对齐平面 dividends 的 5 分钟退避语义）。 */
+        const val FAILURE_BACKOFF_MS = 5L * 60 * 1000
 
         /** 远程失败且无缓存时的兜底值（%）。 */
         const val DEFAULT_YIELD = 2.5

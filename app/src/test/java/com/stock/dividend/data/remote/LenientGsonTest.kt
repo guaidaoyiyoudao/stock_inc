@@ -18,13 +18,15 @@ class LenientGsonTest {
 
     @Test
     fun `default gson throws on dash placeholder - documents the poison we are fixing`() {
-        // 锁定背景事实：默认 Gson（无容错）遇 "-" 直接炸整批——这是本 adapter 存在的理由
+        // 锁定背景事实：默认 Gson（无容错）遇 "-" 直接炸整批——这是本 adapter 存在的理由。
+        // Gson 2.11 实测抛未包装的 NumberFormatException；只断言「抛异常」不断言具体类型，
+        // 避免 Gson 升级改异常形态导致测试脆断
         val json = """{"data":{"diff":[{"f2":"-"}]}}"""
         var threw = false
         try {
             Gson().fromJson(json, MarketClistResponse::class.java)
-        } catch (e: NumberFormatException) {
-            threw = true   // Gson 2.11 实测：JsonReader.nextDouble 对 "-" 直接抛 NFE（未包装）
+        } catch (e: Exception) {
+            threw = true
         }
         assertThat(threw).isTrue()
     }
@@ -65,5 +67,17 @@ class LenientGsonTest {
 
         assertThat(items[0].price).isEqualTo(1294.54)  // 数字字符串照常解析
         assertThat(items[1].price).isNull()            // JSON null → null
+    }
+
+    @Test
+    fun `lenient gson reads NaN and Infinity strings as null`() {
+        // 锁定 takeIf { isFinite() } 分支：Kotlin 的 toDoubleOrNull 接受 "NaN"/"Infinity"
+        // （解析成功但非有限数）→ 降 null，与 "-" 占位同一降级路径
+        val json = """{"data":{"diff":[{"f12":"000004","f14":"国华退","f2":"NaN","f3":"Infinity"}]}}"""
+        val item = gson.fromJson(json, MarketClistResponse::class.java).data!!.diff!!.single()
+
+        assertThat(item.price).isNull()
+        assertThat(item.changePct).isNull()
+        assertThat(item.code).isEqualTo("000004")   // 文本字段不受影响
     }
 }

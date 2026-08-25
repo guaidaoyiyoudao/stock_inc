@@ -201,4 +201,36 @@ class WidgetDataRepositoryTest {
         assertThat(state.gridNextHints).hasSize(1)
         assertThat(state.gridNextHints[0].nextBuyPrice).isEqualTo(8.67)  // 跳过已买的 9.33
     }
+
+    /** 波段计划（2026-08-24 评审修复回归）：补传 swing 三参数后，SELL 命中卖出锚释放的档
+     *  重新进入「下一买」提示——修复前按纯买入口径计算，波段回合后该档仍被标记占用。 */
+    @Test
+    fun `grid next hint swing plan re-arms level after sell`() = runTest {
+        // 两档 8/10、DPS 0.5、波段仓位 100%：8 档卖出锚 = 0.5 ÷ (6.25%−1.25%) = 10.0（GridCalculatorTest 已锁定）
+        coEvery { stockDao.getAll() } returns listOf(stock("sh.600036", shares = 100, costPerShare = 30.0))
+        coEvery { priceCacheDao.getAll() } returns listOf(PriceCacheEntity("sh.600036", price = 9.5, updatedAt = 1000L))
+        coEvery { fireGoalRepository.getGoalOnce() } returns null
+        coEvery { gridPlanRepository.observeAll() } returns kotlinx.coroutines.flow.flowOf(
+            listOf(
+                planOf().copy(
+                    basePrice = 10.0, lowPrice = 8.0, highPrice = 12.0, grids = 2,
+                    swingMode = true, swingRatioPercent = 100.0, dpsPerShare = 0.5
+                )
+            )
+        )
+        // BUY@8.1 占用 8 档 → SELL@10.0 命中 8 档卖出锚，波段释放
+        coEvery { transactionRepository.getAll() } returns listOf(
+            com.stock.dividend.data.local.entity.TransactionEntity(
+                stockCode = "sh.600036", type = "BUY", shares = 300, price = 8.1, date = "2026-08-01"
+            ),
+            com.stock.dividend.data.local.entity.TransactionEntity(
+                stockCode = "sh.600036", type = "SELL", shares = 300, price = 10.0, date = "2026-08-02"
+            )
+        )
+
+        val state = repo.loadSnapshot()
+
+        assertThat(state.gridNextHints).hasSize(1)
+        assertThat(state.gridNextHints[0].nextBuyPrice).isEqualTo(8.0)   // 释放后可再买（修复前恒跳过→无提示）
+    }
 }

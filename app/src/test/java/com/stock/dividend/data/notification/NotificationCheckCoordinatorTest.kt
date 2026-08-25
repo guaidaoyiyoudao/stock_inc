@@ -323,6 +323,32 @@ class NotificationCheckCoordinatorTest {
         }
     }
 
+    /**
+     * 迟滞复位：已提醒 HALF 后现价回到年线附近（脱离卖出区）→ 不发通知，
+     * updateNotifiedSellTier 回写 null 清空状态（下轮再触发可重新提醒整轮）。
+     */
+    @Test
+    fun `clears notified sell tier when price leaves sell zone`() = runTest {
+        val stock = StockEntity("sh.510880", "红利ETF", "0", shares = 500)
+        coEvery { strategyPlanRepository.observeAll() } returns flowOf(
+            listOf(strategyPlan(lastNotifiedSellTier = STRATEGY_SELL_TIER_HALF))
+        )
+        coEvery { marketDataPlane.observeAllStocks() } returns flowOf(listOf(stock))
+        // 现价 = 年线（偏离 0%）→ 脱离卖出区，评估档位回到 null
+        coEvery { marketDataPlane.getPrices(any(), any()) } returns mapOf(stock.code to 10.0)
+        coEvery { transactionRepository.getAll() } returns listOf(
+            TransactionEntity(stockCode = stock.code, type = "BUY", shares = 500, date = "2026-01-05")
+        )
+        coEvery { marketDataPlane.getKlines(stock.code, KlinePeriod.DAILY, 250) } returns
+            List(250) { KlineBar("d$it", 10.0, 10.0, 10.0, 10.0, 1000.0) }
+        coEvery { notifier.canNotify() } returns true
+
+        coordinator.checkStrategies()
+
+        coVerify(exactly = 0) { notifier.sendStrategySellAlert(any()) }
+        coVerify(exactly = 1) { strategyPlanRepository.updateNotifiedSellTier("s1", null) }
+    }
+
     /** 日线数据拉不到（空）→ 计划跳过：不发通知、不动状态。 */
     @Test
     fun `skips strategy plan when klines unavailable`() = runTest {

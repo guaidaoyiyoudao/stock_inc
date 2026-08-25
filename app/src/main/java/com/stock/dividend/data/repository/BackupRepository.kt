@@ -217,6 +217,8 @@ class BackupRepository @Inject constructor(
                 dividendIncomeRecords = safeContainer.dividendIncomeRecords.orEmpty().size,
                 tradeStrategies = safeContainer.tradeStrategies.orEmpty().size,
                 industryTargets = safeContainer.industryTargets.orEmpty().size,
+                gridPlans = safeContainer.gridPlans.orEmpty().size,
+                strategyPlans = safeContainer.strategyPlans.orEmpty().size,
                 settings = safeContainer.prefs.orEmpty().values.sumOf { it.size }
             )
             Result.success(BackupSummary(metadata = safeContainer.metadata, counts = counts))

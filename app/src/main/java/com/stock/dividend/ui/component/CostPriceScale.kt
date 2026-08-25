@@ -44,8 +44,8 @@ import com.stock.dividend.ui.theme.tabularNumberStyle
  *
  * @param costPrice 摊薄成本价（null/≤0 → 占位态）
  * @param currentPrice 现价（null/≤0 → 占位态）
- * @param unrealizedPnl 浮动盈亏额（null 时组件按 (现价-成本)×推导展示口径与外部一致前由调用方保证，
- *   优先展示外部传入的精确值）
+ * @param unrealizedPnl 浮动盈亏额（总额口径）。null 时**不再**用每股差价冒充总额（混维度误导），
+ *   仅显示占位「—」，着色退回按现价 vs 成本方向；由调用方尽量保证非空
  * @param unrealizedPnlRate 浮动盈亏率（小数，如 0.111 = +11.1%）
  * @param realizedPnl FIFO 已实现盈亏（null = 无卖出记录，不展示）
  * @param quote 盘口（PE/PB/换手，null 或全缺时不展示估值行）
@@ -112,11 +112,15 @@ fun CostPriceScale(
         } else {
             val cost = costPrice
             val price = currentPrice
-            val pnl = unrealizedPnl ?: (price - cost)
+            // 浮动盈亏额缺失时不再用每股差价冒充总额（每股 vs 总额混维度，数字全错比不显示更糟），
+            // 仅展示占位「—」；着色按「现价 vs 成本」的方向（同为每股口径，仅视觉不含数值语义）
+            val pnl = unrealizedPnl
             val pnlRate = unrealizedPnlRate ?: ((price - cost) / cost)
             val pnlColor = when {
-                pnl > 0 -> ext.positive
-                pnl < 0 -> ext.negative
+                pnl != null && pnl > 0 -> ext.positive
+                pnl != null && pnl < 0 -> ext.negative
+                price > cost -> ext.positive
+                price < cost -> ext.negative
                 else -> MaterialTheme.colorScheme.onSurface
             }
             val beyondLow = price < cost * 0.7
@@ -146,7 +150,7 @@ fun CostPriceScale(
                             .background(MaterialTheme.colorScheme.primary)
                     )
                     Text(
-                        text = "%.2f".format(cost),
+                        text = MoneyFormatter.amount(cost),
                         style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold,
@@ -176,7 +180,7 @@ fun CostPriceScale(
                     fontWeight = FontWeight.Bold,
                     fontSize = 10.sp
                 )
-                val labelText = "%.2f".format(price)
+                val labelText = MoneyFormatter.amount(price)
                 val labelWidth = with(LocalDensity.current) {
                     textMeasurer.measure(AnnotatedString(labelText), labelStyle).size.width.toDp()
                 }
@@ -247,12 +251,16 @@ fun CostPriceScale(
                     style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    text = "浮盈/亏 ${MoneyFormatter.withSign(pnl)}（${PercentFormatter.withSign(pnlRate * 100.0, decimals = 1)}）",
-                    style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
-                    fontWeight = FontWeight.SemiBold,
-                    color = pnlColor
-                )
+                    Text(
+                        text = if (pnl != null) {
+                            "浮盈/亏 ${MoneyFormatter.withSign(pnl)}（${PercentFormatter.withSign(pnlRate * 100.0, decimals = 1)}）"
+                        } else {
+                            "浮盈/亏 —"
+                        },
+                        style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
+                        fontWeight = FontWeight.SemiBold,
+                        color = pnlColor
+                    )
             }
 
             // 盘口估值行（PE/PB/换手；三者全缺不展示）
@@ -261,11 +269,11 @@ fun CostPriceScale(
                 Text(
                     text = buildString {
                         append("PE ")
-                        append(quote?.pe?.let { "%.2f".format(it) } ?: "—")
+                        append(quote?.pe?.let { MoneyFormatter.amount(it) } ?: "—")
                         append("  PB ")
-                        append(quote?.pb?.let { "%.2f".format(it) } ?: "—")
+                        append(quote?.pb?.let { MoneyFormatter.amount(it) } ?: "—")
                         append("  换手 ")
-                        append(quote?.turnoverRate?.let { "${"%.2f".format(it)}%" } ?: "—")
+                        append(quote?.turnoverRate?.let { PercentFormatter.percent(it) } ?: "—")
                     },
                     style = MaterialTheme.typography.labelSmall.merge(tabularNumberStyle),
                     color = MaterialTheme.colorScheme.onSurfaceVariant

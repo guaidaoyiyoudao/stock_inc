@@ -106,6 +106,7 @@ object StrategyEvaluator {
         STRATEGY_TYPE_YIELD_BAND -> YieldBandStrategyCalculator.evaluate(
             price = input.currentPrice ?: return null,
             dps = input.dps,
+            holdingShares = input.holdingShares,
             buyAmount = plan.dcaAmount,
             params = StrategyParams.decodeYieldBand(plan.params)
         )

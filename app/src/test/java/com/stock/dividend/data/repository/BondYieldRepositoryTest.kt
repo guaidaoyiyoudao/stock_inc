@@ -6,6 +6,7 @@ import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.remote.BondYieldApi
 import com.stock.dividend.data.remote.dto.BondYieldResponse
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
@@ -27,6 +28,9 @@ class BondYieldRepositoryTest {
     }
     private val repo = BondYieldRepository(context, api, mockk(relaxed = true))
 
+    /** 可控时钟（ms）：失败退避窗口断言用。 */
+    private var now = 1_000_000_000L
+
     /** 真实结构响应：data 倒序，首条 10Y=1.7337。 */
     private fun realResponse(): BondYieldResponse = BondYieldResponse(
         BondYieldResponse.BondYieldResult(
@@ -43,6 +47,7 @@ class BondYieldRepositoryTest {
         every { prefs.edit() } returns editor
         every { editor.putString(any(), any()) } returns editor
         every { editor.putLong(any(), any()) } returns editor
+        repo.clock = { now }
     }
 
     @Test
@@ -128,8 +133,55 @@ class BondYieldRepositoryTest {
         val first = repo.fetch10YBondYield(forceRefresh = true)
         assertThat(first).isWithin(1e-9).of(BondYieldRepository.DEFAULT_YIELD)
 
-        val second = repo.fetch10YBondYield(forceRefresh = false)   // 非强制——修复前这里会命中被污染的 memoryCache
+        // 非强制重试须在失败退避窗口之外（窗口内直接回退，不打网络——见下方退避用例）
+        now += BondYieldRepository.FAILURE_BACKOFF_MS + 1
+        val second = repo.fetch10YBondYield(forceRefresh = false)   // 修复前这里会命中被污染的 memoryCache
         assertThat(second).isWithin(1e-9).of(1.7337)
+    }
+
+    // ---------- 2026-08-24 评审 Low：失败负结果退避（对齐平面 dividends 5 分钟语义） ----------
+
+    @Test
+    fun `failure enters backoff window - no network retry within 5 minutes`() = runTest {
+        // 过期旧缓存 + 远端失败：回退旧缓存且记失败时钟；退避窗口内的再次调用不再打网络
+        primePrefs(yieldValue = 2.8, updatedAt = now - 48L * 60 * 60 * 1000)   // 缓存已过 24h TTL
+        coEvery { api.getTreasuryYield(any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
+            java.net.SocketTimeoutException("down")
+
+        val first = repo.fetch10YBondYield(forceRefresh = false)
+        assertThat(first).isWithin(1e-9).of(2.8)
+
+        now += BondYieldRepository.FAILURE_BACKOFF_MS - 1     // 仍在退避窗口内
+        val second = repo.fetch10YBondYield(forceRefresh = false)
+        assertThat(second).isWithin(1e-9).of(2.8)
+        coVerify(exactly = 1) { api.getTreasuryYield(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `backoff window expiry retries remote and clears on success`() = runTest {
+        primePrefs(yieldValue = 2.8, updatedAt = now - 48L * 60 * 60 * 1000)
+        coEvery { api.getTreasuryYield(any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
+            java.net.SocketTimeoutException("down") andThen realResponse()
+
+        repo.fetch10YBondYield(forceRefresh = false)                     // 失败 → 记退避
+        now += BondYieldRepository.FAILURE_BACKOFF_MS + 1                // 窗口过期 → 重试
+        val recovered = repo.fetch10YBondYield(forceRefresh = false)
+
+        assertThat(recovered).isWithin(1e-9).of(1.7337)                  // 成功清退避并落缓存
+        coVerify(exactly = 2) { api.getTreasuryYield(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `force refresh bypasses failure backoff`() = runTest {
+        primePrefs(yieldValue = 2.8, updatedAt = now - 48L * 60 * 60 * 1000)
+        coEvery { api.getTreasuryYield(any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
+            java.net.SocketTimeoutException("down") andThen realResponse()
+
+        repo.fetch10YBondYield(forceRefresh = false)                     // 失败 → 记退避
+        val immediate = repo.fetch10YBondYield(forceRefresh = true)      // 用户显式刷新无视退避
+
+        assertThat(immediate).isWithin(1e-9).of(1.7337)
+        coVerify(exactly = 2) { api.getTreasuryYield(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

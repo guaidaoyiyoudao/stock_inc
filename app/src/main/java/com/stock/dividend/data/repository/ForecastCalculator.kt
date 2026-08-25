@@ -2,6 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.entity.DividendEntity
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 
 /**
  * 股息/预测纯计算器。**年度分红口径全 App 统一**（数据平面收敛数据接入，本对象收敛计算口径）：
@@ -108,6 +109,12 @@ object ForecastCalculator {
      * 的分红视同已派入窗（如「年度分红明天除权」——金额除权日均已确定，非前瞻臆测）；锚点 anchor
      * = max(today, 入窗记录的最大除权日)，随之前移保证 TTM 窗口恰好罩住最近一轮完整派息。
      * 未除权预案（exDate=null）与遥远未来脏数据（超护栏）不计入。
+     *
+     * **窗口内同周期去重**（中国平安 2026-08 实测修复）：多次派息股的「同周期两笔」除权日间隔
+     * 约 12 个月（如中期→中期 364 天），锚点前移后旧笔可能压线留在窗内——窗口（固定 12 个月长）
+     * 同时罩住「旧中期+末期+新中期」1.5 个派息周期，股息率虚高。窗口内间隔落在
+     * [CYCLE_PEER_GAP_MONTHS] 的两笔视为同一周期：新笔替代旧笔，只计新笔（半年派息股的
+     * 中期/末期间隔约 4~9 个月、季度派息约 4 个月，不会误伤；派息节奏年漂移超容差为已知限制）。
      */
     private fun rollingYearlyTotals(
         dividends: List<DividendEntity>,
@@ -129,10 +136,33 @@ object ForecastCalculator {
         return (0 until years).map { k ->
             val upper = anchor.minusYears(k.toLong())
             val lower = anchor.minusYears((k + 1).toLong())
-            exPairs.filter { (ex, _) -> ex > lower && ex <= upper }.sumOf { it.second }
+            exPairs
+                .filter { (ex, _) -> ex > lower && ex <= upper }
+                .dropSupersededCyclePeers()
+                .sumOf { it.second }
         }.filter { it > 0.0 }
     }
 
     /** 已排期除权日的最大前视天数（护栏：实施分配的除权日必然在数周内，超此视为脏数据）。 */
     private const val SCHEDULED_EX_DATE_MAX_AHEAD_DAYS = 365L
+
+    /** 同周期两笔分红（如中期→中期）的除权日间隔判定：约 12 个月 ±2 个月容差。 */
+    private val CYCLE_PEER_GAP_MONTHS = 10L..14L
+
+    /**
+     * 窗口内同周期去重：新除权日往前找间隔 [CYCLE_PEER_GAP_MONTHS] 的上一轮同周期分红，
+     * 视为已被新笔替代（最新派息水平），不入窗合计。每笔新笔至多替代最近的一笔旧笔。
+     */
+    private fun List<Pair<LocalDate, Double>>.dropSupersededCyclePeers(): List<Pair<LocalDate, Double>> {
+        if (size <= 1) return this
+        val sorted = sortedByDescending { it.first }
+        val superseded = mutableSetOf<LocalDate>()
+        sorted.forEachIndexed { i, (ex, _) ->
+            sorted.drop(i + 1)
+                .filter { (older, _) -> ChronoUnit.MONTHS.between(older, ex) in CYCLE_PEER_GAP_MONTHS }
+                .maxByOrNull { it.first }
+                ?.let { superseded.add(it.first) }
+        }
+        return filter { it.first !in superseded }
+    }
 }

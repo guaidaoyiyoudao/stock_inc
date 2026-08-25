@@ -89,8 +89,13 @@ class PortfolioImportViewModel @Inject constructor(
         _uiState.update { it.copy(engine = engine) }
     }
 
+    private var parseJob: kotlinx.coroutines.Job? = null
+
     fun onImagePicked(uri: Uri) {
-        viewModelScope.launch {
+        // 快速连选两图：取消旧解析防旧结果覆盖新图状态（2026-08-24 评审修复）；
+        // uri 直接作参数传递，不再从 UiState 回读（识别中 resetToIdle 置空会 NPE）
+        parseJob?.cancel()
+        parseJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     phase = ImportPhase.LoadingImage,
@@ -104,9 +109,9 @@ class PortfolioImportViewModel @Inject constructor(
             }
             try {
                 if (_uiState.value.engine == ImportEngine.AI_VISION) {
-                    parseWithVision()
+                    parseWithVision(uri)
                 } else {
-                    parseWithLocalOcr()
+                    parseWithLocalOcr(uri)
                 }
             } catch (e: Exception) {
                 _uiState.update {
@@ -120,9 +125,9 @@ class PortfolioImportViewModel @Inject constructor(
     }
 
     /** 本地 ML Kit OCR + 坐标解析（离线，图片不上传）。 */
-    private suspend fun parseWithLocalOcr() {
+    private suspend fun parseWithLocalOcr(uri: Uri) {
         _uiState.update { it.copy(phase = ImportPhase.OcrRunning) }
-        val bitmap = loadSampledBitmap(context, Uri.parse(_uiState.value.imageUri))
+        val bitmap = loadSampledBitmap(context, uri)
         val elements = textRecognitionService.recognize(bitmap)
         val rawText = elements.joinToString("\n") { it.text }
         val parsed = HoldingScreenshotParser.parseFromElements(elements)
@@ -157,9 +162,9 @@ class PortfolioImportViewModel @Inject constructor(
     }
 
     /** AI 视觉模型解析（GLM-4.6V-Flash，图片压缩后上传智谱；失败自动重试 5 次）。 */
-    private suspend fun parseWithVision() {
+    private suspend fun parseWithVision(uri: Uri) {
         _uiState.update { it.copy(phase = ImportPhase.OcrRunning) }
-        val bitmap = loadSampledBitmap(context, Uri.parse(_uiState.value.imageUri))
+        val bitmap = loadSampledBitmap(context, uri)
         val result = visionImportRepository.parse(bitmap, VisionParseMode.HOLDINGS) { attempt, max, reason ->
             _uiState.update {
                 it.copy(visionRetryStatus = "识别失败（$reason），正在自动重试 $attempt/$max…")

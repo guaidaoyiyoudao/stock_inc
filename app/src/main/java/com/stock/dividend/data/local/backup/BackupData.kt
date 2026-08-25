@@ -100,12 +100,16 @@ data class BackupCounts(
     val dividendIncomeRecords: Int = 0,
     val tradeStrategies: Int = 0,
     val industryTargets: Int = 0,
+    /** 网格交易计划（grid_plans，v20 起）。 */
+    val gridPlans: Int = 0,
+    /** 交易策略计划（strategy_plans，v30 起）。 */
+    val strategyPlans: Int = 0,
     /** 用户配置项数（LLM 端点 / AI 助手设置等 SharedPreferences 键值对总数）。 */
     val settings: Int = 0
 ) {
     /** 业务记录总数（用于一句话摘要，不含 settings，避免与「记录数」语义混淆）。 */
     val total: Int get() = stocks + dividends + transactions +
-        dividendIncomeRecords + tradeStrategies + industryTargets
+        dividendIncomeRecords + tradeStrategies + industryTargets + gridPlans + strategyPlans
 }
 
 data class BackupContainer(

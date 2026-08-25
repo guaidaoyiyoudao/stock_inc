@@ -87,7 +87,7 @@ import com.stock.dividend.ui.component.SkeletonList
 import com.stock.dividend.ui.component.StatusPill
 import com.stock.dividend.viewmodel.ForecastDetail
 import com.stock.dividend.viewmodel.StockDetailViewModel
-import com.stock.dividend.ui.navigation.stockCardSharedBounds
+import com.stock.dividend.ui.component.stockCardSharedBounds
 import com.stock.dividend.ui.theme.LocalExtendedColors
 import com.stock.dividend.ui.theme.tabularNumberStyle
 import com.stock.dividend.ui.component.AppOutlinedButton
@@ -523,12 +523,12 @@ private fun StrategyPlanEntryCard(onClick: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "交易策略（年线定投）",
+                    text = "交易策略（8 种内置）",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "低于 250 日年线定投买入；高于年线阈值卖出一半/全部（仅提示，不下单）",
+                    text = "止盈/股息率带/双均线/年线定投等 8 种策略信号（仅提示，不下单）",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -674,7 +674,8 @@ private fun DividendRecordCard(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = dividend.planStatus ?: "分红记录",
+                    text = dividend.planStatus
+                        ?: if (dividend.cashPerShare <= 0.0) "送转/转增" else "分红记录",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -696,11 +697,23 @@ private fun DividendRecordCard(
             ) {
                 FinanceMetric(
                     label = "每股派息",
-                    value = MoneyFormatter.withSymbol(dividend.cashPerShare, decimals = 4),
+                    value = if (dividend.cashPerShare > 0.0) {
+                        MoneyFormatter.withSymbol(dividend.cashPerShare, decimals = 4)
+                    } else {
+                        "—"   // 纯送转行无现金分红
+                    },
                     valueColor = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
-                if (shares > 0) {
+                dividend.bonusPerShare?.takeIf { it > 0.0 }?.let { bonus ->
+                    FinanceMetric(
+                        label = "每股送转",
+                        value = "%.2f 股".format(bonus),
+                        valueColor = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (shares > 0 && dividend.cashPerShare > 0.0) {
                     val total = dividend.cashPerShare * shares
                     FinanceMetric(
                         label = "预计到账",

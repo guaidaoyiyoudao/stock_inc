@@ -560,8 +560,13 @@ class GridPlanViewModel @Inject constructor(
         if (isSwing && !isYield && (s.generatorDps == null || s.generatorDps <= 0.0)) {
             return setSaveError("波段模式需要该股分红数据（卖出锚按股息率换算，请先在详情页刷新分红）")
         }
-        val swingRatio = s.swingRatioInput.toDoubleOrNull()
-            ?: return setSaveError("请输入有效的波段仓位比例")
+        // 波段仓位比例校验收进 isSwing 分支（2026-08-24 评审修复）：非波段计划不再被
+        // 无关字段的脏输入卡死保存；非波段时与 recalculatePreview 口径一致回退默认值
+        val swingRatioParsed = s.swingRatioInput.toDoubleOrNull()
+        if (isSwing && swingRatioParsed == null) {
+            return setSaveError("请输入有效的波段仓位比例")
+        }
+        val swingRatio = swingRatioParsed ?: GridCalculator.DEFAULT_SWING_RATIO_PERCENT
         if (isSwing && (swingRatio <= 0.0 || swingRatio > 100.0)) {
             return setSaveError("波段仓位比例须在 0~100 之间")
         }

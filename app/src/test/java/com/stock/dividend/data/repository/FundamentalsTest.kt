@@ -314,9 +314,9 @@ class FundamentalsTest {
     }
 
     @Test
-    fun `enrichPayoutRatio matches by dividend year across source reportDate conventions`() {
-        // 腾讯源 reportDate 恒为 nd 年份补 12-31、东财源为真实报告期——按「前 4 位年份」归一后都能匹配年报期。
-        // 这里直接锁定 plane 层 cashPerShareByDividendYear 的年合计产物：2025 年两笔 2.50+2.20 → 4.70
+    fun `enrichPayoutRatio matches annual report period by dividend year key`() {
+        // plane 层 cashPerShareByDividendYear 的 key 是除权年份（2025 年两笔 2.50+2.20 → 4.70）：
+        // 年报期（12-31）按年份 key 命中挂派息率，中期（06-30）不挂。
         val f = Fundamentals(
             periods = listOf(
                 Fundamentals.Period("2025-06-30", 10.0, 60.0, 8.0, 5.0, basicEps = 2.50, payoutRatio = null),

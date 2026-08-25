@@ -171,13 +171,13 @@ class AiChatViewModel @Inject constructor(
     /** 当前模型不支持图片时点「加图」入口：给可解释提示而非无反应。 */
     fun onImageUnsupported() {
         _uiState.update { state ->
-                state.copy(
-                    messages = state.messages + ChatMessageUi(
-                        ChatRole.SYSTEM,
-                        "当前对话模型不支持图片输入，请在设置中把 Model 换成多模态模型" +
-                            "（如 deepseek-v4-flash-vision-exp、GLM-4.6V、GPT-4o、Qwen-VL、Claude 系列）后再试"
-                    )
+            state.copy(
+                messages = state.messages + ChatMessageUi(
+                    ChatRole.SYSTEM,
+                    "当前对话模型不支持图片输入，请在设置中把 Model 换成多模态模型" +
+                        "（如 deepseek-v4-flash-vision-exp、GLM-4.6V、GPT-4o、Qwen-VL、Claude 系列）后再试"
                 )
+            )
         }
     }
 

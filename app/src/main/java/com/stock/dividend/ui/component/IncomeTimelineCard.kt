@@ -67,7 +67,8 @@ fun IncomeTimelineCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 9.dp)
+                // 与全 App 列表行内边距口径一致（AppCardDefaults.ListPadding = 16/14dp）
+                .padding(AppCardDefaults.ListPadding)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalSharedTransitionApi::class)
 
-package com.stock.dividend.ui.navigation
+package com.stock.dividend.ui.component
 
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -12,8 +12,9 @@ import androidx.compose.ui.Modifier
 /**
  * 跨页面共享元素动画的 scope 注入（借鉴 TransformationLayout 模式，Compose 1.7 内置实现）。
  *
- * MainScaffold 的 Tab 级 NavHost 外层提供 [LocalSharedTransitionScope]，
- * 各 composable 路由内容提供 [LocalNavAnimatedVisibilityScope]；
+ * 放在 component 层（而非 navigation 层）：[stockCardSharedBounds] 等扩展属于可复用 UI 能力，
+ * 组件（StockCard 等）引用它不得反向依赖导航层——MainScaffold 的 Tab 级 NavHost 外层
+ * 提供 [LocalSharedTransitionScope]，各 composable 路由内容提供 [LocalNavAnimatedVisibilityScope]；
  * 两个 scope 都存在时 [stockCardSharedBounds] 才生效，否则原样返回（可独立预览/测试）。
  */
 val LocalSharedTransitionScope = staticCompositionLocalOf<SharedTransitionScope?> { null }

@@ -1,5 +1,7 @@
 package com.stock.dividend.data.repository
 
+import androidx.room.withTransaction
+import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.FinancialStatementsCacheDao
 import com.stock.dividend.data.local.dao.FundamentalsCacheDao
@@ -8,6 +10,7 @@ import com.stock.dividend.data.local.dao.LlmAnalysisCacheDao
 import com.stock.dividend.data.local.dao.PriceCacheDao
 import com.stock.dividend.data.local.dao.SearchCacheDao
 import com.stock.dividend.data.plane.DividendFreshnessStore
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,35 +60,58 @@ class CacheManagementRepository @Inject constructor(
     private val dividendDao: DividendDao,
     private val dividendFreshnessStore: DividendFreshnessStore,
     private val fuyaoCacheDao: com.stock.dividend.data.local.dao.FuyaoCacheDao,
+    private val appDatabase: AppDatabase,
 ) {
     /** 各缓存当前条目数（按 [CacheKind] 声明顺序返回；单个 DAO 统计失败记 0，不影响其余）。 */
     suspend fun loadStats(): List<CacheStats> = CacheKind.entries.map { kind ->
-        CacheStats(kind, runCatching { countOf(kind) }.getOrDefault(0L))
+        CacheStats(kind, runCatchingRethrowingCancellation { countOf(kind) }.getOrDefault(0L))
     }
 
     /** 清理指定缓存（全表删除；被清数据在下次联网使用时按需重新下载）。 */
     suspend fun clear(kind: CacheKind) {
-        runCatching {
-            when (kind) {
-                CacheKind.PRICE -> priceCacheDao.deleteAll()
-                CacheKind.SEARCH -> searchCacheDao.deleteAll()
-                CacheKind.KLINE -> klineCacheDao.clearAll()
-                CacheKind.FUNDAMENTALS -> fundamentalsCacheDao.clear()
-                CacheKind.STATEMENTS -> financialStatementsCacheDao.clear()
-                CacheKind.LLM_ANALYSIS -> llmAnalysisCacheDao.clear()
-                CacheKind.FUYAO -> fuyaoCacheDao.clearAll()
-                CacheKind.DIVIDENDS -> {
-                    dividendDao.deleteAll()
-                    dividendFreshnessStore.clear()
-                }
+        runCatchingRethrowingCancellation { clearInternal(kind) }
+    }
+
+    /**
+     * 一键清理全部缓存：逐 kind 串行清理包进同一事务——中途某个 DAO 失败时整体回滚，
+     * 避免「清了一半」的中间态（缓存是可再生数据，回滚后重试即可）。
+     */
+    suspend fun clearAll() {
+        runCatchingRethrowingCancellation {
+            appDatabase.withTransaction {
+                CacheKind.entries.forEach { kind -> clearInternal(kind) }
             }
         }
     }
 
-    /** 一键清理全部缓存。 */
-    suspend fun clearAll() {
-        CacheKind.entries.forEach { clear(it) }
+    private suspend fun clearInternal(kind: CacheKind) {
+        when (kind) {
+            CacheKind.PRICE -> priceCacheDao.deleteAll()
+            CacheKind.SEARCH -> searchCacheDao.deleteAll()
+            CacheKind.KLINE -> klineCacheDao.clearAll()
+            CacheKind.FUNDAMENTALS -> fundamentalsCacheDao.clear()
+            CacheKind.STATEMENTS -> financialStatementsCacheDao.clear()
+            CacheKind.LLM_ANALYSIS -> llmAnalysisCacheDao.clear()
+            CacheKind.FUYAO -> fuyaoCacheDao.clearAll()
+            CacheKind.DIVIDENDS -> {
+                dividendDao.deleteAll()
+                dividendFreshnessStore.clear()
+            }
+        }
     }
+
+    /**
+     * runCatching 变体：CancellationException 直接抛出（取消不能被当清理失败吞掉），
+     * 其余 Throwable 吞成失败结果（红线 #2：缓存清理失败静默）。
+     */
+    private inline fun <T> runCatchingRethrowingCancellation(block: () -> T): Result<T> =
+        try {
+            Result.success(block())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
 
     private suspend fun countOf(kind: CacheKind): Long = when (kind) {
         CacheKind.PRICE -> priceCacheDao.count()

@@ -2,11 +2,14 @@ package com.stock.dividend.ui.screen
 
 import android.graphics.BitmapFactory
 import android.util.Base64
+import android.view.ViewTreeObserver
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +24,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -50,9 +55,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -63,7 +71,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -86,7 +97,10 @@ import dev.jeziellago.compose.markdowntext.MarkdownText
 import com.stock.dividend.ui.component.AppTextButton
 import com.stock.dividend.ui.component.AppButton
 import com.stock.dividend.ui.component.AppTextField
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val SUGGESTIONS = listOf(
     "我的持仓怎么样？",
@@ -131,16 +145,7 @@ fun AiChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
-        if (messages.isNotEmpty()) {
-            // 滚到列表绝对底部（scrollOffset 传大值会被 clamp 到末尾）：此前按 lastIndex
-            // 顶对齐，比视口高的长回复下半截会滞留在视口外，观感即「被输入框遮住」
-            listState.animateScrollToItem(
-                index = messages.lastIndex,
-                scrollOffset = Int.MAX_VALUE / 2
-            )
-        }
-    }
+    ChatAutoScrollEffect(messages, listState)
 
     if (!state.llmConfigured) {
         Column(
@@ -207,20 +212,14 @@ fun AiChatScreen(
             )
         }
 
-        if (state.pendingImages.isNotEmpty()) {
-            PendingImagesRow(
-                images = state.pendingImages,
-                onRemove = viewModel::onRemovePendingImage
-            )
-        }
-
-        ChatInputBar(
+        ChatComposer(
             input = state.input,
             isSending = state.isSending,
-            hasPendingImages = state.pendingImages.isNotEmpty(),
+            pendingImages = state.pendingImages,
             onInputChanged = viewModel::onInputChanged,
             onSend = viewModel::onSend,
-            onAttachImage = onAttachImage
+            onAttachImage = onAttachImage,
+            onRemovePendingImage = viewModel::onRemovePendingImage
         )
     }
 
@@ -239,6 +238,82 @@ fun AiChatScreen(
             onDelete = { sessionId -> viewModel.onDeleteSession(sessionId) },
             onDismiss = { showSessions = false }
         )
+    }
+}
+
+/**
+ * 聊天列表自动跟底。key 必须是**末条消息对象**而非 text.length：
+ * `Final` 事件定稿时流式增量拼接长度常与全文等长、仅 streaming 翻转 false，
+ * 此时纯文本→MarkdownText 切换 + 复制行出现会让末条变高——按长度键控会漏掉
+ * 这次高度增长，回复尾部滞留视口外（internal 供 Robolectric 单测复用）。
+ * 滚动方式：流式中（streaming/thinkingStreaming）高频增量会不断取消动画，用
+ * snap 确定性跟底；非流式变化（发送消息/定稿/切换会话）用动画平滑滚底。
+ *
+ * ⚠️ 定稿后内容仍可能**异步变高**（MarkdownText 为 AndroidView+Markwon，代码块
+ * 语法高亮等在后续帧才完成），此时没有任何消息事件可触发——故额外观察
+ * 「末条已测量高度 + 视口高度」的派生状态：只要还在贴底意图内（末条底部仍在
+ * 视口内、未滚出多屏），布局一变就 snap 补滚一次。键盘开合导致的视口变化
+ * 同样被覆盖。用户主动上滑翻历史（末条已滚出视口）则不追赶。
+ */
+@Composable
+internal fun ChatAutoScrollEffect(
+    messages: List<ChatMessageUi>,
+    listState: LazyListState,
+) {
+    val last = messages.lastOrNull()
+    // 派生状态：末条测量高度 / 列表视口高度（读 layoutInfo 不会触发重组，只有值变才重组）
+    val lastMeasuredSize by remember {
+        derivedStateOf { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.size ?: -1 }
+    }
+    val viewportSize by remember {
+        derivedStateOf { listState.layoutInfo.viewportSize.height }
+    }
+    LaunchedEffect(messages.size, last) {
+        if (last != null) {
+            val streaming = last.streaming || last.thinkingStreaming
+            listState.scrollToAbsoluteBottom(messages.lastIndex, animate = !streaming)
+        }
+    }
+    // 异步变高/视口变化的补偿滚动（无消息事件路径）
+    LaunchedEffect(lastMeasuredSize, viewportSize) {
+        val info = listState.layoutInfo
+        val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return@LaunchedEffect
+        val isLast = lastVisible.index == info.totalItemsCount - 1
+        // 仅当末条仍（部分）可见（=贴底意图未被打断）且底部存在缺口时补滚
+        if (isLast && listState.canScrollForward) {
+            listState.scrollToAbsoluteBottom(info.totalItemsCount - 1, animate = false)
+        }
+    }
+}
+
+/**
+ * 滚到列表绝对底部（可选动画）：
+ * - 近距离（末条已在视口内，如定稿变高）：原位 [scrollToItem] 强制 remeasure——
+ *   定稿的高度增长发生在本帧 layout 之前，直接读 layoutInfo 会拿到旧值；
+ * - 远距离（末条不可见，如发送消息/切换会话）：animate 先平滑滚到末条顶对齐
+ *   （末条矮于视口时会被自动钳到底），snap 直接顶对齐；
+ * - 收尾统一按「末条底边 − 视口底边」缺口补齐（末条高于视口时为正）。缺口因
+ *   viewportEndOffset 的 padding 语义只可能偏大，偏大被滚动边界 clamp 到绝对
+ *   底部，不会冲过头。
+ * 不用 `animateScrollToItem(末条, 大 scrollOffset)` 一把梭：其动画目标取自起始帧
+ * 测量，定稿同帧变高时落点会差一截。
+ */
+internal suspend fun LazyListState.scrollToAbsoluteBottom(lastIndex: Int, animate: Boolean = false) {
+    if (lastIndex < 0) return
+    val info = layoutInfo
+    val lastVisible = info.visibleItemsInfo.lastOrNull()
+    when {
+        lastVisible != null && lastVisible.index == lastIndex ->
+            scrollToItem(firstVisibleItemIndex, firstVisibleItemScrollOffset)
+        animate -> animateScrollToItem(lastIndex)
+        else -> scrollToItem(lastIndex)
+    }
+    val last = layoutInfo.visibleItemsInfo.lastOrNull()
+        ?.takeIf { it.index == lastIndex && it.size > 0 } ?: return
+    val viewportBottom = layoutInfo.viewportEndOffset - layoutInfo.afterContentPadding
+    val gap = (last.offset + last.size) - viewportBottom
+    if (gap > 0) {
+        if (animate) animateScrollBy(gap.toFloat()) else scrollBy(gap.toFloat())
     }
 }
 
@@ -400,37 +475,44 @@ private fun ChatGreeting(onSuggestionClick: (String) -> Unit) {
 @Composable
 private fun MessageBubble(message: ChatMessageUi) {
     when (message.role) {
-        ChatRole.USER -> Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        // 用户消息强制 LTR 布局方向：Alignment.End 是方向敏感对齐，个别 ROM/系统
+        // 布局方向判定异常时会把用户气泡翻到左侧——聊天语义上用户消息永远贴右。
+        ChatRole.USER -> CompositionLocalProvider(
+            LocalLayoutDirection provides LayoutDirection.Ltr
         ) {
-            // 用户消息携带的图片（多模态输入）：缩略图置于文字上方
-            if (message.images.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    message.images.forEach { url ->
-                        DataUrlImage(
-                            dataUrl = url,
-                            contentDescription = "用户发送的图片",
-                            modifier = Modifier
-                                .size(width = 110.dp, height = 150.dp)
-                                .clip(MaterialTheme.shapes.medium)
-                        )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                // 用户消息携带的图片（多模态输入）：缩略图置于文字上方
+                if (message.images.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        message.images.forEach { url ->
+                            DataUrlImage(
+                                dataUrl = url,
+                                contentDescription = "用户发送的图片",
+                                modifier = Modifier
+                                    .size(width = 110.dp, height = 150.dp)
+                                    .clip(MaterialTheme.shapes.medium)
+                            )
+                        }
                     }
                 }
-            }
-            if (message.text.isNotEmpty()) {
-                // ChatGPT 式用户气泡：浅色大圆角（28dp）、限宽靠右、内边距舒展
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = MaterialTheme.shapes.extraLarge,
-                    modifier = Modifier.fillMaxWidth(0.82f)
-                ) {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)
-                    )
+                if (message.text.isNotEmpty()) {
+                    // ChatGPT 式用户气泡：浅色大圆角（28dp）、内容自适应宽度靠右
+                    // （widthIn 上限防长文占满整行），内边距舒展
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = MaterialTheme.shapes.extraLarge,
+                        modifier = Modifier.widthIn(max = 300.dp)
+                    ) {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)
+                        )
+                    }
                 }
             }
         }
@@ -447,7 +529,7 @@ private fun MessageBubble(message: ChatMessageUi) {
                 // 流式期间文本尾部带 ▍ 光标，示意正在生成
                 val displayText = if (message.streaming) message.text + " ▍" else message.text
                 if (!message.streaming && canRenderMarkdown(message.text)) {
-                    MarkdownText(markdown = message.text)
+                    MarkdownTextSynced(markdown = message.text)
                 } else {
                     Text(
                         text = displayText,
@@ -473,6 +555,45 @@ private fun MessageBubble(message: ChatMessageUi) {
 }
 
 /**
+ * 高度同步版 MarkdownText（修复「回复尾部划不到底」的真机问题）。
+ *
+ * MarkdownText 内部是 AndroidView + Markwon TextView：个别 ROM / 系统字体缩放下，
+ * TextView 布局完成后的真实高度没有（或迟滞地）传播回 Compose 测量，导致
+ * LazyList 以偏小高度封顶滚动——回复尾部永远滚不出来、也不可见（被裁切）。
+ *
+ * 双保险：
+ * 1. `afterSetMarkdown` 里主动 requestLayout 踢一脚迟滞的自测量；
+ * 2. GlobalLayoutListener 观察 TextView 真实高度，经 `Modifier.layout` 强制
+ *    Compose 节点高度 ≥ 真实值（两者一致时无副作用），高度变化再由
+ *    ChatAutoScrollEffect 的布局补偿拉回绝对底部。
+ */
+@Composable
+private fun MarkdownTextSynced(markdown: String) {
+    var realHeightPx by remember(markdown) { mutableStateOf(0) }
+    MarkdownText(
+        markdown = markdown,
+        modifier = Modifier.layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints)
+            val height = maxOf(placeable.height, realHeightPx)
+            layout(placeable.width, height) { placeable.place(0, 0) }
+        },
+        afterSetMarkdown = { tv ->
+            tv.post { tv.requestLayout() }
+            // 同一 TextView 重复 setMarkdown 时只挂一次高度监听（防每次更新累积监听器；
+            // 高度回填逻辑本身幂等——只增不减，多挂无益只有开销）
+            if (tv.tag == null) {
+                tv.tag = true
+                tv.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+                    override fun onGlobalLayout() {
+                        if (tv.height > realHeightPx) realHeightPx = tv.height
+                    }
+                })
+            }
+        },
+    )
+}
+
+/**
  * 回复底部操作行（ChatGPT 式）：复制全文到剪贴板，小图标弱化不抢正文视线。
  */
 @Composable
@@ -480,6 +601,13 @@ private fun CopyActionRow(text: String) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
+    // 复制成功态 2 秒后自动复位（✓ 回到复制图标）
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2_000L)
+            copied = false
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -664,88 +792,90 @@ private fun ConfirmationCard(
 }
 
 /**
- * ChatGPT 式输入栏：单个大圆角胶囊容器（细边框 + 轻阴影）内嵌
- * 「+ 附件按钮 · 无边框多行输入 · 圆形发送按钮」，focus/发送态随主题色。
+ * 底部 composer 区（ChatGPT 式）：不铺全宽色带，页面背景延伸到底；
+ * 输入行为**大圆角轻底色胶囊**（surfaceContainerHigh，无边框无阴影不浮卡），
+ * 左右留边距。待发图片缩略图与输入行同住此区。
+ * 内容区（LazyColumn）底边直接贴住本区顶边。
  */
 @Composable
-private fun ChatInputBar(
+private fun ChatComposer(
     input: String,
     isSending: Boolean,
-    hasPendingImages: Boolean,
+    pendingImages: List<String>,
     onInputChanged: (String) -> Unit,
     onSend: () -> Unit,
     onAttachImage: () -> Unit,
+    onRemovePendingImage: (String) -> Unit,
 ) {
-    Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        shadowElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 2.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.Bottom
+    Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 6.dp)) {
+        if (pendingImages.isNotEmpty()) {
+            PendingImagesRow(
+                images = pendingImages,
+                onRemove = onRemovePendingImage,
+            )
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = MaterialTheme.shapes.extraLarge,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            IconButton(onClick = onAttachImage, enabled = !isSending) {
-                Icon(Icons.Filled.ImageIcon, contentDescription = "发送图片")
-            }
-            val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
-            val inputInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = 2.dp)
-                    // 整个输入区可点聚焦（无涟漪）：手机上点输入框空白/占位符区域也弹键盘
-                    .clickable(
-                        interactionSource = inputInteraction,
-                        indication = null
-                    ) { focusRequester.requestFocus() },
-                contentAlignment = Alignment.CenterStart
+            Row(
+                modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.Bottom
             ) {
-                androidx.compose.foundation.text.BasicTextField(
-                    value = input,
-                    onValueChange = onInputChanged,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequester),
-                    enabled = !isSending,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(
-                        MaterialTheme.colorScheme.primary
-                    ),
-                    maxLines = 5,
-                )
-                if (input.isEmpty()) {
-                    Text(
-                        text = "问点什么…",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                IconButton(onClick = onAttachImage, enabled = !isSending) {
+                    Icon(Icons.Filled.ImageIcon, contentDescription = "发送图片")
                 }
-            }
-            FilledIconButton(
-                onClick = onSend,
-                enabled = (input.isNotBlank() || hasPendingImages) && !isSending,
-                modifier = Modifier.size(44.dp),
-                shape = CircleShape
-            ) {
-                if (isSending) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp
+                val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+                val inputInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        // 整个输入区可点聚焦（无涟漪）：手机上点输入框空白/占位符区域也弹键盘
+                        .clickable(
+                            interactionSource = inputInteraction,
+                            indication = null
+                        ) { focusRequester.requestFocus() },
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = input,
+                        onValueChange = onInputChanged,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester),
+                        enabled = !isSending,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(
+                            MaterialTheme.colorScheme.primary
+                        ),
+                        maxLines = 5,
                     )
-                } else {
-                    Icon(Icons.Filled.Send, contentDescription = "发送")
+                    if (input.isEmpty()) {
+                        Text(
+                            text = "问点什么…",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !isSending,
+                    modifier = Modifier.size(44.dp),
+                    shape = CircleShape
+                ) {
+                    if (isSending) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.Filled.Send, contentDescription = "发送")
+                    }
                 }
             }
         }
@@ -761,7 +891,7 @@ private fun PendingImagesRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 4.dp),
+            .padding(top = 4.dp, bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         images.forEach { url ->
@@ -773,22 +903,26 @@ private fun PendingImagesRow(
                         .size(64.dp)
                         .clip(MaterialTheme.shapes.small)
                 )
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                // 外层 Box 撑起 48dp 触达区（Material 无障碍最小触控），视觉仍是 20dp 圆钮
+                Box(
+                    contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(2.dp)
-                        .size(20.dp)
+                        .size(48.dp)
+                        .clickable { onRemove(url) }
                 ) {
-                    Icon(
-                        Icons.Filled.Close,
-                        contentDescription = "移除图片",
-                        modifier = Modifier
-                            .clickable { onRemove(url) }
-                            .padding(3.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "移除图片",
+                            modifier = Modifier.padding(3.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -798,6 +932,11 @@ private fun PendingImagesRow(
 /**
  * data URL（`data:image/jpeg;base64,…`）→ Bitmap 渲染。
  * 会话历史重开时图片从 ADK SessionService 持久化字节还原，这里本地解码，不经网络。
+ *
+ * 性能：Base64 解码 + Bitmap 解码在 [Dispatchers.Default] 异步执行（不卡主线程），
+ * 并按显示尺寸下采样（inJustDecodeBounds 先量边界 → inSampleSize 到目标像素约 2 倍上限，
+ * 缩略场景目标 256px）——聊天缩略图无需全尺寸位图，避免大图 OOM 与解码抖动。
+ * 解码中显示低透明度占位色块。
  */
 @Composable
 private fun DataUrlImage(
@@ -805,18 +944,24 @@ private fun DataUrlImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
 ) {
-    val bitmap = remember(dataUrl) { decodeDataUrlBitmap(dataUrl) }
-    if (bitmap != null) {
+    // produceState：dataUrl 变化时重新异步解码；null = 解码中或失败（统一占位）
+    val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, key1 = dataUrl) {
+        value = withContext(Dispatchers.Default) {
+            decodeDataUrlBitmap(dataUrl, targetEdgePx = DATA_URL_IMAGE_TARGET_PX * 2)
+        }
+    }
+    val bmp = bitmap   // 委托属性不能智能转换，接局部变量判空
+    if (bmp != null) {
         Image(
-            bitmap = bitmap.asImageBitmap(),
+            bitmap = bmp.asImageBitmap(),
             contentDescription = contentDescription,
             modifier = modifier,
             contentScale = ContentScale.Crop
         )
     } else {
-        // 解码失败兜底：占位块（历史会话数据损坏时不至于空白无解释）
+        // 解码中/失败兜底：低透明度占位块（历史会话数据损坏时不至于空白无解释）
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
             modifier = modifier
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -831,12 +976,25 @@ private fun DataUrlImage(
     }
 }
 
-private fun decodeDataUrlBitmap(dataUrl: String): android.graphics.Bitmap? {
+/** 缩略图显示目标边长（px）：最大用途 110x150dp 缩略，取 256 已足够清晰。 */
+private const val DATA_URL_IMAGE_TARGET_PX = 256
+
+private fun decodeDataUrlBitmap(dataUrl: String, targetEdgePx: Int): android.graphics.Bitmap? {
     if (!dataUrl.startsWith("data:image/")) return null
     return runCatching {
         val payload = dataUrl.substringAfter("base64,", "")
         if (payload.isEmpty()) return null
         val bytes = Base64.decode(payload, Base64.NO_WRAP)
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        // 先只量边界不载像素，再按 2 的幂算 inSampleSize，长边降到目标（约 2×256px）以内即停
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (bounds.outWidth / sample > targetEdgePx ||
+            bounds.outHeight / sample > targetEdgePx
+        ) {
+            sample *= 2
+        }
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
     }.getOrNull()
 }

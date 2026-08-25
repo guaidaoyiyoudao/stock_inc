@@ -645,6 +645,28 @@ class GridCalculatorTest {
         assertThat(marked.sellFills[0].levelPrice).isEqualTo(8.0)
     }
 
+    /** 同档第二笔分批买入（2026-08-24 评审修复）：不改占用状态，但必须累计 buyFills——
+     *  波段净投入 = ΣbuyFills − ΣsellFills 完全依赖成交事件，静默丢弃会低估投入/虚高剩余资金。 */
+    @Test
+    fun `swing duplicate buy on held level still records fill`() {
+        val base = GridCalculator.generate(
+            10.0, 8.0, 12.0, 2, 100000.0, swingMode = true, dps = 0.5, swingRatioPercent = 100.0
+        )
+        val shares = base.levels.first { it.price == 8.0 }.shares
+        val marked = GridCalculator.markTriggeredLevels(
+            base,
+            listOf(
+                txAt("2026-01-01", "BUY", 8.1, shares / 2),
+                txAt("2026-01-02", "BUY", 8.05, shares / 2)   // 同档分批的第二笔（大额档常见）
+            )
+        )
+        assertThat(marked.buyFills).hasSize(2)   // 第二笔不被静默丢弃
+        assertThat(marked.buyFills.map { it.shares }).containsExactly(shares / 2, shares / 2).inOrder()
+        assertThat(marked.levels.first { it.price == 8.0 }.triggered).isTrue()   // 占用不变
+        val execution = GridExecutionCalculator.calculate(marked, 100000.0, emptyList(), null)
+        assertThat(execution.investedAmount).isWithin(0.01).of(8.1 * shares / 2 + 8.05 * shares / 2)
+    }
+
     /** 底仓不变（30% 波段）：卖出只释放波段部分，底仓标记保留；跌回档位可再买回波段。 */
     @Test
     fun `base position survives sell and swing re-buys`() {

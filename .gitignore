@@ -43,3 +43,6 @@ config/
 
 # ZCode local workspace
 .zcode/
+
+# CodeGraph 代码图谱索引（自动生成，勿提交）
+.codegraph/

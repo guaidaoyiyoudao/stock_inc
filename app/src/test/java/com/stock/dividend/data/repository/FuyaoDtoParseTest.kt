@@ -2,10 +2,23 @@ package com.stock.dividend.data.repository
 
 import com.google.common.truth.Truth.assertThat
 import com.google.gson.reflect.TypeToken
+import com.stock.dividend.data.remote.dto.FuyaoAdjustmentFactorsData
+import com.stock.dividend.data.remote.dto.FuyaoConstituentsData
+import com.stock.dividend.data.remote.dto.FuyaoDragonTigerData
 import com.stock.dividend.data.remote.dto.FuyaoEnvelope
-import com.stock.dividend.data.remote.dto.FuyaoSnapshotData
+import com.stock.dividend.data.remote.dto.FuyaoFundHoldersData
+import com.stock.dividend.data.remote.dto.FuyaoFundHoldingsData
+import com.stock.dividend.data.remote.dto.FuyaoFundNavData
+import com.stock.dividend.data.remote.dto.FuyaoFundProfileData
+import com.stock.dividend.data.remote.dto.FuyaoFundReturnsData
+import com.stock.dividend.data.remote.dto.FuyaoHotStockData
 import com.stock.dividend.data.remote.dto.FuyaoIndicatorsData
 import com.stock.dividend.data.remote.dto.FuyaoIndicatorIds
+import com.stock.dividend.data.remote.dto.FuyaoLimitPoolData
+import com.stock.dividend.data.remote.dto.FuyaoSnapshotData
+import com.stock.dividend.data.remote.dto.FuyaoThsIndexListData
+import com.stock.dividend.data.remote.dto.FuyaoTradingDaysData
+import com.stock.dividend.data.remote.dto.FuyaoValuationData
 import com.stock.dividend.data.remote.dto.fuyaoMsToDateStringOrNull
 import com.stock.dividend.data.remote.dto.fuyaoThscodeToAppCodeOrNull
 import com.stock.dividend.data.remote.dto.indicatorValueOf
@@ -394,7 +407,7 @@ class FuyaoDtoParseTest {
           {"thscode":"600519.SH","ticker":"600519","name":"贵州茅台","pe_ttm":19.539033,"pb_mrq":6.33281}]}}
         """.trimIndent()
 
-        val data = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoValuationData>>(json).data!!
+        val data = parse<FuyaoEnvelope<FuyaoValuationData>>(json).data!!
 
         val abank = data.item!![0]
         assertThat(abank.name).isEqualTo("农业银行")
@@ -406,13 +419,37 @@ class FuyaoDtoParseTest {
     }
 
     @Test
+    fun `adjustment factor stream parses cash and per share bonus`() {
+        // 分红事件流（信封结构实测 2026-08-23）：每股现金已是每股口径（无每10股换算）；
+        // per_share_bonus 为每股送转比例（送转行现金 0/缺失），落库链路见 DividendRepository。
+        val json = """
+        {"code":0,"message":"success","request_id":"t","data":{"thscode":"600XXX.SH","ticker":"600XXX",
+         "item":[
+           {"ex_date_ms":1747084800000,"dividend_per_share":0.3,"per_share_bonus":0.2},
+           {"ex_date_ms":1718841600000,"dividend_per_share":0.0,"per_share_bonus":0.5},
+           {"ex_date_ms":1683609600000,"dividend_per_share":0.25}]}}
+        """.trimIndent()
+
+        val data = parse<FuyaoEnvelope<FuyaoAdjustmentFactorsData>>(json).data!!
+
+        assertThat(data.item!!).hasSize(3)
+        val mixed = data.item!![0]
+        assertThat(mixed.dividendPerShare).isWithin(1e-9).of(0.3)
+        assertThat(mixed.perShareBonus).isWithin(1e-9).of(0.2)
+        // 纯送转行：现金 0 + 送转 0.5（10送5）；送转缺失时 null 不臆造
+        assertThat(data.item!![1].dividendPerShare).isWithin(1e-9).of(0.0)
+        assertThat(data.item!![1].perShareBonus).isWithin(1e-9).of(0.5)
+        assertThat(data.item!![2].perShareBonus).isNull()
+    }
+
+    @Test
     fun `trading days parse yyyyMMdd dates`() {
         val json = """
         {"code":0,"data":{"item":[{"date_ms":1756051200000,"date":"20250825"},
           {"date_ms":1756137600000,"date":"20250826"}]}}
         """.trimIndent()
 
-        val data = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoTradingDaysData>>(json).data!!
+        val data = parse<FuyaoEnvelope<FuyaoTradingDaysData>>(json).data!!
 
         assertThat(data.item!!).hasSize(2)
         assertThat(data.item!![0].date).isEqualTo("20250825")
@@ -431,7 +468,7 @@ class FuyaoDtoParseTest {
            "hot_money_net_value":47294254.5}]}}
         """.trimIndent()
 
-        val board = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoDragonTigerData>>(json)
+        val board = parse<FuyaoEnvelope<FuyaoDragonTigerData>>(json)
             .data!!.toDragonTigerBoard()
 
         assertThat(board.tradeDate).isEqualTo("2026-08-21")
@@ -459,7 +496,7 @@ class FuyaoDtoParseTest {
            "seal_money":123456789.01,"max_seal_money":223456789.01}]}}
         """.trimIndent()
 
-        val data = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoLimitPoolData>>(json).data!!
+        val data = parse<FuyaoEnvelope<FuyaoLimitPoolData>>(json).data!!
 
         assertThat(data.pagination!!.total).isEqualTo(126)
         val item = data.item!!.single()
@@ -478,10 +515,10 @@ class FuyaoDtoParseTest {
            "rank_change":27,"rank_trend":"up"}]}}
         """.trimIndent()
 
-        val data = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoHotStockData>>(json).data!!
+        val data = parse<FuyaoEnvelope<FuyaoHotStockData>>(json).data!!
 
         assertThat(data.item!!).hasSize(2)
-        assertThat(data.item!![0].heat).isWithin(0.1).of(7886619.0)
+        assertThat(data.item!![0].heat).isWithin(1e-9).of(7886619.0)
         assertThat(data.item!![1].rankChange).isEqualTo(27)
     }
 
@@ -498,7 +535,7 @@ class FuyaoDtoParseTest {
           "rate_info":[{"rate_type":"management","charge_mode":"ongoing","standard_rate":"0.50%"}]}]}}
         """.trimIndent()
 
-        val profile = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoFundProfileData>>(json)
+        val profile = parse<FuyaoEnvelope<FuyaoFundProfileData>>(json)
             .data!!.item!!.single()
 
         assertThat(profile.fundName).isEqualTo("红利ETF华泰柏瑞")
@@ -525,7 +562,7 @@ class FuyaoDtoParseTest {
            "start_date_ms":1774972800000,"end_date_ms":1782748800000}]}}
         """.trimIndent()
 
-        val data = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoFundHoldingsData>>(json).data!!
+        val data = parse<FuyaoEnvelope<FuyaoFundHoldingsData>>(json).data!!
 
         assertThat(data.stockRatioPct).isWithin(1e-9).of(98.73)
         assertThat(data.mainIndustry).isEqualTo("均衡")
@@ -546,7 +583,7 @@ class FuyaoDtoParseTest {
           "peer_average_week":-0.7731,"peer_average_month":0.3546}]}}
         """.trimIndent()
 
-        val r = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoFundReturnsData>>(json)
+        val r = parse<FuyaoEnvelope<FuyaoFundReturnsData>>(json)
             .data!!.item!!.single()
 
         assertThat(r.sinceInception).isWithin(1e-9).of(302.91)
@@ -559,7 +596,7 @@ class FuyaoDtoParseTest {
         val navJson = """
         {"code":0,"data":{"item":[{"nav_date":1784563200000,"unit_nav":3.2056,"adj_nav":3.8124}]}}
         """.trimIndent()
-        val nav = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoFundNavData>>(navJson)
+        val nav = parse<FuyaoEnvelope<FuyaoFundNavData>>(navJson)
             .data!!.item!!.single()
         assertThat(nav.unitNav).isWithin(1e-9).of(3.2056)
         assertThat(nav.adjNav).isWithin(1e-9).of(3.8124)
@@ -570,7 +607,7 @@ class FuyaoDtoParseTest {
           "ins_position":25.96,"holder_amount":416667,"avg_holder_share":14533.61,
           "psnl_rate":74.04,"mgmt_staff_hold_rate":0.0}]}}
         """.trimIndent()
-        val holder = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoFundHoldersData>>(holdersJson)
+        val holder = parse<FuyaoEnvelope<FuyaoFundHoldersData>>(holdersJson)
             .data!!.item!!.single()
         assertThat(holder.institutionPct).isWithin(1e-9).of(25.96)
         assertThat(holder.personalPct).isWithin(1e-9).of(74.04)
@@ -583,7 +620,7 @@ class FuyaoDtoParseTest {
         {"code":0,"data":{"item":[{"thscode":"881101.TI","name":"种植业与林业"},
           {"thscode":"884001.TI","name":"种子生产"}]}}
         """.trimIndent()
-        val list = parse<FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoThsIndexListData>>(listJson)
+        val list = parse<FuyaoEnvelope<FuyaoThsIndexListData>>(listJson)
             .data!!.item!!
         assertThat(list).hasSize(2)
         assertThat(list[0].thscode).isEqualTo("881101.TI")
@@ -592,7 +629,7 @@ class FuyaoDtoParseTest {
         {"code":0,"data":{"item":[{"thscode":"302132.SZ","ticker":"302132","name":"中航成飞"},
           {"thscode":"601018.SH","ticker":"601018","name":"宁波港"}]}}
         """.trimIndent()
-        val constituentsEnvelope: FuyaoEnvelope<com.stock.dividend.data.remote.dto.FuyaoConstituentsData> =
+        val constituentsEnvelope: FuyaoEnvelope<FuyaoConstituentsData> =
             parse(constituentsJson)
         val constituents = constituentsEnvelope.data!!.item!!
         assertThat(constituents).hasSize(2)

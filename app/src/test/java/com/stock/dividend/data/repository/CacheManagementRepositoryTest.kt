@@ -1,6 +1,8 @@
 package com.stock.dividend.data.repository
 
+import androidx.room.withTransaction
 import com.google.common.truth.Truth.assertThat
+import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.dao.FinancialStatementsCacheDao
 import com.stock.dividend.data.local.dao.FundamentalsCacheDao
@@ -12,8 +14,12 @@ import com.stock.dividend.data.plane.DividendFreshnessStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.slot
+import io.mockk.unmockkStatic
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
@@ -28,6 +34,7 @@ class CacheManagementRepositoryTest {
     private val dividendDao = mockk<DividendDao>(relaxed = true)
     private val freshnessStore = mockk<DividendFreshnessStore>(relaxed = true)
     private val fuyaoCacheDao = mockk<com.stock.dividend.data.local.dao.FuyaoCacheDao>(relaxed = true)
+    private val appDatabase = mockk<AppDatabase>(relaxed = true)
 
     private val repository = CacheManagementRepository(
         priceCacheDao = priceCacheDao,
@@ -39,6 +46,7 @@ class CacheManagementRepositoryTest {
         dividendDao = dividendDao,
         dividendFreshnessStore = freshnessStore,
         fuyaoCacheDao = fuyaoCacheDao,
+        appDatabase = appDatabase,
     )
 
     @Before
@@ -51,6 +59,17 @@ class CacheManagementRepositoryTest {
         coEvery { llmAnalysisCacheDao.count() } returns 7L
         coEvery { dividendDao.count() } returns 120L
         coEvery { fuyaoCacheDao.count() } returns 9L
+        // Room 的 withTransaction 扩展函数默认会走真实 DB 事务，单测里 mock 为「直接执行 block」
+        mockkStatic("androidx.room.RoomDatabaseKt")
+        val blockSlot = slot<suspend () -> Any>()
+        coEvery { appDatabase.withTransaction(capture(blockSlot)) } coAnswers {
+            blockSlot.captured.invoke()
+        }
+    }
+
+    @After
+    fun tearDown() {
+        unmockkStatic("androidx.room.RoomDatabaseKt")
     }
 
     @Test

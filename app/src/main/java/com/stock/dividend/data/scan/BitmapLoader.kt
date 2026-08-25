@@ -55,6 +55,8 @@ fun bitmapToJpegDataUrl(
     val scaled = scaleToFit(bitmap, maxEdge)
     val out = ByteArrayOutputStream()
     scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
+    // scaleToFit 新建的缩放位图用完即回收（未超边时返回原 bitmap，不回收调用方的）
+    if (scaled !== bitmap) scaled.recycle()
     val base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     return "data:image/jpeg;base64,$base64"
 }

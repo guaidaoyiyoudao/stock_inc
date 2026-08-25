@@ -6,9 +6,11 @@ import com.stock.dividend.data.local.entity.StockEntity
 import com.stock.dividend.data.plane.MarketDataPlane
 import com.stock.dividend.data.repository.GridPlanRepository
 import com.stock.dividend.data.repository.NotificationRuleRepository
+import com.stock.dividend.data.repository.StrategyEvaluator
 import com.stock.dividend.data.repository.StrategyInputAssembler
 import com.stock.dividend.data.repository.StrategyPlanRepository
 import com.stock.dividend.data.repository.TransactionRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -214,7 +216,9 @@ class NotificationCheckCoordinator @Inject constructor(
         }.getOrDefault(emptyMap())
         val evaluations = plans.mapNotNull { plan ->
             inputs[plan.id]?.let { input ->
-                com.stock.dividend.data.repository.StrategyEvaluator.evaluate(plan, input)
+                // 单计划粒度兜底：一个计划评估异常不丢整轮其余计划的提醒（CancellationException 照常抛出）
+                runCatchingKeepingCancellation { StrategyEvaluator.evaluate(plan, input) }
+                    .getOrNull()
                     ?.let { plan.id to it }
             }
         }.toMap()
@@ -239,4 +243,17 @@ class NotificationCheckCoordinator @Inject constructor(
                 runCatching { strategyPlanRepository.updateNotifiedSellTier(id, null) }
             }
     }
+
+    /**
+     * runCatching 变体：CancellationException 直接抛出（取消不能被当计划失败吞掉），
+     * 其余 Throwable 吞成失败结果（§4.3：单计划异常只降级该计划，不丢整轮）。
+     */
+    private inline fun <T> runCatchingKeepingCancellation(block: () -> T): Result<T> =
+        try {
+            Result.success(block())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
 }

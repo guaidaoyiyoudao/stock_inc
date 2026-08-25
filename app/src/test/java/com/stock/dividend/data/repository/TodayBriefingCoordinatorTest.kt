@@ -19,7 +19,10 @@ class TodayBriefingCoordinatorTest {
 
     private val marketDataPlane: MarketDataPlane = mockk()
     private val gridPlanRepository: GridPlanRepository = mockk()
+    private val strategyPlanRepository: StrategyPlanRepository = mockk()
     private val transactionRepository: TransactionRepository = mockk(relaxed = true)
+    // 装配器用真实实现 + 上述 mock 依赖（纯编排，无本地状态，真实例比 mock 更接近生产行为）
+    private val strategyInputAssembler = StrategyInputAssembler(marketDataPlane, transactionRepository)
     private val diagnosisAssembler: PortfolioDiagnosisAssembler = mockk()
     private val llmApi: LlmApi = mockk()
     private val llmConfigRepository: LlmConfigRepository = mockk()
@@ -28,8 +31,8 @@ class TodayBriefingCoordinatorTest {
     private val today = LocalDate.of(2026, 8, 12)
 
     private fun coordinator() = TodayBriefingCoordinator(
-        marketDataPlane, gridPlanRepository, transactionRepository,
-        diagnosisAssembler, llmApi, llmConfigRepository, cacheDao,
+        marketDataPlane, gridPlanRepository, strategyPlanRepository, strategyInputAssembler,
+        transactionRepository, diagnosisAssembler, llmApi, llmConfigRepository, cacheDao,
     )
 
     private fun stubEmptyData() {
@@ -38,6 +41,7 @@ class TodayBriefingCoordinatorTest {
         coEvery { marketDataPlane.get10YBondYield(any()) } returns 2.6
         coEvery { marketDataPlane.getDps(any()) } returns null
         coEvery { gridPlanRepository.observeAll() } returns flowOf(emptyList())
+        coEvery { strategyPlanRepository.observeAll() } returns flowOf(emptyList())
         coEvery { marketDataPlane.getAllDividendsWithExDate() } returns emptyList()
         coEvery { marketDataPlane.getIndexQuotes() } returns emptyList()
         coEvery { marketDataPlane.getIndustryList(any<MarketDataRepository.SortBy>(), any()) } returns emptyList()

@@ -145,4 +145,84 @@ class FundDataRepositoryTest {
         assertThat(holdings!!.item).hasSize(1)   // 断网/禁用：历史数据依然可读（离线优先）
         coVerify(exactly = 0) { fuyaoApi.getFundHoldings(any(), any()) }
     }
+
+    @Test
+    fun `holdings merge remote overrides same period and null keys do not accumulate`() = runTest {
+        // 缓存：2026 年中报告期 holdRatio=4.82 + 一条 endDateMs=null 的脏行
+        coEvery { cacheDao.get("fundHoldings|sh.510880") } returns com.stock.dividend.data.local.entity.FuyaoCacheEntity(
+            key = "fundHoldings|sh.510880",
+            payload = com.google.gson.Gson().toJson(
+                com.stock.dividend.data.remote.dto.FuyaoFundHoldingsData(
+                    item = listOf(
+                        com.stock.dividend.data.remote.dto.FuyaoFundHoldingItem(
+                            thscode = "601919.SH", stockName = "中远海控", holdRatio = 4.82,
+                            endDateMs = 1782748800000L
+                        ),
+                        com.stock.dividend.data.remote.dto.FuyaoFundHoldingItem(
+                            thscode = "600941.SH", stockName = "中国移动", holdRatio = 1.0,
+                            endDateMs = null
+                        )
+                    )
+                )
+            ),
+            fetchedAt = System.currentTimeMillis() - 86_400_000L
+        )
+        // 远端：同期报告期修正 holdRatio=5.1 + 一条新的 null 键行
+        coEvery { fuyaoApi.getFundHoldings(fundType = any(), thscode = any()) } returns
+            FuyaoEnvelope(
+                code = 0, message = "success", requestId = "t",
+                data = com.stock.dividend.data.remote.dto.FuyaoFundHoldingsData(
+                    item = listOf(
+                        com.stock.dividend.data.remote.dto.FuyaoFundHoldingItem(
+                            thscode = "601919.SH", stockName = "中远海控", holdRatio = 5.1,
+                            endDateMs = 1782748800000L
+                        ),
+                        com.stock.dividend.data.remote.dto.FuyaoFundHoldingItem(
+                            thscode = "601398.SH", stockName = "工商银行", holdRatio = 0.9,
+                            endDateMs = null
+                        )
+                    )
+                )
+            )
+
+        val holdings = repository.getHoldings("sh.510880")
+
+        // 同期冲突远端胜出（扶摇侧修正生效），null 键行只保留远端侧（不与缓存 null 行累积塌缩）
+        assertThat(holdings!!.item).hasSize(2)
+        val keyed = holdings.item!!.first { it.endDateMs == 1782748800000L }
+        assertThat(keyed.holdRatio).isWithin(1e-9).of(5.1)
+        assertThat(holdings.item!!.count { it.endDateMs == null }).isEqualTo(1)
+        assertThat(holdings.item!!.single { it.endDateMs == null }.thscode).isEqualTo("601398.SH")
+    }
+
+    @Test
+    fun `nav merge remote overrides same date`() = runTest {
+        // 缓存：2026-06-30 净值 3.00
+        coEvery { cacheDao.get("fundNav|sh.510880|latest") } returns com.stock.dividend.data.local.entity.FuyaoCacheEntity(
+            key = "fundNav|sh.510880|latest",
+            payload = com.google.gson.Gson().toJson(
+                listOf(
+                    com.stock.dividend.data.remote.dto.FuyaoFundNavItem(navDateMs = 1782748800000L, unitNav = 3.00)
+                )
+            ),
+            fetchedAt = System.currentTimeMillis() - 86_400_000L
+        )
+        // 远端：同日净值修正 3.10 + 新一日 3.12
+        coEvery { fuyaoApi.getFundNav(fundType = any(), thscode = any(), range = any()) } returns
+            FuyaoEnvelope(
+                code = 0, message = "success", requestId = "t",
+                data = com.stock.dividend.data.remote.dto.FuyaoFundNavData(
+                    item = listOf(
+                        com.stock.dividend.data.remote.dto.FuyaoFundNavItem(navDateMs = 1782748800000L, unitNav = 3.10),
+                        com.stock.dividend.data.remote.dto.FuyaoFundNavItem(navDateMs = 1782835200000L, unitNav = 3.12)
+                    )
+                )
+            )
+
+        val nav = repository.getNav("sh.510880")
+
+        assertThat(nav).hasSize(2)
+        assertThat(nav.first { it.navDateMs == 1782748800000L }.unitNav).isWithin(1e-9).of(3.10)
+        assertThat(nav.map { it.navDateMs }).containsExactly(1782748800000L, 1782835200000L).inOrder()
+    }
 }

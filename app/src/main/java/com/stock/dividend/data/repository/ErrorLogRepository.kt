@@ -3,6 +3,7 @@ package com.stock.dividend.data.repository
 import androidx.annotation.VisibleForTesting
 import com.stock.dividend.data.local.dao.ErrorLogDao
 import com.stock.dividend.data.local.entity.ErrorLogEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -52,7 +53,7 @@ class ErrorLogRepository @Inject constructor(
         throwable: Throwable? = null,
         category: ErrorLogCategory = ErrorLogCategory.NETWORK,
     ) {
-        runCatching {
+        runCatchingRethrowingCancellation {
             val now = nowProvider()
             val latest = errorLogDao.latest()
             if (latest != null && latest.source == source && latest.message == message &&
@@ -78,11 +79,24 @@ class ErrorLogRepository @Inject constructor(
 
     /** 清空全部日志（失败日志页「清理」入口）。 */
     suspend fun clearAll() {
-        runCatching { errorLogDao.clearAll() }
+        runCatchingRethrowingCancellation { errorLogDao.clearAll() }
     }
 
     /** 条目数（说明卡合计用）。 */
-    suspend fun count(): Long = runCatching { errorLogDao.count() }.getOrDefault(0L)
+    suspend fun count(): Long = runCatchingRethrowingCancellation { errorLogDao.count() }.getOrDefault(0L)
+
+    /**
+     * runCatching 变体：CancellationException 直接抛出（取消不能被当失败吞掉），
+     * 其余 Throwable 吞成失败结果（红线 #2：记日志的代码不能反噬主流程）。
+     */
+    private inline fun <T> runCatchingRethrowingCancellation(block: () -> T): Result<T> =
+        try {
+            Result.success(block())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
 
     /** 异常详情：类名+消息+裁剪后的堆栈（长堆栈截断，防 detail 列膨胀）。 */
     private fun Throwable.toDetail(): String {

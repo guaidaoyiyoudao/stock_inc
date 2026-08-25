@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>open-code-review 技术评估汇报</title>
+<style>
+  :root {
+    --bg: #f6f8fb;
+    --card: #ffffff;
+    --text: #1e293b;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --green: #16a34a;
+    --green-soft: #f0fdf4;
+    --amber: #d97706;
+    --amber-soft: #fffbeb;
+    --red: #dc2626;
+    --code-bg: #0f172a;
+    --code-text: #e2e8f0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  .page { max-width: 980px; margin: 0 auto; padding: 0 24px 64px; }
+
+  /* ===== 封面区 ===== */
+  .cover {
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #3b82f6 100%);
+    color: #fff;
+    border-radius: 0 0 20px 20px;
+    padding: 48px 40px 40px;
+    margin-bottom: 32px;
+  }
+  .cover .tag {
+    display: inline-block;
+    background: rgba(255,255,255,.16);
+    border: 1px solid rgba(255,255,255,.3);
+    border-radius: 999px;
+    padding: 3px 14px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    letter-spacing: 1px;
+  }
+  .cover h1 { font-size: 30px; font-weight: 700; margin-bottom: 10px; }
+  .cover p.sub { font-size: 15px; opacity: .88; max-width: 720px; }
+  .cover .meta { margin-top: 22px; font-size: 13px; opacity: .75; display: flex; gap: 24px; flex-wrap: wrap; }
+
+  /* ===== 数据卡片 ===== */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin: -8px 0 36px; }
+  .stat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 3px rgba(15,23,42,.05);
+  }
+  .stat .num { font-size: 24px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .lbl { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  /* ===== 目录 ===== */
+  nav.toc {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 20px;
+    margin-bottom: 36px;
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    font-size: 14px;
+  }
+  nav.toc a { color: var(--accent); text-decoration: none; font-weight: 500; }
+  nav.toc a:hover { text-decoration: underline; }
+  nav.toc .n { display: inline-block; background: var(--accent-soft); color: var(--accent); border-radius: 6px; width: 20px; height: 20px; text-align: center; line-height: 20px; font-size: 12px; margin-right: 6px; }
+
+  /* ===== 章节 ===== */
+  section { margin-bottom: 44px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; border-bottom: 2px solid var(--border); padding-bottom: 10px; margin-bottom: 20px; }
+  .sec-head .idx { font-size: 26px; font-weight: 800; color: var(--accent); opacity: .28; line-height: 1; }
+  .sec-head h2 { font-size: 21px; font-weight: 700; }
+  h3 { font-size: 16.5px; margin: 24px 0 10px; color: #0f172a; }
+  h3 .bar { display: inline-block; width: 4px; height: 14px; background: var(--accent); border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+  p { margin-bottom: 10px; }
+  ul.plain { margin: 6px 0 12px 22px; }
+  ul.plain li { margin-bottom: 5px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(15,23,42,.04);
+  }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 18px;
+    margin: 14px 0;
+    font-size: 14.5px;
+  }
+  .callout.green { border-left-color: var(--green); background: var(--green-soft); }
+  .callout.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+
+  /* ===== 表格 ===== */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; font-size: 14px; background: var(--card); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(15,23,42,.05); }
+  th { background: #f1f5f9; text-align: left; padding: 10px 14px; font-size: 13.5px; color: #334155; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: #fafcfe; }
+  td.center, th.center { text-align: center; }
+  .ok { color: var(--green); font-weight: 600; }
+  .bad { color: var(--red); font-weight: 600; }
+  .mid { color: var(--amber); font-weight: 600; }
+
+  /* ===== 架构图 ===== */
+  .arch { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0 6px; }
+  .arch .col { border-radius: 12px; padding: 18px 20px; font-size: 14px; }
+  .arch .col.hard { background: #eef4ff; border: 1px solid #c7d9f8; }
+  .arch .col.smart { background: #f0fdf4; border: 1px solid #bbf0cc; }
+  .arch .col h4 { font-size: 15px; margin-bottom: 10px; }
+  .arch .col.hard h4 { color: #1d4ed8; }
+  .arch .col.smart h4 { color: #15803d; }
+  .arch .col ul { margin-left: 18px; }
+  .arch .col li { margin-bottom: 6px; }
+  .arch .plus { text-align: center; align-self: center; font-size: 22px; font-weight: 800; color: var(--muted); }
+  @media (max-width: 720px) { .arch { grid-template-columns: 1fr; } .arch .plus { display: none; } }
+
+  /* ===== 代码块 ===== */
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 10px 0 16px;
+    font-family: "SF Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  pre .cm { color: #7c8db0; }
+  pre .kw { color: #93c5fd; }
+  code.inline {
+    background: #eef2f7;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-size: 13px;
+    font-family: "SF Mono", Consolas, monospace;
+    color: #0f172a;
+  }
+
+  /* ===== 徽章 ===== */
+  .badge { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+  .badge.blue { background: var(--accent-soft); color: var(--accent); }
+  .badge.green { background: var(--green-soft); color: var(--green); }
+  .badge.amber { background: var(--amber-soft); color: var(--amber); }
+  .badge.gray { background: #f1f5f9; color: var(--muted); }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .footer { text-align: center; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--border); padding-top: 18px; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <span class="tag">技术评估汇报 · AI 代码评审</span>
+  <h1>open-code-review（OCR）引入评估</h1>
+  <p class="sub">阿里巴巴开源的 AI 代码评审工具：确定性工程流水线 + LLM 混合架构，为 AI 编码时代的评审环节提供工程化解决方案。本汇报基于官方文档、源码研读与仓库实测试证。</p>
+  <div class="meta">
+    <span>评估对象：alibaba/open-code-review v1.9.10</span>
+    <span>许可证：Apache-2.0</span>
+    <span>汇报日期：2026-08-24</span>
+  </div>
+</div>
+
+<div class="page">
+
+<div class="stats">
+  <div class="stat"><div class="num">21.3k</div><div class="lbl">GitHub Stars</div></div>
+  <div class="stat"><div class="num">30+</div><div class="lbl">语言 / 文件类型规则</div></div>
+  <div class="stat"><div class="num">≈1/9</div><div class="lbl">相对通用 Agent 的 token 消耗</div></div>
+  <div class="stat"><div class="num">1505</div><div class="lbl">基准集人工标注真实问题</div></div>
+</div>
+
+<nav class="toc">
+  <a href="#s1"><span class="n">1</span>特性介绍</a>
+  <a href="#s2"><span class="n">2</span>与提示词直审对比</a>
+  <a href="#s3"><span class="n">3</span>三种接入形式配置</a>
+  <a href="#s4"><span class="n">4</span>总结与建议</a>
+</nav>
+
+<!-- ================= 1 特性 ================= -->
+<section id="s1">
+  <div class="sec-head"><span class="idx">01</span><h2>特性介绍</h2></div>
+
+  <div class="callout">
+    <b>定位</b>：阿里内部运行两年、服务数万开发者后开源的 AI 代码评审工具（CLI 命令 <code class="inline">ocr</code>）。核心思路是——<b>“不许出错”的环节交给工程代码，动态理解交给 LLM</b>，从而解决通用 AI 直审 diff 的三大痛点：<b>大变更集覆盖不全、评论位置漂移、输出质量不稳定</b>。
+  </div>
+
+  <h3><span class="bar"></span>混合架构：确定性工程 × LLM</h3>
+  <div class="arch">
+    <div class="col hard">
+      <h4>确定性工程流水线（硬约束）</h4>
+      <ul>
+        <li><b>五道闸文件过滤</b>：二进制 → 用户排除 → 用户包含 → 扩展名白名单 → 默认测试文件排除</li>
+        <li><b>智能文件捆绑</b>：相关文件打包为一个审查单元（如中英文 properties 对照审），每单元独立 sub-agent 并发</li>
+        <li><b>模板引擎规则匹配</b>：按文件特征细粒度匹配审查清单</li>
+        <li><b>独立评论定位模块</b>：系统性保证“报在哪一行”</li>
+        <li><b>独立内容反思模块</b>：系统性保证“报得对不对”</li>
+      </ul>
+    </div>
+    <div class="col smart">
+      <h4>LLM Agent（动态决策）</h4>
+      <ul>
+        <li><b>场景调优提示模板</b>：针对代码评审深度优化</li>
+        <li><b>蒸馏工具集</b>：从大规模生产数据的工具调用轨迹统计调优（调用频率、重复率）</li>
+        <li>可读完整文件、搜索代码库、查看关联变更</li>
+      </ul>
+      <p style="margin-top:8px;color:#166534;font-size:13px;">→ 同等模型下精度、F1 优于通用 Agent，token 消耗仅约 1/9</p>
+    </div>
+  </div>
+
+  <h3><span class="bar"></span>能力全景</h3>
+  <table>
+    <tr><th style="width:130px">能力</th><th>说明</th></tr>
+    <tr><td><b>四种审查模式</b></td><td>工作区（push 前自查）/ 分支范围（merge-base）/ 单 commit / 全文件扫描（<code class="inline">ocr scan</code>，无需 git 历史，审计陌生代码库）</td></tr>
+    <tr><td><b>会话恢复</b></td><td><code class="inline">ocr session list</code> + <code class="inline">--resume</code>，中断续跑不浪费已耗 token</td></tr>
+    <tr><td><b>四层规则链</b></td><td><code class="inline">--rule</code> 临时 → 项目 <code class="inline">.opencodereview/rule.json</code>（随仓库提交）→ 全局 → 内置系统规则；逐文件先匹配先赢；<code class="inline">merge_system_rule</code> 可叠加内置规则；Kotlin 专有 24 条规则（协程结构化并发、<code class="inline">!!</code> 滥用、资源关闭等）</td></tr>
+    <tr><td><b>委托模式</b></td><td>OCR 只出文件选择 + 规则解析，评审由宿主 AI Agent 用自带模型完成——零 API key、零额外费用</td></tr>
+    <tr><td><b>CI 集成</b></td><td>GitHub Action / GitLab CI 官方模板：增量评论不刷屏、汇总原地更新、低严重度路由、审查会话上传 artifacts、只 checkout 可信 base 防恶意 PR</td></tr>
+    <tr><td><b>Agent 生态</b></td><td>Claude Code / Codex / Cursor / OpenCode 插件与可移植 skill；MCP Server 扩展外部工具</td></tr>
+    <tr><td><b>可观测</b></td><td>Session Viewer 浏览器回放审查会话；OpenTelemetry 遥测；SARIF 2.1.0 输出可入代码扫描平台</td></tr>
+    <tr><td><b>产出结构</b></td><td>行级评论含 path / 行号 / category（bug·security·performance…）/ severity（critical~low）/ 修复建议代码</td></tr>
+  </table>
+
+  <div class="callout green">
+    <b>可信度依据（AACR-Bench）</b>：50 个热门开源仓库、200 个真实 PR、10 种语言，80+ 资深工程师标注 1,505 个真实问题。相同底层模型下，相比 Claude Code 类通用 Agent：<b>Precision 与 F1 显著更高、token 约 1/9、速度更快</b>；Recall 偏低为有意取舍（重精度轻噪音，宁少报不误报）。
+  </div>
+</section>
+
+<!-- ================= 2 对比 ================= -->
+<section id="s2">
+  <div class="sec-head"><span class="idx">02</span><h2>与“直接用提示词评审”的对比</h2></div>
+
+  <p><b>基线方案</b>：把 diff 贴给通用 AI / 编码 Agent，附加一段“你是资深工程师，请评审以下代码”的提示词。这是当前零成本最常见的做法。两者差距不在模型，而在<b>模型外围的工程保障</b>：</p>
+
+  <table>
+    <tr>
+      <th style="width:150px">对比维度</th>
+      <th>提示词直审</th>
+      <th>open-code-review</th>
+    </tr>
+    <tr>
+      <td><b>大变更集覆盖</b></td>
+      <td><span class="bad">✗</span> 上下文窗口有限，几十个文件的 diff 会被截断或选择性忽略，覆盖随规模劣化</td>
+      <td><span class="ok">✓</span> 五道闸精确圈定范围 + 相关文件捆绑分单元，独立 sub-agent 并发，大 PR 全覆盖</td>
+    </tr>
+    <tr>
+      <td><b>评论定位</b></td>
+      <td><span class="bad">✗</span> 位置漂移高发（“第 N 行附近”经常指错行），需要人工二次定位</td>
+      <td><span class="ok">✓</span> 独立定位模块工程化保证行级准确率</td>
+    </tr>
+    <tr>
+      <td><b>输出质量稳定性</b></td>
+      <td><span class="mid">△</span> 取决于提示词写作水平与当日模型状态，不同人/不同次结果差异大</td>
+      <td><span class="ok">✓</span> 场景调优提示模板 + 反思模块 + 从生产轨迹蒸馏的工具集；同模型下 Precision/F1 经基准验证</td>
+    </tr>
+    <tr>
+      <td><b>规则沉淀</b></td>
+      <td><span class="bad">✗</span> 团队规范只能写进提示词口头传递，无版本、无分层、易漂移</td>
+      <td><span class="ok">✓</span> 四层规则链：项目红线沉淀为 <code class="inline">rule.json</code> 随仓库提交、随 diff 生效</td>
+    </tr>
+    <tr>
+      <td><b>成本</b></td>
+      <td>全量上下文反复投喂，token 消耗大</td>
+      <td><b>约 1/9</b>（调优提示模板 + 精确文件选择削减无效 token）</td>
+    </tr>
+    <tr>
+      <td><b>覆盖率问责</b></td>
+      <td><span class="bad">✗</span> 漏审哪些文件无从知晓</td>
+      <td><span class="ok">✓</span> 每个文件落位 reviewed / skipped（附原因），汇总含覆盖率</td>
+    </tr>
+    <tr>
+      <td><b>防刷屏</b></td>
+      <td><span class="bad">✗</span> 每次全量重报</td>
+      <td><span class="ok">✓</span> 增量评论（相似度去重）、汇总原地更新、低严重度路由</td>
+    </tr>
+    <tr>
+      <td><b>接入成本</b></td>
+      <td><span class="ok">✓</span> 零（复制粘贴即用）</td>
+      <td><span class="ok">✓</span> 低（一条命令装 CLI；规则文件一次沉淀长期复用）</td>
+    </tr>
+  </table>
+
+  <div class="callout amber">
+    <b>诚实标注</b>：OCR 的 Recall（查全率）刻意低于通用 Agent——设计哲学是“宁可少报、不许误报”。它的定位是<b>高置信度探测器</b>，与单测、CI 构建、人工评审组成纵深防线，而非替代。另外，提示词直审的灵活性（随意追问、任意上下文）是它的天然优势，两者是互补关系：日常快速判断用直审，正式把关用 OCR。
+  </div>
+</section>
+
+<!-- ================= 3 配置 ================= -->
+<section id="s3">
+  <div class="sec-head"><span class="idx">03</span><h2>三种接入形式的配置方法</h2></div>
+
+  <p>三种形式共享同一套基础设施（CLI + 规则文件），按<b>投入从低到高</b>排列，可并存、可渐进：</p>
+
+  <table>
+    <tr><th>形式</th><th class="center">LLM 来源</th><th class="center">费用</th><th class="center">适用场景</th></tr>
+    <tr><td><b>① 本地委托模式</b></td><td class="center">宿主 Agent 自带模型</td><td class="center ok">零</td><td class="center">日常自查，commit / merge 前</td></tr>
+    <tr><td><b>② Agent Skill（OCR 驱动）</b></td><td class="center">OCR 调用自配端点</td><td class="center mid">API token</td><td class="center">本地高精度正式评审</td></tr>
+    <tr><td><b>③ CI 流水线</b></td><td class="center">OCR 调用自配端点</td><td class="center mid">API token</td><td class="center">MR / PR 自动评审</td></tr>
+  </table>
+
+  <h3><span class="bar"></span>形式 ①：本地委托模式（零配置零费用）</h3>
+  <div class="card">
+    <p><span class="badge green">已完成试点</span> OCR 只负责文件选择与规则解析（<code class="inline">ocr delegate preview</code> + <code class="inline">rule</code>），评审由编码 Agent 在自己会话中执行——对话上下文、工作区规范天然可用，且与写码过程形成<b>独立上下文制衡</b>。</p>
+<pre><span class="cm"># 1. 安装 CLI（要求 Git ≥ 2.41）</span>
+npm install -g @alibaba-group/open-code-review
+
+<span class="cm"># 2. 安装官方现成 skill 到工程（ZCode/Claude Code 等通用发现路径）</span>
+mkdir -p .agents/skills/open-code-review-delegate
+curl -o .agents/skills/open-code-review-delegate/SKILL.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/skills/open-code-review-delegate/SKILL.md
+
+<span class="cm"># 3. 无需任何 LLM 配置。对 Agent 说「用委托模式评审当前改动」即触发：</span>
+<span class="cm">#    preview 选文件 → rule 出规则 → Agent 取 diff 逐文件审 → 分级报告</span></pre>
+    <p style="font-size:13.5px;color:var(--muted)">审查范围支持：工作区变更（默认）/ 分支对比 / 单 commit；报告按 Critical/High/Medium 分级，Low 默认丢弃防噪。</p>
+  </div>
+
+  <h3><span class="bar"></span>形式 ②：Agent Skill —— OCR 驱动的本地评审</h3>
+  <div class="card">
+    <p>宿主 Agent 只做调度与汇报，评审由 OCR 完整管线执行——吃到<b>智能捆绑、定位模块、反思模块</b>的全部工程红利，精度最高。需配置 LLM 端点（任意 OpenAI 兼容 / Anthropic 协议，现有供应商可直接复用）。</p>
+<pre><span class="cm"># 1. 安装 CLI 后交互式配置供应商（含连通性测试）</span>
+ocr config provider
+
+<span class="cm"># 2. 安装 OCR 驱动版 skill</span>
+mkdir -p .agents/skills/open-code-review
+curl -o .agents/skills/open-code-review/SKILL.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/skills/open-code-review/SKILL.md
+
+<span class="cm"># 3. 也可直接手动调用：完整管线评审（--background 注入业务背景收益最高）</span>
+ocr review --audience agent -b <span class="kw">"需求背景"</span> --from origin/master --to feat/xxx --format json</pre>
+    <p style="font-size:13.5px;color:var(--muted)">输出为结构化 JSON：每条评论含行号、category、severity 与修复建议代码；Agent 会按严重度分组汇报，并在用户要求时自动修复。</p>
+  </div>
+
+  <h3><span class="bar"></span>形式 ③：CI 流水线（GitHub Action / GitLab CI）</h3>
+  <div class="card">
+    <p><b>GitHub</b>——官方 Action 一行接入，评论自动以行级形式发到 PR：</p>
+<pre>mkdir -p .github/workflows
+curl -o .github/workflows/ocr-review.yml \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/github_actions/ocr-review.yml
+
+<span class="cm"># 在 Settings → Secrets 配置：OCR_LLM_URL / OCR_LLM_AUTH_TOKEN / OCR_LLM_MODEL</span></pre>
+    <p><b>GitLab</b>——官方流水线模板同样一条命令，MR 触发、行级 Discussion 回帖：</p>
+<pre>curl -o .gitlab-ci.yml \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gitlab_ci/.gitlab-ci.yml
+
+<span class="cm"># Settings → CI/CD → Variables：</span>
+<span class="cm">#   OCR_LLM_URL / OCR_LLM_AUTH_TOKEN（Masked）/ OCR_LLM_MODEL</span>
+<span class="cm">#   GITLAB_API_TOKEN（可选，api scope；缺省回退 CI_JOB_TOKEN）</span></pre>
+    <p style="font-size:13.5px;color:var(--muted)">内置防刷屏（增量评论、汇总原地更新）、限流退避、fork MR 支持；建议初期「只评论不阻塞」，统计信噪比后再决定是否按 severity 设门禁。</p>
+  </div>
+
+  <h3><span class="bar"></span>三形式共用：项目规则层</h3>
+  <div class="card">
+    <p>团队规范沉淀在仓库根 <code class="inline">.opencodereview/rule.json</code>（随仓库提交，三种形式自动生效）：路径 glob 挂载红线、<code class="inline">merge_system_rule: true</code> 与内置语言规则叠加、<code class="inline">include</code> 可将默认排除的测试文件拉回评审范围。</p>
+<pre>{
+  <span class="kw">"rules"</span>: [
+    {
+      <span class="kw">"path"</span>: "**/data/local/AppDatabase.kt",
+      <span class="kw">"merge_system_rule"</span>: true,
+      <span class="kw">"rule"</span>: <span class="kw">"【红线】改 schema 必须三件事同步：entities/version 更新、新增 Migration 并注册、version +1……"</span>
+    }
+  ]
+}</pre>
+    <p style="font-size:13.5px;color:var(--muted)">试点仓库已沉淀 11 条规则 12 处红线（数据库迁移、外部数据单位纪律、架构约束、UI 规范等），逐类文件命中实测通过。</p>
+  </div>
+</section>
+
+<!-- ================= 4 总结 ================= -->
+<section id="s4">
+  <div class="sec-head"><span class="idx">04</span><h2>总结与建议</h2></div>
+
+  <div class="callout green">
+    <b>结论：建议引入，分阶段推进。</b>工具免费开源（Apache-2.0），唯一成本是 LLM 调用费用且约为通用方案 1/9；本地委托模式零费用即可启动；接入成本一条命令级；试点验证已完成。
+  </div>
+
+  <table>
+    <tr><th style="width:170px">阶段</th><th>内容</th><th class="center" style="width:100px">状态 / 成本</th></tr>
+    <tr>
+      <td><b>一：本地委托模式</b></td>
+      <td>开发者通过编码 Agent 触发委托评审，写码 / 查码独立上下文制衡；规则层沉淀团队红线</td>
+      <td class="center"><span class="badge green">已就绪</span>零费用</td>
+    </tr>
+    <tr>
+      <td><b>二：CI 自动评审</b></td>
+      <td>PR / MR 触发，先「只评论不阻塞」，统计信噪比与 token 用量；项目规则自动生效</td>
+      <td class="center"><span class="badge blue">待批准</span>token 按量</td>
+    </tr>
+    <tr>
+      <td><b>三：质量门禁</b></td>
+      <td>视试点数据决定是否将 critical 级发现设为合并门禁</td>
+      <td class="center"><span class="badge gray">视数据</span>—</td>
+    </tr>
+  </table>
+
+  <h3><span class="bar"></span>风险与对策</h3>
+  <table>
+    <tr><th style="width:150px">风险</th><th>等级</th><th>对策</th></tr>
+    <tr><td>代码发送至 LLM 端点（数据安全）</td><td class="center mid">中</td><td>选用国内合规端点或私有化部署模型，需管理层拍板选型</td></tr>
+    <tr><td>误报骚扰开发者</td><td class="center ok">低</td><td>产品设计即“宁缺毋滥”；低严重度路由、增量去重、初期不阻塞</td></tr>
+    <tr><td>依赖外部开源项目</td><td class="center ok">低</td><td>Apache-2.0 无商用限制；CLI 可锁版本，规则文件自主可控</td></tr>
+  </table>
+
+  <h3><span class="bar"></span>试点验证记录（本仓库）</h3>
+  <ul class="plain">
+    <li>CLI v1.9.10 安装、委托模式 preview / rule 命令输出全部正常；</li>
+    <li>官方 skill 已装入工程，端到端走通一次真实改动的完整评审流程（含单测覆盖核查）；</li>
+    <li>项目规则层 11 条规则逐类文件实测命中正确，merge 叠加、测试文件 include、声明顺序修正均验证通过。</li>
+  </ul>
+
+  <h3><span class="bar"></span>需要决策的两点</h3>
+  <ul class="plain">
+    <li><b>是否批准第二阶段 CI 接入</b>及试点范围（建议先 1~2 个活跃仓库）；</li>
+    <li><b>LLM 端点选型</b>：复用现有供应商 / 指定国内端点 / 私有化部署——涉及代码数据安全口径。</li>
+  </ul>
+</section>
+
+<div class="footer">
+  open-code-review 技术评估汇报 · 2026-08-24 · 数据来源：官方文档、仓库源码、AACR-Bench 基准报告及本仓库实测
+</div>
+
+</div>
+</body>
+</html>

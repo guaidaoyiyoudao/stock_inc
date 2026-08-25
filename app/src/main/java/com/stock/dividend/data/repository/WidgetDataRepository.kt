@@ -89,7 +89,12 @@ class WidgetDataRepository @Inject constructor(
                     currentPrice = price,
                     gridType = GridType.fromRaw(plan.gridType),
                     dps = plan.dpsPerShare,
-                    levelWeights = GridLevelWeights.parse(plan.levelWeights)
+                    levelWeights = GridLevelWeights.parse(plan.levelWeights),
+                    // 波段三参数（2026-08-24 评审修复补传）：漏传时 Widget「下一买档」与
+                    // App 今日页口径不一致（波段卖出后可再买的档仍被标记占用）
+                    swingMode = plan.swingMode,
+                    swingStepPercent = plan.swingStepPercent,
+                    swingRatioPercent = plan.swingRatioPercent
                 ),
                 txsByStock[plan.stockCode].orEmpty()
             )

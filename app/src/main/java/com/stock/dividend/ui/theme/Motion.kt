@@ -4,7 +4,6 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.ui.unit.IntOffset
 
 /**
  * 全 App 统一动效 token（Material Motion 节奏）。
@@ -37,6 +36,3 @@ object Motion {
     /** 线性（无限循环类动画专用：shimmer 高光、波浪滚动）。 */
     val Linear: Easing = LinearEasing
 }
-
-/** 水平滑入滑出的 IntOffset 工厂（导航转场用，slideInHorizontally 传 lambda）。 */
-fun motionSlideOffset(fullOffset: Int): IntOffset = IntOffset(fullOffset, 0)

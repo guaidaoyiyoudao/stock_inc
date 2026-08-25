@@ -66,7 +66,12 @@ class GetGridPlansTool(
                         currentPrice = price,
                         gridType = GridType.fromRaw(plan.gridType),
                         dps = plan.dpsPerShare,
-                        levelWeights = GridLevelWeights.parse(plan.levelWeights)
+                        levelWeights = GridLevelWeights.parse(plan.levelWeights),
+                        // 波段三参数（2026-08-24 评审修复补传）：漏传时波段计划被当纯买入
+                        // 口径计算——SELL 不释放档位、下一买股数/弹药口径全错
+                        swingMode = plan.swingMode,
+                        swingStepPercent = plan.swingStepPercent,
+                        swingRatioPercent = plan.swingRatioPercent
                     ),
                     planTxs
                 )
@@ -80,8 +85,11 @@ class GetGridPlansTool(
                     put("grids", plan.grids)
                     put("gridType", plan.gridType)        // ARITH 等差 / GEOM 等比 / YIELD 按股息率
                     put("totalCapital", plan.totalCapital)
-                    // 按股息率计划：补档位分布口径（档位价 = 年分红 ÷ 股息率）
-                    if (plan.gridType == "YIELD" && plan.dpsPerShare != null && plan.dpsPerShare > 0.0) {
+                    // 按股息率计划：补档位分布口径（档位价 = 年分红 ÷ 股息率）；
+                    // basePrice/lowPrice 非法（≤0，validationError 已标）时不产出 NaN% 文案
+                    if (plan.gridType == "YIELD" && plan.dpsPerShare != null && plan.dpsPerShare > 0.0 &&
+                        plan.basePrice > 0.0 && plan.lowPrice > 0.0
+                    ) {
                         put("yieldRange",
                             "按股息率 ${"%.2f".format(plan.dpsPerShare / plan.basePrice * 100.0)}%" +
                                 "→${"%.2f".format(plan.dpsPerShare / plan.lowPrice * 100.0)}% 分档" +

@@ -180,9 +180,11 @@ fun PortfolioScreen(
 
     var holdingsExpanded by remember { mutableStateOf(true) }
 
-    // FIRE 达标撒花：覆盖率从 <100% 跨到 ≥100% 的瞬间庆祝一次（每次会话仅一次，刷新不重复）
+    // FIRE 达标撒花：覆盖率从 <100% 跨到 ≥100% 的瞬间庆祝一次（每次会话仅一次，刷新不重复）。
+    // celebrated 用 rememberSaveable 跨组合重建/切 Tab 保留（导航返回栈条目内）——
+    // 修复此前 plain remember 切 Tab 回来即复位、已达 100% 用户每次进持仓页重复撒花（2026-08-24 评审修复）
     var fireCelebration by remember { mutableStateOf(false) }
-    var fireCelebrated by remember { mutableStateOf(false) }
+    var fireCelebrated by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(uiState.fireProgress) {
         val p = uiState.fireProgress
         if (p != null && p >= 100f && !fireCelebrated) {

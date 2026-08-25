@@ -16,9 +16,13 @@ enum class TodaySignalType {
 
 /**
  * 单条今日信号（纯数据，UI 据此渲染一行）。
- * @param sortPriority 排序权重，小者在前（BUY=0 / SELL=1 / GRID=1 / DIVIDEND=2）。
- * @param key LazyColumn 稳定唯一键（buy-{code} / gridsell-{planId} / grid-{planId} / div-{code}）。
- *   ⚠️ 不可用 stockCode+type 组合——同股多套网格计划会产生多条 GRID 信号，
+ * @param sortPriority 排序权重，小者在前。全量权重表：
+ *   BUY_TRIGGER=0 / STRATEGY_DCA=0 / SELL_TRIGGER=1 / GRID_NEXT_LEVEL=1 /
+ *   STRATEGY_SELL=1 / DIVIDEND_COUNTDOWN=2。
+ * @param key LazyColumn 稳定唯一键（前缀区分信号源，全量清单：
+ *   buy-{code} / gridsell-{planId} / grid-{planId} / strategydca-{planId} /
+ *   strategysell-{planId} / div-{code}）。
+ *   ⚠️ 不可用 stockCode+type 组合——同股多套网格/策略计划会产生多条 GRID/STRATEGY 信号，
  *   key 撞车会在今日页滚动到信号区时抛「Key was already used」闪退（2026-08-16 修复）。
  */
 data class TodaySignal(
@@ -210,18 +214,21 @@ object TodaySignalAggregator {
                 input.gridTransactionsByStock[plan.stockCode].orEmpty()
             )
             if (result.validationError != null) continue
-            // 已到达（现价 ≥ 卖出锚）的在持档中最高的一档
+            // 已到达（现价 ≥ 卖出锚）的在持档中最高的一档——pairedSellPrice 与档位配对取出，
+            // 后续全部用局部变量，不再重复非空断言
             val reached = result.levels
-                .filter { it.triggered && it.pairedSellPrice != null && current >= it.pairedSellPrice!! }
-                .maxByOrNull { it.pairedSellPrice!! }
+                .mapNotNull { level -> level.pairedSellPrice?.let { level to it } }
+                .filter { (level, sellPrice) -> level.triggered && current >= sellPrice }
+                .maxByOrNull { it.second }
                 ?: continue
+            val (reachedLevel, reachedSellPrice) = reached
             out += TodaySignal(
                 type = TodaySignalType.SELL_TRIGGER,
                 stockCode = plan.stockCode,
                 stockName = plan.stockName,
                 title = "波段网格到卖出档",
                 detail = "现价 %.2f ≥ 卖出锚 %.2f，减仓波段 %d 股（底仓不动）".format(
-                    current, reached.pairedSellPrice!!, reached.swingShares
+                    current, reachedSellPrice, reachedLevel.swingShares
                 ),
                 sortPriority = 1,
                 key = "gridsell-${plan.id}",  // 与买入侧信号（grid-）分键，互不顶替

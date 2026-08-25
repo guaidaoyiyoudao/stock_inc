@@ -8,6 +8,7 @@ import com.stock.dividend.data.remote.dto.LlmImageUrl
 import com.stock.dividend.data.remote.dto.LlmMessage
 import com.stock.dividend.data.scan.ParsedHoldingRow
 import com.stock.dividend.data.scan.bitmapToJpegDataUrl
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -85,7 +86,9 @@ class VisionImportRepository @Inject constructor(
             } catch (e: HttpException) {
                 if (isRetryableHttp(e.code())) RetryableFailure(mapHttpError(e.code()))
                 else return VisionImportResult.Error(mapHttpError(e.code()))
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                // 用户取消（页面退出等）不是网络错误：误判为可重试会让已取消的任务继续打 5 轮接口
+                if (e is CancellationException) throw e
                 RetryableFailure("网络错误")
             }
             if (retry >= MAX_RETRIES) {

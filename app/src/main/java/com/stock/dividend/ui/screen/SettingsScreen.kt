@@ -99,7 +99,7 @@ fun SettingsScreen(
         )
         SettingsNavRow(
             title = settingsGroupTitles[5],
-            description = "年线定投：低于年线定投、高于阈值卖出（仅提示，不下单）",
+            description = "止盈/股息率带/双均线/年线定投等 8 种策略信号（仅提示，不下单）",
             icon = Icons.Filled.Timeline,
             onClick = onOpenStrategyPlan
         )

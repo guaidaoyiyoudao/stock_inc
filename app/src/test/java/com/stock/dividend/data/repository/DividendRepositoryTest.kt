@@ -1,7 +1,9 @@
 package com.stock.dividend.data.repository
 
+import androidx.room.withTransaction
 import com.google.common.truth.Truth.assertThat
 import com.google.gson.JsonObject
+import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.remote.DividendApi
@@ -14,9 +16,12 @@ import com.stock.dividend.di.TencentDividendSource
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.mockkStatic
 import io.mockk.slot
+import io.mockk.unmockkStatic
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import retrofit2.HttpException
@@ -34,7 +39,10 @@ class DividendRepositoryTest {
     private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi = mockk()
     private val fuyaoConfig: FuyaoConfig = mockk(relaxed = true)
     private val dao: DividendDao = mockk(relaxed = true)
-    private val repository = DividendRepository(tencentApi, eastMoneyApi, fundDividendApi, fuyaoApi, fuyaoConfig, dao)
+    private val appDatabase: AppDatabase = mockk(relaxed = true)
+    private val repository = DividendRepository(
+        tencentApi, eastMoneyApi, fundDividendApi, fuyaoApi, fuyaoConfig, dao, appDatabase
+    )
 
     @Before
     fun setUp() {
@@ -44,6 +52,17 @@ class DividendRepositoryTest {
         )
         // 默认扶摇未配置（relaxed Boolean=false），存量用例全部走腾讯/f10 现状路径
         coEvery { fuyaoConfig.enabled } returns false
+        // Room 的 withTransaction 扩展函数默认会走真实 DB 事务，单测里 mock 为「直接执行 block」
+        mockkStatic("androidx.room.RoomDatabaseKt")
+        val blockSlot = slot<suspend () -> Any>()
+        coEvery { appDatabase.withTransaction(capture(blockSlot)) } coAnswers {
+            blockSlot.captured.invoke()
+        }
+    }
+
+    @After
+    fun tearDown() {
+        unmockkStatic("androidx.room.RoomDatabaseKt")
     }
 
     /** 构造一条 qfqday 记录：前 6 个是 OHLCV 字符串，第 7 个是分红对象（可为 null 表示无分红）。 */
@@ -784,6 +803,50 @@ class DividendRepositoryTest {
         val scheduled = entities.first { it.exDividendDate == "2026-12-15" }
         assertThat(scheduled.cashPerShare).isWithin(1e-9).of(0.13)
         assertThat(scheduled.reportDate).isEqualTo("2026-06-30")
+    }
+
+    @Test
+    fun `fuyao pure bonus events are ingested with exDate for kline drift detection`() = runTest {
+        coEvery { fuyaoConfig.enabled } returns true
+        // 事件流：纯送转（现金 0 + 每股送转 0.5）+ 混合（派现 0.3 + 送转 0.2）+ 双零事件（应丢弃）
+        coEvery { fuyaoApi.getAdjustmentFactors(any(), any(), any()) } returns
+            com.stock.dividend.data.remote.dto.FuyaoEnvelope(
+                code = 0, message = "success", requestId = "t",
+                data = com.stock.dividend.data.remote.dto.FuyaoAdjustmentFactorsData(
+                    thscode = "600XXX.SH", ticker = "600XXX",
+                    item = listOf(
+                        com.stock.dividend.data.remote.dto.FuyaoAdjustmentItem(
+                            exDateMs = msOf("2024-06-20"), dividendPerShare = 0.0, perShareBonus = 0.5
+                        ),
+                        com.stock.dividend.data.remote.dto.FuyaoAdjustmentItem(
+                            exDateMs = msOf("2026-05-13"), dividendPerShare = 0.3, perShareBonus = 0.2
+                        ),
+                        com.stock.dividend.data.remote.dto.FuyaoAdjustmentItem(
+                            exDateMs = msOf("2023-05-10"), dividendPerShare = 0.0
+                        )
+                    )
+                )
+            )
+        // 东财 enrich 无数据：静默返回原列表
+        coEvery { eastMoneyApi.getDividends(filter = any()) } returns DividendResponse(
+            success = true, result = DividendResponse.DividendResult(data = emptyList())
+        )
+        val entitiesSlot = mutableListOf<List<DividendEntity>>()
+        coEvery { dao.insertAll(capture(entitiesSlot)) } returns Unit
+
+        repository.fetchAndCacheDividends("sh.600XXX", "600XXX")
+
+        val entities = entitiesSlot.last()
+        assertThat(entities).hasSize(2)   // 双零事件不落行
+        // 纯送转行：cashPerShare=0 + bonusPerShare 落库——exDividendDate 是 K 线漂移检测
+        // （DividendDao.getLatestExDividendDate = MAX(exDividendDate)）感知送转除权的唯一信号
+        val pureBonus = entities.first { it.exDividendDate == "2024-06-20" }
+        assertThat(pureBonus.cashPerShare).isWithin(1e-9).of(0.0)
+        assertThat(pureBonus.bonusPerShare).isWithin(1e-9).of(0.5)
+        // 混合行：现金与送转并存
+        val mixed = entities.first { it.exDividendDate == "2026-05-13" }
+        assertThat(mixed.cashPerShare).isWithin(1e-9).of(0.3)
+        assertThat(mixed.bonusPerShare).isWithin(1e-9).of(0.2)
     }
 
     @Test

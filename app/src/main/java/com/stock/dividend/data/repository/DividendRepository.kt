@@ -1,6 +1,8 @@
 package com.stock.dividend.data.repository
 
+import androidx.room.withTransaction
 import com.google.gson.Gson
+import com.stock.dividend.data.local.AppDatabase
 import com.stock.dividend.data.local.dao.DividendDao
 import com.stock.dividend.data.local.entity.DividendEntity
 import com.stock.dividend.data.remote.DividendApi
@@ -29,7 +31,8 @@ class DividendRepository @Inject constructor(
     private val fundDividendApi: FundDividendApi,
     private val fuyaoApi: com.stock.dividend.data.remote.FuyaoApi,
     private val fuyaoConfig: FuyaoConfig,
-    private val dividendDao: DividendDao
+    private val dividendDao: DividendDao,
+    private val appDatabase: AppDatabase,
 ) {
     /**
      * 拉取并写入分红记录。
@@ -74,17 +77,21 @@ class DividendRepository @Inject constructor(
                 return Result.success(Unit)
             }
 
-            dividendDao.deleteByIds(stockCode, entities.map { it.id }.distinct())
-            entities.mapNotNull { it.exDividendDate }.distinct().takeIf { it.isNotEmpty() }?.let {
-                // 腾讯(id=code_exDate)与东财(id=code_reportDate)两种 id 方案按除权日跨源去重
-                dividendDao.deleteByStockAndExDates(stockCode, it)
+            // 删+插必须同一事务（AGENTS §4.3）：中途失败会留下「已删旧、未插新」——
+            // 历史分红不可再生，丢行比暂时不更新更糟
+            appDatabase.withTransaction {
+                dividendDao.deleteByIds(stockCode, entities.map { it.id }.distinct())
+                entities.mapNotNull { it.exDividendDate }.distinct().takeIf { it.isNotEmpty() }?.let {
+                    // 腾讯(id=code_exDate)与东财(id=code_reportDate)两种 id 方案按除权日跨源去重
+                    dividendDao.deleteByStockAndExDates(stockCode, it)
+                }
+                if (usedEastMoneyFallback) {
+                    // 东财全量路径携带预案信息：清洗已取消/失效的预案行（exDate=null 且不在本次结果中）。
+                    // 腾讯只返回已实施分红、不携带预案，不能据其清洗。
+                    dividendDao.deleteStalePendingByStock(stockCode, entities.map { it.id })
+                }
+                dividendDao.insertAll(entities)
             }
-            if (usedEastMoneyFallback) {
-                // 东财全量路径携带预案信息：清洗已取消/失效的预案行（exDate=null 且不在本次结果中）。
-                // 腾讯只返回已实施分红、不携带预案，不能据其清洗。
-                dividendDao.deleteStalePendingByStock(stockCode, entities.map { it.id })
-            }
-            dividendDao.insertAll(entities)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(Exception(e.toUserMessage(), e))
@@ -175,7 +182,10 @@ class DividendRepository @Inject constructor(
 
     /**
      * 扶摇股票分红事件流（主源）：**一次请求返回全部已除权历史**（替代腾讯三块各 2 年的分块请求），
-     * `dividend_per_share` 已是每股现金口径（无每10股换算）。纯送股事件（现金=0）无字段承载、跳过。
+     * `dividend_per_share` 已是每股现金口径（无每10股换算）。现金与送转（`per_share_bonus`）**任一 > 0
+     * 即落行**——纯送转行 cashPerShare=0 + bonusPerShare>0：送转同样整体位移前复权历史，落行后
+     * K 线漂移检测（MAX(exDividendDate)）才能感知（2026-08-20 审计 M4-1 盲区修复；腾讯候补源
+     * 无送转字段、东财回退源按现金过滤，该两路径维持已知限制）。
      * 事件流**无报告期与预案状态**：reportDate 先按除权年占位，由 [enrichAndMergeFromEastMoney]
      * 按除权日对齐回填东财准确报告期；「已排期未除权」仍由东财通道合并。
      * 失败/信封非 0 抛异常 → 调用方降级腾讯路径。
@@ -186,13 +196,16 @@ class DividendRepository @Inject constructor(
         val envelope = fuyaoApi.getAdjustmentFactors(thscode = thscode)
         check(envelope.isOk) { "扶摇分红事件流失败: code=${envelope.code} ${envelope.message}" }
         return envelope.data?.item.orEmpty().mapNotNull { item ->
-            val cashPerShare = item.dividendPerShare?.takeIf { it > 0.0 } ?: return@mapNotNull null
+            val cash = item.dividendPerShare?.takeIf { it > 0.0 } ?: 0.0
+            val bonus = item.perShareBonus?.takeIf { it > 0.0 }
+            if (cash <= 0.0 && bonus == null) return@mapNotNull null
             val exDate = item.exDateMs.fuyaoMsToDateStringOrNull() ?: return@mapNotNull null
             DividendEntity(
                 id = "${stockCode}_${exDate}",
                 stockCode = stockCode,
                 reportDate = "${exDate.substringBefore("-")}-12-31", // 占位，东财 enrich 回填准确报告期
-                cashPerShare = cashPerShare,
+                cashPerShare = cash,
+                bonusPerShare = bonus,
                 dividendYield = null,
                 exDividendDate = exDate,
                 recordDate = null,

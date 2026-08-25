@@ -152,6 +152,32 @@ class StockRepositoryTest {
     }
 
     @Test
+    fun `searchStocks east money fallback prices keyed by app sh-sz format`() = runTest {
+        // 扶摇未配置（默认态）：东财 ulist 兜底价格必须按 sh./sz. key 关联——此前误用
+        // "1.600036" 形态 key，与 priceMap[item.code]（sh.600036）永不匹配，价格恒 null
+        coEvery { api.searchStocks(input = "平安银行") } returns StockSearchResponse(
+            quotationCodeTable = StockSearchResponse.QuotationCodeTable(
+                Data = listOf(
+                    StockSearchResponse.StockItem(
+                        Code = "000001", Name = "平安银行", MktNum = "0",
+                        SecurityTypeName = "深A", Classify = "AStock"
+                    )
+                )
+            )
+        )
+        coEvery { quoteApi.getQuotes(secids = "0.000001") } returns QuoteResponse(
+            data = QuoteData(
+                diff = listOf(QuoteItem(price = 1109.0, code = "000001", market = 0))
+            )
+        )
+
+        val result = repository.searchStocks("平安银行")
+
+        assertThat(result.isSuccess).isTrue()
+        assertThat(result.getOrNull()!![0].currentPrice).isWithin(0.01).of(11.09)   // 股票 ÷100
+    }
+
+    @Test
     fun `searchStocks returns user-friendly message on timeout`() = runTest {
         coEvery { api.searchStocks(input = any()) } throws SocketTimeoutException("timeout")
 
@@ -1124,6 +1150,31 @@ class StockRepositoryTest {
             code = 0, message = "success", requestId = "t",
             data = com.stock.dividend.data.remote.dto.FuyaoSnapshotData(item = items.toList())
         )
+
+    @Test
+    fun `multiple funds fetched concurrently all land in snapshot map`() = runTest {
+        // 2026-08-24 评审修复回归：基金逐只 async 并发，此前各协程并发写同一非线程安全
+        // mutableMap 可能丢写——改为各 async 返回局部结果、awaitAll 后顺序合并
+        coEvery { fuyaoConfig.enabled } returns true
+        val stocks = listOf(
+            StockEntity(code = "sh.510880", name = "红利ETF", marketCode = "1"),
+            StockEntity(code = "sz.159905", name = "红利ETF工银", marketCode = "0")
+        )
+        coEvery { fuyaoApi.getFundSnapshot(thscode = "510880.SH") } returns fuyaoSnapshotEnvelope(
+            fuyaoPriceItem("510880.SH", 3.387)
+        )
+        coEvery { fuyaoApi.getFundSnapshot(thscode = "159905.SZ") } returns fuyaoSnapshotEnvelope(
+            fuyaoPriceItem("159905.SZ", 1.212)
+        )
+        coEvery { quoteApi.getQuotes(secids = any()) } returns QuoteResponse(
+            data = QuoteData(diff = emptyList())
+        )
+
+        val snapshots = repository.fetchQuoteSnapshots(stocks)
+
+        assertThat(snapshots["sh.510880"]!!.price).isWithin(1e-9).of(3.387)
+        assertThat(snapshots["sz.159905"]!!.price).isWithin(1e-9).of(1.212)
+    }
 
     @Test
     fun `quotes use fuyao as authoritative with eastmoney field supplement`() = runTest {

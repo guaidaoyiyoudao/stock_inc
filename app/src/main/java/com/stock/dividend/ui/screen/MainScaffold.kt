@@ -33,8 +33,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.stock.dividend.ui.navigation.LocalNavAnimatedVisibilityScope
-import com.stock.dividend.ui.navigation.LocalSharedTransitionScope
+import com.stock.dividend.ui.component.LocalNavAnimatedVisibilityScope
+import com.stock.dividend.ui.component.LocalSharedTransitionScope
 import com.stock.dividend.ui.navigation.NavTransitions
 import com.stock.dividend.ui.navigation.TabEnterTransition
 import com.stock.dividend.ui.navigation.TabExitTransition

@@ -226,6 +226,53 @@ class ForecastCalculatorTest {
     }
 
     @Test
+    fun `scheduled next interim superseded its own last cycle peer instead of double counting`() {
+        // 中国平安实测场景（today=2026-08-23）：中期除权日历年几乎不漂移——
+        // 2025 中期除权 2025-10-10、2026 中期已排期 2026-10-09，间隔 364 天 ≤ 365；
+        // 锚点前移至 2026-10-09 后窗口 (2025-10-09, 2026-10-09] 把 2025 中期压线留在窗内，
+        // 旧口径三笔全罩（2025中期+2025末期+2026中期）= 1.5 个派息周期，股息率虚高约 50%。
+        // 正确语义：新中期替代上一轮中期，TTM = 末期 + 新中期（一轮完整派息，且反映最新中期水平）
+        val dividends = listOf(
+            makeExDividend(reportDate = "2024-12-31", exDividendDate = "2024-10-11", cashPerShare = 0.93),
+            makeExDividend(reportDate = "2024-12-31", exDividendDate = "2025-06-25", cashPerShare = 1.62),
+            makeExDividend(reportDate = "2025-06-30", exDividendDate = "2025-10-10", cashPerShare = 0.93),
+            makeExDividend(reportDate = "2025-12-31", exDividendDate = "2026-06-25", cashPerShare = 1.62),
+            makeExDividend(reportDate = "2026-06-30", exDividendDate = "2026-10-09", cashPerShare = 0.95)
+        )
+
+        val dps = ForecastCalculator.latestYearlyCashPerShare(
+            dividends, today = LocalDate.parse("2026-08-23")
+        )
+
+        // 2025 末期 1.62 + 2026 中期 0.95；不得再叠加 2025 中期 0.93
+        assertThat(dps).isWithin(1e-9).of(1.62 + 0.95)
+    }
+
+    @Test
+    fun `rolling window older than ttm also drops cycle peer double counting`() {
+        // 派息节奏漂移场景：周期对都压在 k=1 窗口内——2024 中期 2024-11-05 与 2025 中期
+        // 2025-09-10 间隔 10 个月（同周期双计），k=1 窗口 (2024-10-09, 2025-10-09] 三笔全罩；
+        // 去重后 w1 = 2024 末期 + 2025 中期（一轮），与 w0 同口径
+        val dividends = listOf(
+            makeExDividend(reportDate = "2024-06-30", exDividendDate = "2024-11-05", cashPerShare = 0.90),
+            makeExDividend(reportDate = "2024-12-31", exDividendDate = "2025-06-20", cashPerShare = 1.60),
+            makeExDividend(reportDate = "2025-06-30", exDividendDate = "2025-09-10", cashPerShare = 0.92),
+            makeExDividend(reportDate = "2025-12-31", exDividendDate = "2026-06-25", cashPerShare = 1.62),
+            makeExDividend(reportDate = "2026-06-30", exDividendDate = "2026-10-09", cashPerShare = 0.95)
+        )
+        val today = LocalDate.parse("2026-08-23")
+
+        // w0 = (2025-10-09, 2026-10-09] = 2025 末期 + 2026 中期
+        val dps = ForecastCalculator.latestYearlyCashPerShare(dividends, today = today)
+        assertThat(dps).isWithin(1e-9).of(1.62 + 0.95)
+
+        // w1 = (2024-10-09, 2025-10-09] 去重后 = 2024 末期 1.60 + 2025 中期 0.92（剔 2024 中期）
+        val avg = ForecastCalculator.calculateAvgCashPerShare(dividends, years = 2, today = today)!!
+        assertThat(avg.avgCashPerShare).isWithin(1e-9).of(((1.62 + 0.95) + (1.60 + 0.92)) / 2.0)
+        assertThat(avg.actualYears).isEqualTo(2)
+    }
+
+    @Test
     fun `no recent ex dates falls back to latest report year group`() {
         // 无 exDate 的历史数据（旧口径兼容）：最新报告年 2024 两笔合计 0.25
         val dividends = listOf(

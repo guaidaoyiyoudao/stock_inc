@@ -120,4 +120,9 @@ class AchievementViewModel @Inject constructor(
             }.collect {}
         }
     }
+
+    /** 一次性庆祝事件消费（2026-08-24 评审修复）：UI 撒花后调用，重进页面/重建不再重复触发。 */
+    fun consumeNewlyUnlocked() {
+        _uiState.value = _uiState.value.copy(newlyUnlockedIds = emptyList())
+    }
 }

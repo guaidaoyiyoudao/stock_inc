@@ -105,6 +105,17 @@ class VisionImportParserTest {
     }
 
     @Test
+    fun `dates with time suffix are stripped before parsing`() {
+        // 券商成交时间常带时分秒（§4.9.6 报告期归一化先例）：剥掉后缀再解析，不再整条归 null
+        assertThat(VisionImportParser.normalizeDate("2026-08-01 09:30:15")).isEqualTo("2026-08-01")
+        assertThat(VisionImportParser.normalizeDate("2026/8/1 09:30")).isEqualTo("2026-08-01")
+        assertThat(VisionImportParser.normalizeDate("2026年8月1日 15:00:00")).isEqualTo("2026-08-01")
+        assertThat(VisionImportParser.normalizeDate(" 2026-08-01 09:30:15 ")).isEqualTo("2026-08-01")
+        // 剥掉后缀后仍非法的照旧归 null
+        assertThat(VisionImportParser.normalizeDate("not a date 09:30:15")).isNull()
+    }
+
+    @Test
     fun `type normalization covers synonyms`() {
         assertThat(VisionImportParser.normalizeType("买入")).isEqualTo("BUY")
         assertThat(VisionImportParser.normalizeType("证券买入")).isEqualTo("BUY")

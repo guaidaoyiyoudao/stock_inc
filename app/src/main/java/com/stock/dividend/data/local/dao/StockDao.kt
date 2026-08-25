@@ -21,6 +21,10 @@ interface StockDao {
     @Query("SELECT * FROM stocks WHERE code = :code")
     suspend fun getByCode(code: String): StockEntity?
 
+    /** 按代码列表批量取实体（单次 IN 查询；数据平面 getPricesForCodes 取齐自选股用）。 */
+    @Query("SELECT * FROM stocks WHERE code IN (:codes)")
+    suspend fun getByCodes(codes: List<String>): List<StockEntity>
+
     @Query("SELECT * FROM stocks WHERE code = :code")
     fun observeByCode(code: String): Flow<StockEntity?>
 

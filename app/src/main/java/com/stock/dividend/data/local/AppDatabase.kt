@@ -11,6 +11,7 @@ import com.stock.dividend.data.local.dao.ErrorLogDao
 import com.stock.dividend.data.local.dao.FinancialStatementsCacheDao
 import com.stock.dividend.data.local.dao.FireGoalDao
 import com.stock.dividend.data.local.dao.FundamentalsCacheDao
+import com.stock.dividend.data.local.dao.FuyaoCacheDao
 import com.stock.dividend.data.local.dao.GridPlanDao
 import com.stock.dividend.data.local.dao.IndustryTargetDao
 import com.stock.dividend.data.local.dao.KlineCacheDao
@@ -72,7 +73,11 @@ import com.stock.dividend.data.local.entity.TransactionEntity
         FuyaoCacheEntity::class,
         StrategyPlanEntity::class
     ],
-    version = 31,
+    version = 32,
+    // 2026-08-24 评审 M3：v32 schema 基线已导出至 app/schemas/…/32.json（迁移测试的起点）。
+    // exportSchema 暂回退 false：开启时 KSP 内部回读 schema 触发 room-compiler 自带
+    // kotlinx-serialization 与依赖图中更高版本 serialization-core 的 AbstractMethodError
+    // （与 ADK 顶高 coroutines 同族的传递依赖 ABI 冲突，修复依赖图后可重新开启）。
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -95,7 +100,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun gridPlanDao(): GridPlanDao
     abstract fun klineCacheDao(): KlineCacheDao
     abstract fun errorLogDao(): ErrorLogDao
-    abstract fun fuyaoCacheDao(): com.stock.dividend.data.local.dao.FuyaoCacheDao
+    abstract fun fuyaoCacheDao(): FuyaoCacheDao
     abstract fun strategyPlanDao(): StrategyPlanDao
 
     companion object {
@@ -522,6 +527,14 @@ abstract class AppDatabase : RoomDatabase() {
                 // 偏离回归/价值平均/估值带/分红再投）的统一参数存储，不再逐类型加列。
                 // MA_DCA 继续用既有专用列（历史存量不迁移）；编解码与脏数据回退见 StrategyParams。
                 db.execSQL("ALTER TABLE strategy_plans ADD COLUMN params TEXT")
+            }
+        }
+
+        val MIGRATION_31_32 = object : Migration(31, 32) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 分红送转比例列（2026-08-23）：扶摇事件流 per_share_bonus 落库，修复审计 M4-1
+                // 「纯送转不落行 → K 线前复权漂移检测盲区」。可空列，旧行 null = 无送转，旧备份恢复兼容。
+                db.execSQL("ALTER TABLE dividends ADD COLUMN bonusPerShare REAL")
             }
         }
     }

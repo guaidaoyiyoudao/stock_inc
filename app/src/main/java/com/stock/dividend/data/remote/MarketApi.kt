@@ -51,4 +51,18 @@ interface MarketApi {
         @Query("fields") fields: String = "f43,f44,f45,f46,f48,f57,f58,f60,f170",
         @Query("ut") ut: String = "fa5fd1943c7b386f172d6893dbfba10b"
     ): IndexQuoteResponse
+
+    /**
+     * 个股资金流（按 secid 精确拉取，fltt=2 全真实值——净额元原值、占比 % 原值，单位规则
+     * 见 [CapitalFlowResponse]）。2026-08-24 接入：替代此前 clist 单股方案（clist 的 `s:` 单股
+     * 筛选实际不生效，按 fid 拉前 N 条再客户端匹配对普通个股恒 miss）。
+     */
+    @GET("api/qt/ulist.np/get")
+    suspend fun getCapitalFlow(
+        @Query("secids") secids: String,
+        @Query("fields") fields: String = "f12,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87",
+        @Query("fltt") fltt: String = "2",
+        @Query("invt") invt: String = "2",
+        @Query("ut") ut: String = "fa5fd1943c7b386f172d6893dbfba10b"
+    ): com.stock.dividend.data.remote.dto.CapitalFlowResponse
 }
