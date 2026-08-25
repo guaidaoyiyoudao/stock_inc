@@ -3,6 +3,7 @@ package com.stock.dividend.data.repository
 import com.google.gson.Gson
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_DIVIDEND_REINVEST
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_DUAL_MA
+import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_BREAKOUT
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DEVIATION
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_TAKE_PROFIT
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_VALUATION_BAND
@@ -45,6 +46,11 @@ object StrategyParams {
         val maPeriod: Int = 250,
         val stepPercent: Double = 5.0,
         val buyLevels: Int = 3
+    )
+
+    /** 均线突破：现价站上 N 日均线 = 买入信号，跌破 = 清仓（短周期趋势跟随，5 日线 ETF 波段经典款）。 */
+    data class MaBreakout(
+        val maPeriod: Int = 5
     )
 
     /** 价值平均法：目标市值 = 每期金额 × 已过期数，缺口补足、超额卖出。 */
@@ -129,6 +135,11 @@ object StrategyParams {
         )
     }
 
+    fun decodeMaBreakout(raw: String?): MaBreakout {
+        val p = parseOrNull(raw, MaBreakout::class.java) ?: return MaBreakout()
+        return p.copy(maPeriod = p.maPeriod.takeIf { it >= 2 } ?: 5)
+    }
+
     fun decodeValueAveraging(raw: String?): ValueAveraging {
         val p = parseOrNull(raw, ValueAveraging::class.java) ?: return ValueAveraging()
         return p.copy(
@@ -175,6 +186,7 @@ object StrategyParams {
         )
         STRATEGY_TYPE_DUAL_MA -> mapOf("fastPeriod" to "50", "slowPeriod" to "250")
         STRATEGY_TYPE_MA_DEVIATION -> mapOf("maPeriod" to "250", "stepPercent" to "5", "buyLevels" to "3")
+        STRATEGY_TYPE_MA_BREAKOUT -> mapOf("maPeriod" to "5")
         STRATEGY_TYPE_VALUE_AVERAGING -> mapOf("perPeriodAmount" to "1000")
         STRATEGY_TYPE_VALUATION_BAND -> mapOf(
             "metric" to VALUATION_METRIC_PE, "lowThreshold" to "8", "highThreshold" to "15"
@@ -204,6 +216,9 @@ object StrategyParams {
                 "stepPercent" to num(it.stepPercent),
                 "buyLevels" to it.buyLevels.toString()
             )
+        }
+        STRATEGY_TYPE_MA_BREAKOUT -> decodeMaBreakout(raw).let {
+            mapOf("maPeriod" to it.maPeriod.toString())
         }
         STRATEGY_TYPE_VALUE_AVERAGING -> decodeValueAveraging(raw).let {
             mapOf("perPeriodAmount" to num(it.perPeriodAmount))
@@ -264,6 +279,11 @@ object StrategyParams {
                 if (step <= 0.0) return null to "偏离步长必须大于 0"
                 if (levels !in 1..10) return null to "买入档数须在 1~10"
                 encode(MaDeviation(ma, step, levels)) to null
+            }
+            STRATEGY_TYPE_MA_BREAKOUT -> {
+                val ma = int("maPeriod") ?: return null to "均线周期须为整数"
+                if (ma < 2) return null to "均线周期至少 2 日"
+                encode(MaBreakout(ma)) to null
             }
             STRATEGY_TYPE_VALUE_AVERAGING -> {
                 val amount = num("perPeriodAmount") ?: return null to "每期增长金额须为数字"

@@ -95,8 +95,8 @@ fun StrategyPlanScreen(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "8 种内置策略可选：年线定投 / 目标止盈 / 股息率带 /\n" +
-                        "双均线 / 均线偏离回归 / 价值平均 / 估值带 / 分红再投\n" +
+                    text = "9 种内置策略可选：年线定投 / 目标止盈 / 股息率带 /\n" +
+                        "双均线 / 均线突破 / 均线偏离回归 / 价值平均 / 估值带 / 分红再投\n" +
                         "（仅提示与记账辅助，不下单）",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

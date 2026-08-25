@@ -2,6 +2,7 @@ package com.stock.dividend.data.repository
 
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_DIVIDEND_REINVEST
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_DUAL_MA
+import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_BREAKOUT
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DCA
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DEVIATION
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_TAKE_PROFIT
@@ -80,6 +81,7 @@ object StrategyEvaluator {
         STRATEGY_TYPE_YIELD_BAND -> "股息率带"
         STRATEGY_TYPE_DUAL_MA -> "双均线趋势"
         STRATEGY_TYPE_MA_DEVIATION -> "均线偏离回归"
+        STRATEGY_TYPE_MA_BREAKOUT -> "均线突破"
         STRATEGY_TYPE_VALUE_AVERAGING -> "价值平均法"
         STRATEGY_TYPE_VALUATION_BAND -> "估值带（PE/PB）"
         STRATEGY_TYPE_DIVIDEND_REINVEST -> "分红再投"
@@ -91,6 +93,7 @@ object StrategyEvaluator {
         STRATEGY_TYPE_MA_DCA -> plan.maPeriod
         STRATEGY_TYPE_DUAL_MA -> StrategyParams.decodeDualMa(plan.params).slowPeriod + 2
         STRATEGY_TYPE_MA_DEVIATION -> StrategyParams.decodeMaDeviation(plan.params).maPeriod
+        STRATEGY_TYPE_MA_BREAKOUT -> StrategyParams.decodeMaBreakout(plan.params).maPeriod
         else -> 0
     }
 
@@ -121,6 +124,12 @@ object StrategyEvaluator {
             holdingShares = input.holdingShares,
             buyAmount = plan.dcaAmount,
             params = StrategyParams.decodeMaDeviation(plan.params)
+        )
+        STRATEGY_TYPE_MA_BREAKOUT -> MaBreakoutStrategyCalculator.evaluate(
+            closes = input.closes,
+            currentPrice = input.currentPrice ?: return null,
+            holdingShares = input.holdingShares,
+            params = StrategyParams.decodeMaBreakout(plan.params)
         )
         STRATEGY_TYPE_VALUE_AVERAGING -> ValueAveragingStrategyCalculator.evaluate(
             price = input.currentPrice ?: return null,

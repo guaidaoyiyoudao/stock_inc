@@ -3,6 +3,7 @@ package com.stock.dividend.data.repository
 import com.google.common.truth.Truth.assertThat
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_DIVIDEND_REINVEST
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_DUAL_MA
+import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_BREAKOUT
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_TAKE_PROFIT
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_VALUATION_BAND
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_YIELD_BAND
@@ -148,6 +149,39 @@ class StrategyParamsTest {
         )
         assertThat(params).isNull()
         assertThat(error).isNull()
+    }
+
+    // ── 均线突破 ──
+
+    @Test
+    fun `均线突破 编解码 round-trip 与脏数据回退`() {
+        val breakout = StrategyParams.MaBreakout(maPeriod = 10)
+        assertThat(StrategyParams.decodeMaBreakout(StrategyParams.encode(breakout))).isEqualTo(breakout)
+        // Gson 绕过构造函数：缺字段/0 值 → 回退默认 5 日
+        assertThat(StrategyParams.decodeMaBreakout("""{"maPeriod":0}"""))
+            .isEqualTo(StrategyParams.MaBreakout())
+        assertThat(StrategyParams.decodeMaBreakout(null)).isEqualTo(StrategyParams.MaBreakout())
+    }
+
+    @Test
+    fun `均线突破 输入校验与编辑器回填`() {
+        val (params, e1) = StrategyParams.fromInputs(STRATEGY_TYPE_MA_BREAKOUT, mapOf("maPeriod" to "20"))
+        assertThat(e1).isNull()
+        assertThat(StrategyParams.decodeMaBreakout(params)).isEqualTo(StrategyParams.MaBreakout(maPeriod = 20))
+        // 非整数拒绝而非静默截断（与双均线/展望天数同语义）
+        val (_, e2) = StrategyParams.fromInputs(STRATEGY_TYPE_MA_BREAKOUT, mapOf("maPeriod" to "5.5"))
+        assertThat(e2).isEqualTo("均线周期须为整数")
+        // 周期下限 2 日
+        val (_, e3) = StrategyParams.fromInputs(STRATEGY_TYPE_MA_BREAKOUT, mapOf("maPeriod" to "1"))
+        assertThat(e3).isEqualTo("均线周期至少 2 日")
+        // 默认输入 + 存档回填
+        assertThat(StrategyParams.defaultsFor(STRATEGY_TYPE_MA_BREAKOUT)).isEqualTo(mapOf("maPeriod" to "5"))
+        assertThat(
+            StrategyParams.toInputs(
+                STRATEGY_TYPE_MA_BREAKOUT,
+                StrategyParams.encode(StrategyParams.MaBreakout(maPeriod = 10))
+            )
+        ).isEqualTo(mapOf("maPeriod" to "10"))
     }
 
     // ── 2026-08-24 评审修复：decode 兜底不变量闭合 + 整数输入不静默截断 ──

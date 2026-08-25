@@ -1,7 +1,7 @@
 package com.stock.dividend.data.repository
 
 /**
- * 七个策略计算器（纯函数，无 Android 依赖；统一输出 [StrategyEvaluation]，
+ * 八个策略计算器（纯函数，无 Android 依赖；统一输出 [StrategyEvaluation]，
  * 经 [StrategyEvaluator] 分发）。文件内聚多计算器（先例：Formatters.kt）。
  *
  * 共同约定：
@@ -244,6 +244,51 @@ object MaDeviationStrategyCalculator {
             else -> StrategyEvaluation(
                 action = StrategyAction.HOLD,
                 headline = "均线下方但未到第一档",
+                metrics = metrics
+            )
+        }
+    }
+}
+
+/** 均线突破：现价站上 N 日均线 = 突破买入，跌破 = 清仓（短周期趋势跟随；恰达均线计为站上）。 */
+object MaBreakoutStrategyCalculator {
+
+    fun evaluate(
+        closes: List<Double>,
+        currentPrice: Double,
+        holdingShares: Int,
+        params: StrategyParams.MaBreakout
+    ): StrategyEvaluation? {
+        if (closes.size < params.maPeriod) return null
+        if (!currentPrice.isFinite() || currentPrice <= 0.0) return null
+        if (!closes.all { it.isFinite() && it > 0.0 }) return null
+        val ma = closes.takeLast(params.maPeriod).average()
+        val deviation = (currentPrice / ma - 1.0) * 100.0
+        val deviationText = (if (deviation >= 0) "+" else "") + MoneyFormatter.amount(deviation) + "%"
+        val metrics = listOf(
+            StrategyMetric("现价", MoneyFormatter.amount(currentPrice)),
+            StrategyMetric("均线 MA${params.maPeriod}", MoneyFormatter.amount(ma)),
+            StrategyMetric("偏离度", deviationText),
+            StrategyMetric("当前持仓", "$holdingShares 股")
+        )
+        return if (currentPrice >= ma) {
+            StrategyEvaluation(
+                action = StrategyAction.BUY,
+                headline = "站上 MA${params.maPeriod}，突破买入",
+                metrics = metrics
+            )
+        } else if (holdingShares > 0) {
+            StrategyEvaluation(
+                action = StrategyAction.SELL_ALL,
+                headline = "跌破 MA${params.maPeriod}，清仓卖出",
+                metrics = metrics,
+                sellShares = holdingShares,
+                notifyTier = TIER_ALL
+            )
+        } else {
+            StrategyEvaluation(
+                action = StrategyAction.HOLD,
+                headline = "均线下方，观望回避",
                 metrics = metrics
             )
         }

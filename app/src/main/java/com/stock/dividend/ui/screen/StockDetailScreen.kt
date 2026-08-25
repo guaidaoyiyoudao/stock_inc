@@ -523,12 +523,12 @@ private fun StrategyPlanEntryCard(onClick: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "交易策略（8 种内置）",
+                    text = "交易策略（9 种内置）",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "止盈/股息率带/双均线/年线定投等 8 种策略信号（仅提示，不下单）",
+                    text = "止盈/股息率带/双均线/均线突破等 9 种策略信号（仅提示，不下单）",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

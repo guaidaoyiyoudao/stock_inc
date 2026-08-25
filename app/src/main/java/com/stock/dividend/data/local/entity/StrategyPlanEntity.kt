@@ -33,6 +33,9 @@ const val STRATEGY_TYPE_VALUATION_BAND = "VALUATION_BAND"
 /** strategy_plans.strategyType 取值：分红再投（除权到账金额按现价再投入提示）。参数走 params JSON。 */
 const val STRATEGY_TYPE_DIVIDEND_REINVEST = "DIVIDEND_REINVEST"
 
+/** strategy_plans.strategyType 取值：均线突破（现价站上 N 日均线买入、跌破清仓）。参数走 params JSON。 */
+const val STRATEGY_TYPE_MA_BREAKOUT = "MA_BREAKOUT"
+
 /**
  * 交易策略计划：用户为某只股票/ETF 设定的策略参数。**仅做信号提示与记账辅助，
  * 不联网下单**。同一标的可配置多条策略（与网格计划同语义）。

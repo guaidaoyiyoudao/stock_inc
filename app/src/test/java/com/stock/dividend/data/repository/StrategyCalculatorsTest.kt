@@ -123,6 +123,44 @@ class StrategyCalculatorsTest {
         ).isNull()
     }
 
+    // ── 均线突破 ──
+
+    @Test
+    fun `均线突破 站上均线买入 跌破均线清仓`() {
+        val params = StrategyParams.MaBreakout(maPeriod = 5)
+        val closes = listOf(4.0, 4.0, 4.0, 4.0, 4.0)   // MA5 = 4.0
+        // 现价 4.2 > MA → 突破买入（买入方向只展示不推送）
+        val bull = MaBreakoutStrategyCalculator.evaluate(closes, 4.2, 300, params)!!
+        assertThat(bull.action).isEqualTo(StrategyAction.BUY)
+        assertThat(bull.notifyTier).isNull()
+        // 恰达均线（价 == MA）计为站上（恰达阈值计为触发）
+        val exact = MaBreakoutStrategyCalculator.evaluate(closes, 4.0, 300, params)!!
+        assertThat(exact.action).isEqualTo(StrategyAction.BUY)
+        // 跌破均线且有持仓 → 清仓信号带股数（一键记账按钮依赖 sellShares>0）+ ALL 档推送
+        val bear = MaBreakoutStrategyCalculator.evaluate(closes, 3.8, 300, params)!!
+        assertThat(bear.action).isEqualTo(StrategyAction.SELL_ALL)
+        assertThat(bear.sellShares).isEqualTo(300)
+        assertThat(bear.notifyTier).isEqualTo("ALL")
+        // 跌破但无持仓 → 观望（不推 0 股卖出提醒，与 DualMa/YieldBand 守卫一致）
+        val bearNoHolding = MaBreakoutStrategyCalculator.evaluate(closes, 3.8, 0, params)!!
+        assertThat(bearNoHolding.action).isEqualTo(StrategyAction.HOLD)
+        assertThat(bearNoHolding.notifyTier).isNull()
+    }
+
+    @Test
+    fun `均线突破 收盘价不足或现价非法返回 null`() {
+        assertThat(
+            MaBreakoutStrategyCalculator.evaluate(
+                List(4) { 4.0 }, 4.0, 0, StrategyParams.MaBreakout(maPeriod = 5)
+            )
+        ).isNull()
+        assertThat(
+            MaBreakoutStrategyCalculator.evaluate(
+                List(5) { 4.0 }, 0.0, 0, StrategyParams.MaBreakout(maPeriod = 5)
+            )
+        ).isNull()
+    }
+
     // ── 均线偏离回归 ──
 
     private val flatDeviationCloses = List(250) { 10.0 }
@@ -304,6 +342,14 @@ class StrategyCalculatorsTest {
                 )
             )
         ).isEqualTo(62)
+        assertThat(
+            StrategyEvaluator.requiredCloses(
+                planOf(
+                    com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_BREAKOUT,
+                    StrategyParams.encode(StrategyParams.MaBreakout(maPeriod = 5))
+                )
+            )
+        ).isEqualTo(5)
         assertThat(
             StrategyEvaluator.requiredCloses(planOf(com.stock.dividend.data.local.entity.STRATEGY_TYPE_TAKE_PROFIT))
         ).isEqualTo(0)

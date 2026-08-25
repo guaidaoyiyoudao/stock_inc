@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_DIVIDEND_REINVEST
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_DUAL_MA
+import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_BREAKOUT
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DCA
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_MA_DEVIATION
 import com.stock.dividend.data.local.entity.STRATEGY_TYPE_TAKE_PROFIT
@@ -454,6 +455,7 @@ class StrategyPlanViewModel @Inject constructor(
             STRATEGY_TYPE_TAKE_PROFIT to "目标止盈",
             STRATEGY_TYPE_YIELD_BAND to "股息率带",
             STRATEGY_TYPE_DUAL_MA to "双均线趋势",
+            STRATEGY_TYPE_MA_BREAKOUT to "均线突破",
             STRATEGY_TYPE_MA_DEVIATION to "均线偏离回归",
             STRATEGY_TYPE_VALUE_AVERAGING to "价值平均法",
             STRATEGY_TYPE_VALUATION_BAND to "估值带 PE/PB",
@@ -474,6 +476,9 @@ class StrategyPlanViewModel @Inject constructor(
             STRATEGY_TYPE_DUAL_MA -> listOf(
                 StrategyEditorField("fastPeriod", "快线周期（日）"),
                 StrategyEditorField("slowPeriod", "慢线周期（日）")
+            )
+            STRATEGY_TYPE_MA_BREAKOUT -> listOf(
+                StrategyEditorField("maPeriod", "均线周期（日）")
             )
             STRATEGY_TYPE_MA_DEVIATION -> listOf(
                 StrategyEditorField("maPeriod", "均线周期（日）"),
